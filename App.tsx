@@ -37,7 +37,7 @@ import { accountingMoney, accountingValue, productCost, productMinStock, saleCos
 import { buildDashboard } from "./src/utils/dashboard";
 import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, guideInActiveScope, guideNumber, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
-import { dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
+import { buildCalendarDays, dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, sanitizeFileName, shortText, toInputDate } from "./src/utils/format";
 import { buildStockCredits, buildStockMovements, getAvailableStockForSale, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
 import { buildMobileReportHtml, buildReportCsv, buildReportExcelHtml, buildReportHtml, formatIva104Report, formatSalesReport, paymentLabel } from "./src/utils/reportFormats";
@@ -4567,18 +4567,6 @@ function validateMod11(value: string, coefficients: number[], verifierIndex: num
   const verifier = remainder === 0 ? 0 : 11 - remainder;
 
   return verifier === Number(value[verifierIndex]);
-}
-
-function buildCalendarDays(year: number, month: number) {
-  const firstDay = new Date(year, month, 1);
-  const mondayOffset = (firstDay.getDay() + 6) % 7;
-  const start = new Date(year, month, 1 - mondayOffset);
-
-  return Array.from({ length: 42 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
-}
-
-function sanitizeFileName(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "periodo";
 }
 
 function showMessage(title: string, message: string) {

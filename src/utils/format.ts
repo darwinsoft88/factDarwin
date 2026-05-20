@@ -28,6 +28,18 @@ export function toInputDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+export function buildCalendarDays(year: number, month: number) {
+  const firstDay = new Date(year, month, 1);
+  const mondayOffset = (firstDay.getDay() + 6) % 7;
+  const start = new Date(year, month, 1 - mondayOffset);
+
+  return Array.from({ length: 42 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
+}
+
+export function sanitizeFileName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "periodo";
+}
+
 export function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")
