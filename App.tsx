@@ -25,6 +25,7 @@ import {
   TextInput,
   View
 } from "react-native";
+import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
 import { AuthorizationResponse, BackendCompanyOption, BackendHealthResponse, BackupSummary, BackendLicenseStatus, IdentityLookupResponse, TechnicalLog, authorizeInvoice, authorizeRemissionGuide, backupAppData, changeBackendPassword, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, loginBackend, lookupIdentityData, mergeBackendData, registerBackend, requestPasswordReset, reserveDocumentSequence, restoreAppData, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
 import { buildRideHtml } from "./src/services/ride";
 import { hashPassword } from "./src/services/security";
@@ -8546,15 +8547,6 @@ function ProductPriceOptionsModal({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.title}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
 function ProcessingOverlay({ visible, message }: { visible: boolean; message: string }) {
   return (
     <Modal visible={visible} transparent animationType="fade">
@@ -8566,23 +8558,6 @@ function ProcessingOverlay({ visible, message }: { visible: boolean; message: st
         </View>
       </View>
     </Modal>
-  );
-}
-
-function Input(props: React.ComponentProps<typeof TextInput> & { label: string; rightElement?: React.ReactNode }) {
-  const { label, rightElement, style, ...rest } = props;
-  return (
-    <View style={styles.inputGroup}>
-      <Text style={styles.label}>{label}</Text>
-      {rightElement ? (
-        <View style={styles.inputShell}>
-          <TextInput style={[styles.input, styles.inputWithRightElement, style]} placeholderTextColor="#7d8796" {...rest} />
-          <View style={styles.inputRightElement}>{rightElement}</View>
-        </View>
-      ) : (
-        <TextInput style={[styles.input, style]} placeholderTextColor="#7d8796" {...rest} />
-      )}
-    </View>
   );
 }
 
@@ -8790,31 +8765,6 @@ function BarcodeScannerModal({ visible, title, onClose, onScan }: { visible: boo
   );
 }
 
-function Select({ label, value, options, onChange }: { label: string; value: string; options: { label: string; value: string }[]; onChange: (value: string) => void }) {
-  return (
-    <View style={styles.inputGroup}>
-      <Text style={styles.label}>{label}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <View style={styles.selectRow}>
-          {options.map((option) => (
-            <Pressable key={option.value} style={[styles.choice, value === option.value && styles.choiceActive]} onPress={() => onChange(option.value)}>
-              <Text style={[styles.choiceText, value === option.value && styles.choiceTextActive]}>{option.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-      </ScrollView>
-    </View>
-  );
-}
-
-function PrimaryButton({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Pressable style={styles.primaryButton} onPress={onPress}>
-      <Text style={styles.primaryButtonText}>{label}</Text>
-    </Pressable>
-  );
-}
-
 function InlineInputButton({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <Pressable style={styles.inlineInputButton} onPress={onPress}>
@@ -8844,14 +8794,6 @@ function EyeIcon({ hidden }: { hidden: boolean }) {
       </View>
       {hidden ? <View style={styles.eyeSlash} /> : null}
     </View>
-  );
-}
-
-function LoadMoreButton({ label, onPress }: { label: string; onPress: () => void }) {
-  return (
-    <Pressable style={styles.smallButton} onPress={onPress}>
-      <Text style={styles.smallButtonText}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -9008,10 +8950,6 @@ function actionButtonTextStyle(tone: "primary" | "success" | "warning" | "info" 
   if (tone === "warning") return styles.retryButtonText;
   if (tone === "danger") return styles.cancelButtonText;
   return styles.rideButtonText;
-}
-
-function Empty({ text }: { text: string }) {
-  return <Text style={styles.hint}>{text}</Text>;
 }
 
 function OperationTile({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: "success" | "warning" | "danger" }) {
