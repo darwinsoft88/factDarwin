@@ -32,6 +32,7 @@ import { hashPassword } from "./src/services/security";
 import { buildCreditNoteXml, buildInvoiceXml, buildRemissionGuideXml, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal, calculateTotalDiscount, calculateTotals, createAccessKey, createCreditNoteAccessKey, createGuideAccessKey, grossToNetUnitPrice, money, nextSequence } from "./src/services/sri";
 import { clearSession, initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
 import { AppData, AppLicense, AuditLog, CashClosing, Client, DocumentType, InventoryMovement, InventoryMovementType, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
+import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, guideInActiveScope, guideNumber, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
@@ -3533,72 +3534,6 @@ function documentTypeLabel(sale: Sale) {
   if (isInvoiceSale(sale)) return "Factura SRI";
   if (sale.documentType === "proforma") return "Proforma";
   return "Nota de venta";
-}
-
-function documentNumber(sale: Sale, issuer: Issuer) {
-  const scopedIssuer = issuerForSale(issuer, sale);
-  if (sale.establishment && sale.emissionPoint) return `${scopedIssuer.establishment}-${scopedIssuer.emissionPoint}-${sale.sequence}`;
-  return isInvoiceSale(sale) || isCreditNoteSale(sale) ? `${scopedIssuer.establishment}-${scopedIssuer.emissionPoint}-${sale.sequence}` : sale.sequence;
-}
-
-function compareSalesNewestFirst(a: Sale, b: Sale) {
-  const dateDiff = timestampOf(b.createdAt) - timestampOf(a.createdAt);
-  if (dateDiff !== 0) return dateDiff;
-  const sequenceDiff = sequenceSortValue(b.sequence) - sequenceSortValue(a.sequence);
-  if (sequenceDiff !== 0) return sequenceDiff;
-  return b.id.localeCompare(a.id);
-}
-
-function sequenceSortValue(sequence: string) {
-  const match = sequence.match(/(\d+)(?!.*\d)/);
-  return match ? Number(match[1]) : 0;
-}
-
-function guideNumber(guide: RemissionGuide, issuer: Issuer) {
-  const scopedIssuer = issuerForGuide(issuer, guide);
-  return guide.establishment && guide.emissionPoint ? `${scopedIssuer.establishment}-${scopedIssuer.emissionPoint}-${guide.sequence}` : guide.sequence;
-}
-
-function activeScopeId(data: AppData) {
-  const establishment = activeEstablishment(data.issuer);
-  return establishment.id;
-}
-
-function documentScopeId(document: { establishment?: string; emissionPoint?: string; accessKey?: string }, fallbackIssuer: Issuer) {
-  if (document.establishment && document.emissionPoint) return `${document.establishment}-${document.emissionPoint}`;
-  const accessKeyScope = scopeIdFromAccessKey(document.accessKey || "");
-  if (accessKeyScope) return accessKeyScope;
-  return `${fallbackIssuer.establishment}-${fallbackIssuer.emissionPoint}`;
-}
-
-function scopeIdFromAccessKey(accessKey: string) {
-  if (!/^\d{49}$/.test(accessKey)) return "";
-  return `${accessKey.slice(24, 27)}-${accessKey.slice(27, 30)}`;
-}
-
-function saleInActiveScope(sale: Sale, data: AppData) {
-  return documentScopeId(sale, data.issuer) === activeScopeId(data);
-}
-
-function guideInActiveScope(guide: RemissionGuide, data: AppData) {
-  return documentScopeId(guide, data.issuer) === activeScopeId(data);
-}
-
-function closingInActiveScope(closing: CashClosing, data: AppData) {
-  if (closing.establishment && closing.emissionPoint) return `${closing.establishment}-${closing.emissionPoint}` === activeScopeId(data);
-  return true;
-}
-
-function scopedReportData(data: AppData, scopeId = activeScopeId(data)) {
-  const sales = data.sales.filter((sale) => documentScopeId(sale, data.issuer) === scopeId);
-  const saleIds = new Set(sales.map((sale) => sale.id));
-  return {
-    ...data,
-    sales,
-    guides: (data.guides || []).filter((guide) => documentScopeId(guide, data.issuer) === scopeId),
-    receivedRetentions: (data.receivedRetentions || []).filter((retention) => !retention.saleId || saleIds.has(retention.saleId)),
-    cashClosings: (data.cashClosings || []).filter((closing) => closing.establishment && closing.emissionPoint ? `${closing.establishment}-${closing.emissionPoint}` === scopeId : true)
-  };
 }
 
 function nextInternalSequence(sales: Sale[], scopeId: string, legacyScopeId: string) {
