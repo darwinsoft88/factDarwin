@@ -527,6 +527,7 @@ const reserveDocumentSequenceTx = db.transaction(({ documentType = "factura", is
     currentValue: initialValue,
     updatedAt: now
   });
+  db.prepare("UPDATE document_sequences SET current_value = MAX(current_value, @initialValue), updated_at = @updatedAt WHERE id = @id").run({ id, initialValue, updatedAt: now });
   db.prepare("UPDATE document_sequences SET current_value = current_value + 1, updated_at = @updatedAt WHERE id = @id").run({ id, updatedAt: now });
   const sequence = Number(db.prepare("SELECT current_value AS currentValue FROM document_sequences WHERE id = @id").get({ id })?.currentValue || 1);
   insertBackendAudit("DOCUMENT_SEQUENCE_RESERVED", {
@@ -895,13 +896,21 @@ function initialSequenceValue(documentType, issuer, companyId = "") {
     : db.prepare("SELECT data FROM app_snapshots WHERE id = 1").get();
   const snapshotIssuer = snapshot ? JSON.parse(String(snapshot.data)).issuer || {} : {};
   const scopedIssuer = issuerSequenceConfig(snapshotIssuer, issuer);
-  const configuredNext = Number(
+  const snapshotNext = Number(
     documentType === "nota_credito"
-      ? scopedIssuer.creditNoteSequential || issuer.creditNoteSequential || 1
+      ? scopedIssuer.creditNoteSequential || 1
       : documentType === "guia_remision"
-        ? scopedIssuer.remissionSequential || issuer.remissionSequential || 1
-        : scopedIssuer.sequential || issuer.sequential || 1
+        ? scopedIssuer.remissionSequential || 1
+        : scopedIssuer.sequential || 1
   );
+  const requestNext = Number(
+    documentType === "nota_credito"
+      ? issuer.creditNoteSequential || 1
+      : documentType === "guia_remision"
+        ? issuer.remissionSequential || 1
+        : issuer.sequential || 1
+  );
+  const configuredNext = Math.max(snapshotNext, requestNext, 1);
   const maxExisting = documentType === "guia_remision"
     ? Number(db.prepare("SELECT COALESCE(MAX(CAST(sequence AS INTEGER)), 0) AS max FROM remission_guides WHERE company_id = @companyId AND environment = @environment AND establishment = @establishment AND emission_point = @emissionPoint AND sequence GLOB '[0-9]*'").get({ companyId: companyId || "", environment: String(issuer.environment || ""), establishment: String(issuer.establishment || ""), emissionPoint: String(issuer.emissionPoint || "") })?.max || 0)
     : Number(db.prepare("SELECT COALESCE(MAX(CAST(sequence AS INTEGER)), 0) AS max FROM sales WHERE company_id = @companyId AND document_type = @documentType AND environment = @environment AND establishment = @establishment AND emission_point = @emissionPoint AND sequence GLOB '[0-9]*'").get({ companyId: companyId || "", documentType: documentType === "nota_credito" ? "nota_credito" : "factura", environment: String(issuer.environment || ""), establishment: String(issuer.establishment || ""), emissionPoint: String(issuer.emissionPoint || "") })?.max || 0);

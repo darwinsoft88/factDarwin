@@ -145,6 +145,27 @@ function normalizedEstablishments(issuer: Issuer): IssuerEstablishment[] {
   return normalizeEstablishmentNames(normalized);
 }
 
+function editableEstablishments(issuer: Issuer): IssuerEstablishment[] {
+  const source = Array.isArray(issuer.establishments) && issuer.establishments.length > 0 ? issuer.establishments : normalizedEstablishments(issuer);
+  return source.map((item) => {
+    const establishment = normalizeThreeDigits(item.establishment);
+    const emissionPoint = normalizeThreeDigits(item.emissionPoint);
+    return {
+      ...item,
+      id: `${establishment}-${emissionPoint}`,
+      name: String(item.name ?? ""),
+      establishment,
+      emissionPoint,
+      address: String(item.address || issuer.address || ""),
+      sequential: Math.max(1, Number(item.sequential || 1)),
+      remissionSequential: Math.max(1, Number(item.remissionSequential || 1)),
+      creditNoteSequential: Math.max(1, Number(item.creditNoteSequential || 1)),
+      active: item.active !== false,
+      updatedAt: item.updatedAt || ""
+    };
+  });
+}
+
 function normalizeEstablishmentNames(establishments: IssuerEstablishment[]) {
   const matrizCandidates = establishments.filter((item) => item.name.trim().toLowerCase() === "matriz");
   const matrizId = matrizCandidates.find((item) => item.id === "001-001")?.id || matrizCandidates[0]?.id || "";
@@ -684,7 +705,7 @@ function AppContent() {
   const enterSession = async (nextData: AppData, nextUser: User, token: string, passwordHash = "") => {
     let sessionToken = token;
     if (!sessionToken) {
-      const storedSession = await loadSession();
+    const storedSession = await loadSession();
       const sameUser = storedSession?.user && (
         storedSession.user.id === nextUser.id ||
         storedSession.user.email.trim().toLowerCase() === nextUser.email.trim().toLowerCase() ||
@@ -847,12 +868,20 @@ function AppContent() {
         return;
       }
       const restored = sanitizeAppData({
-        ...mergeAppDataSnapshots(snapshot.data, dataRef.current),
+        ...snapshot.data,
         backendUrl,
         autoBackupEnabled: true,
         autoBackupLastAt: snapshot.updatedAt,
         autoBackupLastError: ""
       });
+      const loginRuc = /^\d{13}$/.test(identifier) ? identifier : "";
+      const restoredRuc = restored.issuer.ruc.replace(/\D/g, "");
+      if (loginRuc && restoredRuc && restoredRuc !== loginRuc) {
+        const message = `El servidor devolvio datos del RUC ${restoredRuc}, pero usted ingreso ${loginRuc}. Se cancelo el ingreso para evitar mezcla de empresas.`;
+        setLoginStatus({ tone: "error", message });
+        setLoginErrorModalMessage(message);
+        return;
+      }
       await saveData(restored);
       setData(restored);
       dataRef.current = restored;
@@ -896,13 +925,12 @@ function AppContent() {
     }
 
     const passwordHash = await hashPassword(password);
-    const storedSession = await loadSession();
+      const storedSession = await loadSession();
     if (storedSession?.user) {
       const storedEmailMatches = storedSession.user.email.trim().toLowerCase() === normalizedIdentifier;
       const rucMatches = /^\d{13}$/.test(identifier) && (storedSession.companyRuc === identifier || data.issuer.ruc === identifier);
-      const deviceSessionMatchesRuc = /^\d{13}$/.test(identifier) && Boolean(storedSession.passwordHash || storedSession.token);
       const passwordMatches = storedSession.passwordHash ? storedSession.passwordHash === passwordHash : Boolean(storedSession.token);
-      if ((storedEmailMatches || rucMatches || deviceSessionMatchesRuc) && passwordMatches) {
+      if ((storedEmailMatches || rucMatches) && passwordMatches) {
         const localData = sanitizeAppData({ ...data, backendUrl, autoBackupEnabled: true, autoBackupLastError: "" });
         await enterSession(localData, storedSession.user, storedSession.token || "", storedSession.passwordHash || passwordHash);
         return;
@@ -2250,6 +2278,9 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       try {
         setProcessingMessage("Preparando numero de factura...");
         const reserved = await reserveDocumentSequence(data.backendUrl, { documentType: "factura", issuer: documentIssuer, createdAt }, backendToken);
+        if (Number(reserved.sequence) < Number(sequence)) {
+          throw new Error(`El servidor devolvio el secuencial ${reserved.sequence}, menor al configurado ${sequence}. Guarde SRI y sincronice antes de emitir.`);
+        }
         sequence = reserved.sequence || sequence;
         accessKey = reserved.accessKey || accessKey;
         reservedByBackend = true;
@@ -2749,6 +2780,9 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
     try {
       setProcessingMessage("Preparando numero de nota de credito...");
       const reserved = await reserveDocumentSequence(data.backendUrl, { documentType: "nota_credito", issuer: documentIssuer, createdAt }, backendToken);
+      if (Number(reserved.sequence) < Number(sequence)) {
+        throw new Error(`El servidor devolvio el secuencial ${reserved.sequence}, menor al configurado ${sequence}. Guarde SRI y sincronice antes de emitir.`);
+      }
       sequence = reserved.sequence || sequence;
       accessKey = reserved.accessKey || accessKey;
     } catch (error) {
@@ -6650,6 +6684,9 @@ function GuidesView({ data, user, backendToken, persist, onXml }: { data: AppDat
       try {
         setProcessingMessage("Preparando numero de guia...");
         const reserved = await reserveDocumentSequence(data.backendUrl, { documentType: "guia_remision", issuer: documentIssuer, createdAt: accessKeyDate.toISOString() }, backendToken);
+        if (Number(reserved.sequence) < Number(sequence)) {
+          throw new Error(`El servidor devolvio el secuencial ${reserved.sequence}, menor al configurado ${sequence}. Guarde SRI y sincronice antes de emitir.`);
+        }
         sequence = reserved.sequence || sequence;
         accessKey = reserved.accessKey || accessKey;
       } catch (error) {
@@ -7531,6 +7568,9 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
   const [sequentialText, setSequentialText] = useState(String(data.issuer.sequential));
   const [remissionSequentialText, setRemissionSequentialText] = useState(String(data.issuer.remissionSequential || 1));
   const [creditNoteSequentialText, setCreditNoteSequentialText] = useState(String(data.issuer.creditNoteSequential || 1));
+  const [establishmentNameText, setEstablishmentNameText] = useState("");
+  const [establishmentCodeText, setEstablishmentCodeText] = useState(data.issuer.establishment || "001");
+  const [emissionPointText, setEmissionPointText] = useState(data.issuer.emissionPoint || "001");
   const [backendUrl, setBackendUrl] = useState(data.backendUrl);
   const [autoBackupEnabled, setAutoBackupEnabled] = useState(data.autoBackupEnabled !== false);
   const [syncing, setSyncing] = useState(false);
@@ -7561,8 +7601,11 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
   const [certificatePassword, setCertificatePassword] = useState("");
   const [uploadingAsset, setUploadingAsset] = useState(false);
   const productionChecklist = useMemo(() => buildProductionChecklist({ ...issuer, sequential: Number(sequentialText), remissionSequential: Number(remissionSequentialText), creditNoteSequential: Number(creditNoteSequentialText) }, backendUrl, connectionResult), [backendUrl, connectionResult, creditNoteSequentialText, issuer, remissionSequentialText, sequentialText]);
-  const establishments = useMemo(() => normalizedEstablishments(issuer), [issuer]);
-  const selectedEstablishment = activeEstablishment(issuer);
+  const establishments = useMemo(() => editableEstablishments(issuer), [issuer]);
+  const selectedEstablishment = establishments.find((item) => item.id === issuer.activeEstablishmentId && item.active)
+    || establishments.find((item) => item.active)
+    || establishments[0]
+    || activeEstablishment(issuer);
   const canManageEstablishments = appLicenseStatus(license).active && maxEmissionPointsForLicense(license) > 1;
   const maxEmissionPoints = maxEmissionPointsForLicense(license);
   const [visibleAuditCount, setVisibleAuditCount] = useState(LIST_BATCH_SIZE);
@@ -7579,21 +7622,33 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
     void refreshAssetsStatus(false);
   }, [backendToken, backendUrl]);
 
+  useEffect(() => {
+    setEstablishmentNameText(selectedEstablishment.name);
+    setEstablishmentCodeText(selectedEstablishment.establishment);
+    setEmissionPointText(selectedEstablishment.emissionPoint);
+  }, [selectedEstablishment.id]);
+
   const issuerFromForm = () => {
     const sequential = Number(sequentialText);
     const remissionSequential = Number(remissionSequentialText);
     const creditNoteSequential = Number(creditNoteSequentialText);
     const activeId = selectedEstablishment.id;
+    const nextEstablishmentCode = normalizeThreeDigits(establishmentCodeText);
+    const nextEmissionPointCode = normalizeThreeDigits(emissionPointText);
+    const nextActiveId = `${nextEstablishmentCode}-${nextEmissionPointCode}`;
     const nextEstablishments = establishments.map((item) => item.id === activeId ? {
       ...item,
-      name: item.name || "Matriz",
+      name: establishmentNameText.trim(),
       address: issuer.address,
+      establishment: nextEstablishmentCode,
+      emissionPoint: nextEmissionPointCode,
+      id: nextActiveId,
       sequential,
       remissionSequential,
       creditNoteSequential
     } : item);
-    const active = nextEstablishments.find((item) => item.id === activeId) || activeEstablishment(issuer);
-    return issuerWithEstablishment({ ...issuer, establishments: nextEstablishments, activeEstablishmentId: active.id }, active);
+    const active = nextEstablishments.find((item) => item.id === nextActiveId) || nextEstablishments.find((item) => item.id === activeId) || activeEstablishment(issuer);
+    return issuerWithEstablishment({ ...issuer, establishments: nextEstablishments, activeEstablishmentId: active.id, establishmentsUpdatedAt: active.id !== activeId ? new Date().toISOString() : issuer.establishmentsUpdatedAt }, active);
   };
 
   const selectEstablishment = (id: string) => {
@@ -7610,6 +7665,9 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
     setSequentialText(String(next.sequential));
     setRemissionSequentialText(String(next.remissionSequential || 1));
     setCreditNoteSequentialText(String(next.creditNoteSequential || 1));
+    setEstablishmentNameText(next.name);
+    setEstablishmentCodeText(next.establishment);
+    setEmissionPointText(next.emissionPoint);
     setEstablishmentStatus({ tone: "info", message: `Editando ${next.name} ${next.establishment}-${next.emissionPoint}.` });
   };
 
@@ -7701,6 +7759,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
       return {
         ...item,
         ...patch,
+        name: patch.name !== undefined ? patch.name : item.name,
         establishment: nextEstablishment,
         emissionPoint: nextEmissionPoint,
         id: nextId
@@ -7793,9 +7852,25 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
     const remissionSequential = Number(remissionSequentialText);
     const creditNoteSequential = Number(creditNoteSequentialText);
     const errors: string[] = [];
-    validateIssuer({ ...issuer, sequential, remissionSequential, creditNoteSequential }, backendUrl, errors);
+    const formEstablishment = normalizeThreeDigits(establishmentCodeText);
+    const formEmissionPoint = normalizeThreeDigits(emissionPointText);
+    validateIssuer({ ...issuer, establishment: formEstablishment, emissionPoint: formEmissionPoint, sequential, remissionSequential, creditNoteSequential }, backendUrl, errors);
     if (errors.length > 0) {
       showMessage("Revise configuracion SRI", errors.join("\n"));
+      return;
+    }
+    if (!establishmentNameText.trim()) {
+      showMessage("Nombre requerido", "Ingrese el nombre del establecimiento antes de guardar.");
+      return;
+    }
+    if (!/^\d{1,3}$/.test(establishmentCodeText) || !/^\d{1,3}$/.test(emissionPointText)) {
+      showMessage("Punto invalido", "Estab. y Pto. emi. deben tener entre 1 y 3 digitos.");
+      return;
+    }
+    if (selectedEstablishmentDocumentCount > 0 && (formEstablishment !== selectedEstablishment.establishment || formEmissionPoint !== selectedEstablishment.emissionPoint)) {
+      const message = `No se puede cambiar el codigo ${selectedEstablishment.id} porque tiene ${selectedEstablishmentDocumentCount} documento(s).`;
+      setEstablishmentStatus({ tone: "error", message });
+      Alert.alert("Punto protegido", message);
       return;
     }
     if (!Number.isInteger(sequential) || sequential <= 0) {
@@ -7812,7 +7887,11 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
     }
     const nextIssuer = issuerFromForm();
     const addedIds = addedEstablishmentIds(data.issuer, nextIssuer);
-    if (addedIds.length > 0) {
+    const previousIdsForGuard = new Set(normalizedEstablishments(data.issuer).map((item) => item.id));
+    const nextIdsForGuard = new Set(normalizedEstablishments(nextIssuer).map((item) => item.id));
+    const removedIdsForGuard = Array.from(previousIdsForGuard).filter((id) => !nextIdsForGuard.has(id));
+    const isActiveCodeReplacement = addedIds.length === 1 && removedIdsForGuard.length === 1 && removedIdsForGuard[0] === selectedEstablishment.id && selectedEstablishmentDocumentCount === 0;
+    if (addedIds.length > 0 && !isActiveCodeReplacement) {
       const message = `Guardar emisor no puede crear puntos nuevos (${addedIds.join(", ")}). Use Agregar establecimiento para crear sucursales.`;
       setEstablishmentStatus({ tone: "error", message });
       Alert.alert("Creacion de punto bloqueada", message);
@@ -7836,9 +7915,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
       setEstablishmentStatus({ tone: "error", message: "Hay establecimientos duplicados. Revise estab. y punto de emision." });
       return;
     }
-    const previousIds = new Set(normalizedEstablishments(data.issuer).map((item) => item.id));
-    const nextIds = new Set(normalizedEstablishments(nextIssuer).map((item) => item.id));
-    const removedIds = Array.from(previousIds).filter((id) => !nextIds.has(id));
+    const removedIds = removedIdsForGuard;
     const nextData = appendAudit({ ...data, backendUrl, autoBackupEnabled, issuer: nextIssuer, license }, user, "SRI_CONFIG_UPDATED", "issuer", issuer.ruc, "Configuracion SRI actualizada", { environment: issuer.environment, establishment: nextIssuer.establishment, emissionPoint: nextIssuer.emissionPoint, sequential, remissionSequential, creditNoteSequential, autoBackupEnabled, removedEstablishments: removedIds, establishmentsUpdatedAt: nextIssuer.establishmentsUpdatedAt });
     await persist(nextData);
     await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, issuer: nextIssuer, auditLogs: nextData.auditLogs.slice(0, 1) }, "Configuracion SRI pendiente de sincronizar", nextData, persist);
@@ -7846,6 +7923,9 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
     setSequentialText(String(sequential));
     setRemissionSequentialText(String(remissionSequential));
     setCreditNoteSequentialText(String(creditNoteSequential));
+    setEstablishmentNameText(activeEstablishment(nextIssuer).name);
+    setEstablishmentCodeText(nextIssuer.establishment);
+    setEmissionPointText(nextIssuer.emissionPoint);
     if (removedIds.length > 0) {
       const message = `Establecimiento${removedIds.length > 1 ? "s" : ""} ${removedIds.join(", ")} eliminado${removedIds.length > 1 ? "s" : ""} correctamente.`;
       setEstablishmentStatus({ tone: "success", message });
@@ -8124,13 +8204,13 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
           onChange={(id) => selectEstablishment(id)}
           options={establishments.map((item) => ({ label: `${item.name} ${item.establishment}-${item.emissionPoint}`, value: item.id }))}
         />
-        <Input label="Nombre establecimiento" value={selectedEstablishment.name} onChangeText={(name) => updateSelectedEstablishment({ name })} />
+        <Input label="Nombre establecimiento" value={establishmentNameText} onChangeText={setEstablishmentNameText} />
         <View style={styles.row}>
           <View style={styles.flex}>
-            <Input label="Estab." value={selectedEstablishment.establishment} onChangeText={(establishment) => updateSelectedEstablishment({ establishment })} keyboardType="number-pad" />
+            <Input label="Estab." value={establishmentCodeText} onChangeText={(value) => setEstablishmentCodeText(value.replace(/\D/g, "").slice(0, 3))} keyboardType="number-pad" />
           </View>
           <View style={styles.flex}>
-            <Input label="Pto. emi." value={selectedEstablishment.emissionPoint} onChangeText={(emissionPoint) => updateSelectedEstablishment({ emissionPoint })} keyboardType="number-pad" />
+            <Input label="Pto. emi." value={emissionPointText} onChangeText={(value) => setEmissionPointText(value.replace(/\D/g, "").slice(0, 3))} keyboardType="number-pad" />
           </View>
         </View>
         <Input label="Direccion establecimiento" value={selectedEstablishment.address || issuer.address} onChangeText={(address) => updateSelectedEstablishment({ address })} />

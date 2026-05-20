@@ -161,7 +161,9 @@ function applySnapshotPatch(currentData, patch = {}) {
     const incomingEstablishmentTime = timestampOf(patch.issuer.establishmentsUpdatedAt);
     const incomingEstablishmentsAreCurrent = incomingEstablishmentTime >= currentEstablishmentTime;
     const addedIds = incomingEstablishmentsAreCurrent ? addedEstablishmentIds(data.issuer, patch.issuer) : [];
-    if (addedIds.length > 0 && !allowsEstablishmentCreation(patch, addedIds)) {
+    const currentCount = normalizedEstablishmentIds(data.issuer?.establishments || []).length;
+    const incomingCount = normalizedEstablishmentIds(patch.issuer.establishments || []).length;
+    if (addedIds.length > 0 && incomingCount > currentCount && !allowsEstablishmentCreation(patch, addedIds)) {
       throwBadSnapshot(`Guardar emisor no puede crear puntos nuevos: ${addedIds.join(", ")}.`);
     }
     data.issuer = {

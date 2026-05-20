@@ -514,6 +514,12 @@ async function reserveDocumentSequence({ documentType = "factura", issuer, creat
        ON CONFLICT(id) DO NOTHING`,
       [key, documentType, issuer.establishment, issuer.emissionPoint, issuer.environment, initialValue, now]
     );
+    await client.query(
+      `UPDATE document_sequences
+       SET current_value = GREATEST(current_value, $2), updated_at = $3
+       WHERE id = $1`,
+      [key, initialValue, now]
+    );
     const result = await client.query(
       `UPDATE document_sequences
        SET current_value = current_value + 1, updated_at = $2
@@ -816,13 +822,21 @@ async function initialSequenceValue(client, documentType, issuer, companyId = ""
   const snapshot = await getSnapshot(companyId);
   const snapshotIssuer = snapshot?.data?.issuer || {};
   const scopedIssuer = issuerSequenceConfig(snapshotIssuer, issuer);
-  const configuredNext = Number(
+  const snapshotNext = Number(
     documentType === "nota_credito"
-      ? scopedIssuer.creditNoteSequential || issuer.creditNoteSequential || 1
+      ? scopedIssuer.creditNoteSequential || 1
       : documentType === "guia_remision"
-        ? scopedIssuer.remissionSequential || issuer.remissionSequential || 1
-        : scopedIssuer.sequential || issuer.sequential || 1
+        ? scopedIssuer.remissionSequential || 1
+        : scopedIssuer.sequential || 1
   );
+  const requestNext = Number(
+    documentType === "nota_credito"
+      ? issuer.creditNoteSequential || 1
+      : documentType === "guia_remision"
+        ? issuer.remissionSequential || 1
+        : issuer.sequential || 1
+  );
+  const configuredNext = Math.max(snapshotNext, requestNext, 1);
   const table = documentType === "guia_remision" ? "remission_guides" : "sales";
   const dbDocumentType = documentType === "nota_credito" ? "nota_credito" : "factura";
   const result = await client.query(
