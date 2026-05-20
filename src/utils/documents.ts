@@ -1,10 +1,11 @@
 import { AppData, CashClosing, Issuer, RemissionGuide, Sale } from "../types";
 import { activeEstablishment, issuerForGuide, issuerForSale } from "./establishments";
+import { isCreditNoteSale, isInvoiceSale } from "./sales";
 
 export function documentNumber(sale: Sale, issuer: Issuer) {
   const scopedIssuer = issuerForSale(issuer, sale);
   if (sale.establishment && sale.emissionPoint) return `${scopedIssuer.establishment}-${scopedIssuer.emissionPoint}-${sale.sequence}`;
-  return isInvoiceDocument(sale) || isCreditNoteDocument(sale) ? `${scopedIssuer.establishment}-${scopedIssuer.emissionPoint}-${sale.sequence}` : sale.sequence;
+  return isInvoiceSale(sale) || isCreditNoteSale(sale) ? `${scopedIssuer.establishment}-${scopedIssuer.emissionPoint}-${sale.sequence}` : sale.sequence;
 }
 
 export function compareSalesNewestFirst(a: Sale, b: Sale) {
@@ -65,14 +66,6 @@ export function scopedReportData(data: AppData, scopeId = activeScopeId(data)) {
     receivedRetentions: (data.receivedRetentions || []).filter((retention) => !retention.saleId || saleIds.has(retention.saleId)),
     cashClosings: (data.cashClosings || []).filter((closing) => closing.establishment && closing.emissionPoint ? `${closing.establishment}-${closing.emissionPoint}` === scopeId : true)
   };
-}
-
-function isInvoiceDocument(sale: Sale) {
-  return (sale.documentType || "factura") === "factura";
-}
-
-function isCreditNoteDocument(sale: Sale) {
-  return sale.documentType === "nota_credito";
 }
 
 function timestampOf(value?: string) {

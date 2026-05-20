@@ -36,6 +36,7 @@ import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentN
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
+import { canEditSale, documentTypeLabel, isCreditNoteSale, isEffectiveReportSale, isInvoiceSale, isTaxableSale, saleNeedsStockDiscount, saleStatusReducesStock } from "./src/utils/sales";
 import { findDuplicateClient, findDuplicateProductCode, normalizeClientIdentification, normalizeProductCode, sanitizeAppData } from "./src/validation";
 
 type Tab = "dashboard" | "ventas" | "clientes" | "productos" | "inventario" | "caja" | "guias" | "usuarios" | "reportes" | "sri";
@@ -3405,18 +3406,6 @@ function resolveInvoiceStatus(result: AuthorizationResponse): Sale["status"] {
   return "FIRMADA";
 }
 
-function saleStatusReducesStock(status: Sale["status"]) {
-  return status === "AUTORIZADA" || status === "RECIBIDA" || status === "FIRMADA" || status === "INTERNA";
-}
-
-function saleNeedsStockDiscount(status: Sale["status"]) {
-  return !saleStatusReducesStock(status);
-}
-
-function canEditSale(sale: Sale) {
-  return !isCreditNoteSale(sale) && sale.status !== "AUTORIZADA" && sale.status !== "ANULADA";
-}
-
 function isAccessKeyUsed(data: AppData, accessKey: string, currentId = "") {
   if (!accessKey) return false;
   return data.sales.some((sale) => sale.id !== currentId && sale.accessKey === accessKey) || (data.guides || []).some((guide) => guide.id !== currentId && guide.accessKey === accessKey);
@@ -3509,14 +3498,6 @@ function getLocalVoidReason(defaultReason: string) {
   return defaultReason;
 }
 
-function isInvoiceSale(sale: Sale) {
-  return (sale.documentType || "factura") === "factura";
-}
-
-function isCreditNoteSale(sale: Sale) {
-  return sale.documentType === "nota_credito";
-}
-
 function isFinalConsumerClient(client: Client) {
   const identification = client.identification.trim();
   return client.identificationType === "07" || identification === "9999999999999";
@@ -3527,13 +3508,6 @@ function canIssueCreditNoteForSale(sales: Sale[], sale: Sale, client: Client) {
     sale.status === "AUTORIZADA" &&
     !isFinalConsumerClient(client) &&
     hasCreditNoteBalance(sales, sale);
-}
-
-function documentTypeLabel(sale: Sale) {
-  if (isCreditNoteSale(sale)) return "Nota credito";
-  if (isInvoiceSale(sale)) return "Factura SRI";
-  if (sale.documentType === "proforma") return "Proforma";
-  return "Nota de venta";
 }
 
 function nextInternalSequence(sales: Sale[], scopeId: string, legacyScopeId: string) {
@@ -4903,15 +4877,6 @@ function buildIva104Summary(invoices: Sale[], creditNotes: Sale[], retentionIva:
     totalCreditNotes,
     totalNet
   };
-}
-
-function isTaxableSale(sale: Sale) {
-  return (isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA";
-}
-
-function isEffectiveReportSale(sale: Sale, reportType: string) {
-  if (reportType === "tax") return isTaxableSale(sale);
-  return sale.status === "AUTORIZADA" || sale.status === "INTERNA";
 }
 
 function accountingMoney(sale: Sale, value: number) {
