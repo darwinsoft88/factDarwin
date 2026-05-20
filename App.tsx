@@ -34,6 +34,7 @@ import { buildCreditNoteXml, buildInvoiceXml, buildRemissionGuideXml, calculateL
 import { clearSession, initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
 import { AppData, AppLicense, AuditLog, CashClosing, Client, DocumentType, InventoryMovement, InventoryMovementType, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
 import { accountingMoney, accountingValue, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
+import { buildDashboard } from "./src/utils/dashboard";
 import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, guideInActiveScope, guideNumber, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
@@ -4566,40 +4567,6 @@ function validateMod11(value: string, coefficients: number[], verifierIndex: num
   const verifier = remainder === 0 ? 0 : 11 - remainder;
 
   return verifier === Number(value[verifierIndex]);
-}
-
-function buildDashboard(data: AppData) {
-  const scoped = scopedReportData(data);
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  const effectiveSales = scoped.sales.filter((sale) => (sale.documentType === "nota_venta" && sale.status === "INTERNA") || ((isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA"));
-  const todaySales = effectiveSales.filter((sale) => isDateInRange(sale.createdAt, todayStart, todayEnd));
-  const monthSales = effectiveSales.filter((sale) => isDateInRange(sale.createdAt, monthStart, monthEnd));
-  const pending = scoped.sales.filter((sale) => isInvoiceSale(sale) && !["AUTORIZADA", "RECHAZADA", "ANULADA"].includes(sale.status));
-  const rejected = scoped.sales.filter((sale) => isInvoiceSale(sale) && sale.status === "RECHAZADA");
-  const lowStock = data.products.filter((product) => product.stock <= productMinStock(product)).sort((a, b) => a.stock - b.stock);
-  const recentSales = [...scoped.sales].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
-
-  return {
-    todayCount: todaySales.length,
-    todayTotal: todaySales.reduce((sum, sale) => sum + accountingValue(sale, sale.total), 0),
-    monthCount: monthSales.length,
-    monthTotal: monthSales.reduce((sum, sale) => sum + accountingValue(sale, sale.total), 0),
-    monthTax: monthSales.reduce((sum, sale) => sum + accountingValue(sale, sale.tax), 0),
-    monthProfit: monthSales.reduce((sum, sale) => sum + saleProfitValue(sale, data.products), 0),
-    pendingCount: pending.length,
-    rejectedCount: rejected.length,
-    lowStock,
-    recentSales
-  };
-}
-
-function isDateInRange(value: string, start: Date, end: Date) {
-  const date = new Date(value);
-  return !Number.isNaN(date.getTime()) && date >= start && date <= end;
 }
 
 function buildCalendarDays(year: number, month: number) {
