@@ -35,6 +35,7 @@ import { AppData, AppLicense, AuditLog, CashClosing, Client, DocumentType, Inven
 import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, guideInActiveScope, guideNumber, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
+import { buildStockCredits, buildStockMovements, getAvailableStockForSale, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
 import { canEditSale, documentTypeLabel, isCreditNoteSale, isEffectiveReportSale, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock } from "./src/utils/sales";
 import { findDuplicateClient, findDuplicateProductCode, normalizeClientIdentification, normalizeProductCode, sanitizeAppData } from "./src/validation";
@@ -1970,7 +1971,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       items
     };
     const restoredProducts = editingSale && saleStatusReducesStock(editingSale.status) ? restoreSaleStock(data.products, editingSale) : data.products;
-    const restoreMovements = editingSale && saleStatusReducesStock(editingSale.status) ? buildStockMovements(data.products, editingSale, "entrada", "Reverso por correccion de nota de venta", user.id, savedAt) : [];
+    const restoreMovements = editingSale && saleStatusReducesStock(editingSale.status) ? buildStockMovements(data.products, editingSale, "entrada", "Reverso por correccion de nota de venta", user.id, savedAt, uid) : [];
     const saleMovements: InventoryMovement[] = [];
     const saleStockChanges = new Map<string, number>();
     items.forEach((item) => {
@@ -2179,7 +2180,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
     setProcessingMessage(sourceTicket ? "Emitiendo factura desde ticket..." : sourceProforma ? "Emitiendo factura desde proforma..." : editingSale ? "Guardando correccion y reintentando emision..." : "Emitiendo factura...");
     setIssueNotice(sourceTicket ? "Emitiendo factura desde ticket..." : sourceProforma ? "Emitiendo factura desde proforma..." : editingSale ? "Guardando correccion y reintentando emision..." : "Guardando y emitiendo factura...");
     const restoredProducts = editingSale && saleStatusReducesStock(editingSale.status) ? restoreSaleStock(data.products, editingSale) : data.products;
-    const restoreMovements = editingSale && saleStatusReducesStock(editingSale.status) ? buildStockMovements(data.products, editingSale, "entrada", "Reverso por correccion de factura", user.id, retryAt) : [];
+    const restoreMovements = editingSale && saleStatusReducesStock(editingSale.status) ? buildStockMovements(data.products, editingSale, "entrada", "Reverso por correccion de factura", user.id, retryAt, uid) : [];
     const savedDraftData: AppData = {
       ...data,
       issuer: editingSale ? data.issuer : updateIssuerEstablishmentSequence(data.issuer, documentEstablishment.id, "sequential", Math.max(documentIssuer.sequential + 1, Number(sequence) + 1)),
@@ -3508,57 +3509,6 @@ function canIssueCreditNoteForSale(sales: Sale[], sale: Sale, client: Client) {
     sale.status === "AUTORIZADA" &&
     !isFinalConsumerClient(client) &&
     hasCreditNoteBalance(sales, sale);
-}
-
-function buildStockCredits(sale?: Sale) {
-  const credits = new Map<string, number>();
-  if (!sale || !saleStatusReducesStock(sale.status)) return credits;
-
-  sale.items.forEach((item) => {
-    credits.set(item.productId, (credits.get(item.productId) || 0) + item.quantity);
-  });
-
-  return credits;
-}
-
-function getAvailableStockForSale(product: Product, editingSale?: Sale) {
-  return product.stock + (buildStockCredits(editingSale).get(product.id) || 0);
-}
-
-function restoreSaleStock(products: Product[], sale: Sale) {
-  const credits = buildStockCredits(sale);
-
-  return products.map((product) => {
-    const quantity = credits.get(product.id) || 0;
-    return quantity > 0 ? { ...product, stock: product.stock + quantity } : product;
-  });
-}
-
-function buildStockMovements(products: Product[], sale: Sale, type: InventoryMovementType, reason: string, userId: string, createdAt: string) {
-  const quantities = new Map<string, number>();
-  sale.items.forEach((item) => {
-    quantities.set(item.productId, (quantities.get(item.productId) || 0) + item.quantity);
-  });
-
-  return products.flatMap((product) => {
-    const quantity = quantities.get(product.id) || 0;
-    if (quantity <= 0) return [];
-    const stockAfter = type === "entrada" ? product.stock + quantity : product.stock - quantity;
-
-    return [{
-      id: uid(),
-      productId: product.id,
-      productName: product.name,
-      type,
-      quantity,
-      stockBefore: product.stock,
-      stockAfter,
-      reason,
-      reference: sale.sequence,
-      userId,
-      createdAt
-    }];
-  });
 }
 
 function getRetryInfo(document: { retryHistory?: string[] }) {
