@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "FactuDarwin",
+    "slug": "factura-sri-mobile",
+    "version": "1.0.1",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "facturasri",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#f5f7fb",
+    "assetBundlePatterns": [
+      "assets/*"
+    ],
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0b6f68"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.facturasri.mobile",
+      "buildNumber": "2",
+      "infoPlist": {
+        "NSCameraUsageDescription": "La app puede usar la camara si se agrega lectura de codigos o documentos en futuras versiones.",
+        "NSLocalNetworkUsageDescription": "Solo se usa en desarrollo para conectar con el backend local. En produccion debe usarse un backend HTTPS.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.facturasri.mobile",
+      "versionCode": 2,
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0b6f68"
+      }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "FactuDarwin usa la camara para escanear productos.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-sharing"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "8a8ee08e-e0c1-4d89-9406-62eb8b370ab9"
+      }
+    },
+    "owner": "dawinsoft"
+  }
+}

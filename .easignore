@@ -1,0 +1,16 @@
+node_modules/
+.expo/
+dist/
+.env
+.env.local
+.env.*.local
+*.log
+
+backend/
+data/
+docs/
+git-dir/
+
+*.apk
+*.aab
+*.map
