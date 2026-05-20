@@ -35,3 +35,25 @@ export function isEffectiveReportSale(sale: Sale, reportType: string) {
   if (reportType === "tax") return isTaxableSale(sale);
   return sale.status === "AUTORIZADA" || sale.status === "INTERNA";
 }
+
+export function nextInternalSequence(sales: Sale[], scopeId: string, legacyScopeId: string) {
+  const next = sales
+    .filter((sale) => sale.documentType === "nota_venta" && internalDocumentScopeId(sale, legacyScopeId) === scopeId)
+    .map((sale) => Number((sale.sequence.match(/NV-(\d+)/) || [])[1] || 0))
+    .reduce((max, value) => Math.max(max, value), 0) + 1;
+
+  return `NV-${String(next).padStart(9, "0")}`;
+}
+
+export function nextProformaSequence(sales: Sale[], scopeId: string, legacyScopeId: string) {
+  const next = sales
+    .filter((sale) => sale.documentType === "proforma" && internalDocumentScopeId(sale, legacyScopeId) === scopeId)
+    .map((sale) => Number((sale.sequence.match(/PRO-(\d+)/) || [])[1] || 0))
+    .reduce((max, value) => Math.max(max, value), 0) + 1;
+
+  return `PRO-${String(next).padStart(9, "0")}`;
+}
+
+export function internalDocumentScopeId(sale: Sale, legacyScopeId: string) {
+  return sale.establishment && sale.emissionPoint ? `${sale.establishment}-${sale.emissionPoint}` : legacyScopeId;
+}

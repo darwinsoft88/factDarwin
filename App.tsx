@@ -36,7 +36,7 @@ import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentN
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
-import { canEditSale, documentTypeLabel, isCreditNoteSale, isEffectiveReportSale, isInvoiceSale, isTaxableSale, saleNeedsStockDiscount, saleStatusReducesStock } from "./src/utils/sales";
+import { canEditSale, documentTypeLabel, isCreditNoteSale, isEffectiveReportSale, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock } from "./src/utils/sales";
 import { findDuplicateClient, findDuplicateProductCode, normalizeClientIdentification, normalizeProductCode, sanitizeAppData } from "./src/validation";
 
 type Tab = "dashboard" | "ventas" | "clientes" | "productos" | "inventario" | "caja" | "guias" | "usuarios" | "reportes" | "sri";
@@ -3508,28 +3508,6 @@ function canIssueCreditNoteForSale(sales: Sale[], sale: Sale, client: Client) {
     sale.status === "AUTORIZADA" &&
     !isFinalConsumerClient(client) &&
     hasCreditNoteBalance(sales, sale);
-}
-
-function nextInternalSequence(sales: Sale[], scopeId: string, legacyScopeId: string) {
-  const next = sales
-    .filter((sale) => sale.documentType === "nota_venta" && internalDocumentScopeId(sale, legacyScopeId) === scopeId)
-    .map((sale) => Number((sale.sequence.match(/NV-(\d+)/) || [])[1] || 0))
-    .reduce((max, value) => Math.max(max, value), 0) + 1;
-
-  return `NV-${String(next).padStart(9, "0")}`;
-}
-
-function nextProformaSequence(sales: Sale[], scopeId: string, legacyScopeId: string) {
-  const next = sales
-    .filter((sale) => sale.documentType === "proforma" && internalDocumentScopeId(sale, legacyScopeId) === scopeId)
-    .map((sale) => Number((sale.sequence.match(/PRO-(\d+)/) || [])[1] || 0))
-    .reduce((max, value) => Math.max(max, value), 0) + 1;
-
-  return `PRO-${String(next).padStart(9, "0")}`;
-}
-
-function internalDocumentScopeId(sale: Sale, legacyScopeId: string) {
-  return sale.establishment && sale.emissionPoint ? `${sale.establishment}-${sale.emissionPoint}` : legacyScopeId;
 }
 
 function buildStockCredits(sale?: Sale) {
