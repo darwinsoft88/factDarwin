@@ -33,6 +33,7 @@ import { buildCreditNoteXml, buildInvoiceXml, buildRemissionGuideXml, calculateL
 import { clearSession, initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
 import { AppData, AppLicense, AuditLog, CashClosing, Client, DocumentType, InventoryMovement, InventoryMovementType, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
+import { dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
 import { findDuplicateClient, findDuplicateProductCode, normalizeClientIdentification, normalizeProductCode, sanitizeAppData } from "./src/validation";
 
@@ -3507,10 +3508,6 @@ function getLocalVoidReason(defaultReason: string) {
   return defaultReason;
 }
 
-function formatSriDate(date: Date) {
-  return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
-}
-
 function isInvoiceSale(sale: Sale) {
   return (sale.documentType || "factura") === "factura";
 }
@@ -3685,15 +3682,6 @@ function getRetryInfo(document: { retryHistory?: string[] }) {
     today: todayAttempts,
     remaining: Math.max(0, MAX_DAILY_RETRIES - todayAttempts)
   };
-}
-
-function dateKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function shortText(value: string, maxLength: number) {
-  const clean = value.replace(/\s+/g, " ").trim();
-  return clean.length > maxLength ? `${clean.slice(0, maxLength - 3)}...` : clean;
 }
 
 function userFriendlyActionError(error: unknown, action: "reserve-sequence" | "authorize-invoice" | "sync" | "email" | "generic" = "generic") {
@@ -4941,13 +4929,6 @@ function getReportRange(periodType: string, year: number, month: number, semeste
   };
 }
 
-function parseInputDate(value: string, boundary: "start" | "end") {
-  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return null;
-  const [, year, month, day] = match;
-  return new Date(Number(year), Number(month) - 1, Number(day), boundary === "start" ? 0 : 23, boundary === "start" ? 0 : 59, boundary === "start" ? 0 : 59, boundary === "start" ? 0 : 999);
-}
-
 function subtotalByRate(sale: Sale, rate: number) {
   return sale.items.filter((item) => item.ivaRate === rate).reduce((sum, item) => sum + calculateLineSubtotal(item), 0);
 }
@@ -5433,16 +5414,6 @@ function paymentLabel(value: string) {
   return paymentOptions.find((option) => option.value === value)?.label || value;
 }
 
-function formatShortDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
-}
-
-function toInputDate(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
 function buildCalendarDays(year: number, month: number) {
   const firstDay = new Date(year, month, 1);
   const mondayOffset = (firstDay.getDay() + 6) % 7;
@@ -5453,15 +5424,6 @@ function buildCalendarDays(year: number, month: number) {
 
 function sanitizeFileName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "periodo";
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }
 
 function showMessage(title: string, message: string) {
