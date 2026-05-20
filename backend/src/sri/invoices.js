@@ -35,6 +35,7 @@ async function authorizeInvoice(xml, companyId = "") {
   const receptionMessage = parseSriMessages(reception.body);
   const authorizationSummary = authorization ? parseAuthorization(authorization.body) : {};
   const registeredAccessKey = isRegisteredAccessKeyMessage(reception.body) || isRegisteredAccessKeyMessage(receptionMessage);
+  const registeredSequential = isRegisteredSequentialMessage(reception.body) || isRegisteredSequentialMessage(receptionMessage);
   const authorizationStatus = authorizationSummary.authorizationStatus;
   let ok = reception.ok && receptionStatus !== "DEVUELTA" && authorizationStatus !== "NO AUTORIZADO";
   let sriMessage = [receptionMessage, authorizationSummary.sriMessage].filter(Boolean).join(" | ");
@@ -57,6 +58,19 @@ async function authorizeInvoice(xml, companyId = "") {
         `La clave de acceso ya esta registrada pero pertenece a otro comprobante. No se actualizo como autorizado. Diferencias: ${comparison.reason}`
       ].filter(Boolean).join(" | ");
     }
+  }
+
+  if (registeredSequential && authorizationStatus !== "AUTORIZADO") {
+    ok = false;
+    safeAuthorizationSummary = {
+      ...authorizationSummary,
+      authorizationStatus: "NO AUTORIZADO",
+      authorizedXml: ""
+    };
+    sriMessage = [
+      sriMessage,
+      "Secuencial ya registrado en el SRI. Se consulto la clave de acceso generada por la app, pero no esta autorizada; probablemente ese establecimiento/punto/secuencial ya fue usado con otra clave. Revise el comprobante en el portal SRI y configure el siguiente secuencial libre antes de emitir."
+    ].filter(Boolean).join(" | ");
   }
 
   return {
@@ -128,6 +142,10 @@ function parseReceptionStatus(body) {
 
 function isRegisteredAccessKeyMessage(value) {
   return /CLAVE\s+ACCESO\s+REGISTRADA/i.test(value || "") || /<identificador>\s*43\s*<\/identificador>/i.test(value || "");
+}
+
+function isRegisteredSequentialMessage(value) {
+  return /SECUENCIAL\s+REGISTRADO/i.test(value || "") || /<identificador>\s*45\s*<\/identificador>/i.test(value || "");
 }
 
 function compareAuthorizedDocument(sentXml, authorizedXml) {
