@@ -32,6 +32,7 @@ import { hashPassword } from "./src/services/security";
 import { buildCreditNoteXml, buildInvoiceXml, buildRemissionGuideXml, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal, calculateTotalDiscount, calculateTotals, createAccessKey, createCreditNoteAccessKey, createGuideAccessKey, grossToNetUnitPrice, money, nextSequence } from "./src/services/sri";
 import { clearSession, initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
 import { AppData, AppLicense, AuditLog, CashClosing, Client, DocumentType, InventoryMovement, InventoryMovementType, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
+import { accountingMoney, accountingValue, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
 import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, guideInActiveScope, guideNumber, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
@@ -123,14 +124,6 @@ function tabLabel(tab: Tab) {
 
 function roleLabel(role: UserRole) {
   return roleOptions.find((option) => option.value === role)?.label || "Vendedor";
-}
-
-function productMinStock(product: Product) {
-  return Number.isFinite(Number(product.minStock)) ? Number(product.minStock) : 5;
-}
-
-function productCost(product: Product | undefined) {
-  return Number.isFinite(Number(product?.cost)) ? Number(product?.cost) : 0;
 }
 
 function appLicenseStatus(license?: AppLicense | BackendLicenseStatus) {
@@ -4805,28 +4798,6 @@ function buildIva104Summary(invoices: Sale[], creditNotes: Sale[], retentionIva:
     totalCreditNotes,
     totalNet
   };
-}
-
-function accountingMoney(sale: Sale, value: number) {
-  if (!(sale.status === "AUTORIZADA" || sale.status === "INTERNA")) return "0.00";
-  return `${isCreditNoteSale(sale) ? "-" : ""}${money(value)}`;
-}
-
-function accountingValue(sale: Sale, value: number) {
-  if (!(sale.status === "AUTORIZADA" || sale.status === "INTERNA")) return 0;
-  return isCreditNoteSale(sale) ? -value : value;
-}
-
-function saleCostValue(sale: Sale, products: Product[]) {
-  const productMap = new Map(products.map((product) => [product.id, product]));
-  return sale.items.reduce((sum, item) => {
-    const cost = Number.isFinite(Number(item.cost)) ? Number(item.cost) : productCost(productMap.get(item.productId));
-    return sum + item.quantity * cost;
-  }, 0);
-}
-
-function saleProfitValue(sale: Sale, products: Product[]) {
-  return accountingValue(sale, sale.subtotal) - accountingValue(sale, saleCostValue(sale, products));
 }
 
 function formatSalesReport(report: ReturnType<typeof buildSalesReport>) {
