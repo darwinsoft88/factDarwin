@@ -3857,6 +3857,8 @@ function userFriendlyActionError(error: unknown, action: "reserve-sequence" | "a
   const lower = raw.toLowerCase();
   const looksOffline = lower.includes("conexion") || lower.includes("network") || lower.includes("fetch") || lower.includes("failed to fetch") || lower.includes("internet") || lower.includes("servidor");
 
+  if (lower.includes("secuencial") || lower.includes("configurado")) return raw;
+
   if (looksOffline) {
     if (action === "reserve-sequence") {
       return "No hay internet o el servidor no esta disponible. Para emitir una factura electronica se necesita conexion a internet.";
