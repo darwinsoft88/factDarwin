@@ -30,6 +30,7 @@ import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CompanyAssetsSection } from "./src/components/CompanyAssetsSection";
+import { ConnectionResultText } from "./src/components/ConnectionResultText";
 import { CrudSection } from "./src/components/CrudSection";
 import { CreditNoteModal } from "./src/components/CreditNoteModal";
 import { DateRangeFilter } from "./src/components/DateRangeFilter";
@@ -3684,7 +3685,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
           </View>
         </View>
         <PrimaryButton label={testingEmail ? "Enviando prueba..." : "Probar correo"} onPress={testingEmail ? () => undefined : testCompanyEmail} />
-        {connectionResult ? <Text selectable style={styles.xml}>{connectionResult}</Text> : null}
+        <ConnectionResultText value={connectionResult} />
       </Section>
       <Section title="Logo y firma electronica">
         <CompanyAssetsSection
@@ -4372,15 +4373,5 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     textAlign: "center",
     marginTop: 8
-  },
-  xml: {
-    fontFamily: "monospace",
-    color: "#111827",
-    backgroundColor: "#ffffff",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    padding: 12,
-    lineHeight: 18
   }
 });
