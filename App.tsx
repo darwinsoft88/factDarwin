@@ -19,7 +19,6 @@ import {
   StyleSheet,
   StatusBar as NativeStatusBar,
   Text,
-  TextInput,
   View
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
@@ -45,6 +44,7 @@ import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal";
 import { SaleEditNotice } from "./src/components/SaleEditNotice";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
+import { SaleProductControls } from "./src/components/SaleProductControls";
 import { SelectedClientCard } from "./src/components/SelectedClientCard";
 import { SelectedProductCard } from "./src/components/SelectedProductCard";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
@@ -2747,42 +2747,20 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
           {filteredProductsForSale.length === 0 ? <Empty text="No hay productos con esa busqueda." /> : null}
           {visibleProductsForSale.length < filteredProductsForSale.length ? <LoadMoreButton label="Cargar mas productos" onPress={() => setVisibleProductCount((count) => count + LIST_BATCH_SIZE)} /> : null}
           <SelectedProductCard product={selectedProduct} />
-          <View style={styles.saleControlsRow}>
-            <View style={styles.quantityBlock}>
-              <Text style={styles.label}>Cantidad</Text>
-              <View style={styles.quantityStepper}>
-                <Pressable style={styles.stepperButton} onPress={() => adjustQuantity(-1)}>
-                  <Text style={styles.stepperButtonText}>-</Text>
-                </Pressable>
-                <TextInput style={styles.stepperInput} value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" placeholderTextColor="#7d8796" />
-                <Pressable style={styles.stepperButton} onPress={() => adjustQuantity(1)}>
-                  <Text style={styles.stepperButtonText}>+</Text>
-                </Pressable>
-              </View>
-            </View>
-            <View style={styles.flex}>
-              <Text style={[styles.label, styles.optionsLabel]}>Opciones</Text>
-              <Pressable style={styles.secondaryActionButton} onPress={openPriceOptions}>
-                <Text style={styles.secondaryActionText}>Precio / descuento</Text>
-              </Pressable>
-            </View>
-          </View>
-          {selectedProductLowStock ? (
-            <View style={styles.stockWarningBox}>
-              <Text style={styles.stockWarningText}>Stock bajo: quedaria {formatQuantity(selectedProductProjectedStock)}. Minimo configurado {selectedProduct ? productMinStock(selectedProduct) : 0}.</Text>
-            </View>
-          ) : null}
-          {selectedProduct ? (
-            <View style={styles.taxPreview}>
-              <Text style={styles.taxPreviewText}>
-                Cant. {formatQuantity(currentQty)} | Total estimado ${money(currentGrossLineTotal - currentGrossDiscount)}
-              </Text>
-              <Text style={styles.taxPreviewText}>Precio ${money(currentGrossPrice || selectedProduct.price)} | Desc. ${money(currentGrossDiscount)}</Text>
-            </View>
-          ) : null}
-          <Pressable style={styles.addButton} onPress={addItem}>
-            <Text style={styles.addButtonText}>Agregar a la venta</Text>
-          </Pressable>
+          <SaleProductControls
+            product={selectedProduct}
+            quantity={quantity}
+            currentQty={currentQty}
+            currentGrossPrice={currentGrossPrice}
+            currentGrossDiscount={currentGrossDiscount}
+            currentGrossLineTotal={currentGrossLineTotal}
+            lowStock={selectedProductLowStock}
+            projectedStock={selectedProductProjectedStock}
+            onQuantityChange={setQuantity}
+            onAdjustQuantity={adjustQuantity}
+            onOpenPriceOptions={openPriceOptions}
+            onAdd={addItem}
+          />
         </View>
 
         {items.map((item, index) => (
@@ -4261,21 +4239,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "900"
   },
-  secondaryActionButton: {
-    minHeight: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#0f766e",
-    backgroundColor: "#e6fffb",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12
-  },
-  secondaryActionText: {
-    color: "#0f5f59",
-    fontSize: 12,
-    fontWeight: "900"
-  },
   establishmentDeleteButton: {
     minHeight: 48,
     borderRadius: 8,
@@ -4291,62 +4254,6 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     textAlign: "center"
   },
-  quantityBlock: {
-    width: 152,
-    flexShrink: 0,
-    gap: 6
-  },
-  saleControlsRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 8
-  },
-  quantityStepper: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 8,
-    overflow: "hidden",
-    backgroundColor: "#ffffff",
-    flexDirection: "row",
-    alignItems: "center"
-  },
-  stepperButton: {
-    width: 38,
-    flexShrink: 0,
-    alignSelf: "stretch",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#eef2ff"
-  },
-  stepperButtonText: {
-    color: "#1d4ed8",
-    fontSize: 20,
-    fontWeight: "900"
-  },
-  stepperInput: {
-    flex: 1,
-    minWidth: 42,
-    minHeight: 44,
-    textAlign: "center",
-    color: "#111827",
-    fontWeight: "900",
-    backgroundColor: "#ffffff"
-  },
-  stockWarningBox: {
-    borderWidth: 1,
-    borderColor: "#fbbf24",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: "#fffbeb"
-  },
-  stockWarningText: {
-    color: "#92400e",
-    fontSize: 12,
-    fontWeight: "900",
-    lineHeight: 17
-  },
   errorText: {
     color: "#b91c1c"
   },
@@ -4360,10 +4267,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#4b5563",
     fontWeight: "700"
-  },
-  optionsLabel: {
-    paddingLeft: 2,
-    marginBottom: 6
   },
   input: {
     minHeight: 38,
@@ -4452,20 +4355,6 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     backgroundColor: "#94a3b8"
-  },
-  addButton: {
-    flexGrow: 1,
-    minWidth: 96,
-    height: 46,
-    borderRadius: 8,
-    backgroundColor: "#2563eb",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 14
-  },
-  addButtonText: {
-    color: "#ffffff",
-    fontWeight: "800"
   },
   smallButton: {
     borderRadius: 8,
@@ -4600,18 +4489,6 @@ const styles = StyleSheet.create({
     borderColor: "#e5e7eb",
     paddingTop: 10,
     gap: 4
-  },
-  taxPreview: {
-    borderWidth: 1,
-    borderColor: "#bae6fd",
-    borderRadius: 8,
-    padding: 9,
-    backgroundColor: "#f0f9ff"
-  },
-  taxPreviewText: {
-    color: "#075985",
-    fontSize: 12,
-    fontWeight: "800"
   },
   quickGrid: {
     flexDirection: "row",
