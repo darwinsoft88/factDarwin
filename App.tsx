@@ -25,6 +25,7 @@ import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./
 import { ActivePlanInfo } from "./src/components/ActivePlanInfo";
 import { AppMenuModal } from "./src/components/AppMenuModal";
 import { AuditLogList } from "./src/components/AuditLogList";
+import { BackupStatusInfo } from "./src/components/BackupStatusInfo";
 import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
@@ -3707,10 +3708,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         <ActivePlanInfo license={license} />
       </Section>
       <Section title="Base de datos">
-        <Text style={styles.paragraph}>Respalda o restaura usuarios, clientes, productos, ventas, guias, retenciones, inventario y configuracion.</Text>
-        <Text style={styles.paragraph}>Automatico: {data.autoBackupEnabled === false ? "Inactivo" : "Activo"} | Ultimo: {data.autoBackupLastAt ? formatAuditDate(data.autoBackupLastAt) : "pendiente"}</Text>
-        {data.autoBackupLastError ? <Text style={styles.paragraph}>Ultimo error automatico: {data.autoBackupLastError}</Text> : null}
-        <Text selectable style={styles.inlineInfo}>{formatBackupSummary(summarizeAppData(data))}</Text>
+        <BackupStatusInfo data={data} />
         <View style={styles.row}>
           <View style={styles.flex}>
             <PrimaryButton label={syncing ? "Procesando..." : "Subir cambios"} onPress={syncing ? () => undefined : backupData} />
