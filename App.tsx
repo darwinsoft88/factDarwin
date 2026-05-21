@@ -45,7 +45,7 @@ import { buildStockCredits, buildStockMovements, createInventoryMovement, getAva
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
 import { buildMobileReportHtml, buildReportCsv, buildReportExcelHtml, buildReportHtml, formatIva104Report, formatSalesReport, paymentLabel } from "./src/utils/reportFormats";
 import { buildSalesReport } from "./src/utils/reports";
-import { canEditSale, documentTypeLabel, isCreditNoteSale, isEffectiveReportSale, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock } from "./src/utils/sales";
+import { buildCreditNoteItem, buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
 import { explainSriResult, formatSriResult, sriUserMessage, userFriendlyActionError } from "./src/utils/sriMessages";
 import { findDuplicateClient, findDuplicateProductCode, isValidCedula, isValidEmail, isValidRuc, isValidUrl, normalizeClientIdentification, normalizeProductCode, sanitizeAppData } from "./src/validation";
 
@@ -3268,84 +3268,6 @@ function isAccessKeyUsed(data: AppData, accessKey: string, currentId = "") {
   return data.sales.some((sale) => sale.id !== currentId && sale.accessKey === accessKey) || (data.guides || []).some((guide) => guide.id !== currentId && guide.accessKey === accessKey);
 }
 
-function getCreditLineKey(item: SaleItem, index: number) {
-  return item.sourceLineKey || `${item.productId || item.code}-${index}`;
-}
-
-function formatQuantity(value: number) {
-  return Number(value.toFixed(6)).toString();
-}
-
-function sameCreditLine(sourceItem: SaleItem, creditItem: SaleItem) {
-  return sourceItem.productId === creditItem.productId &&
-    sourceItem.code === creditItem.code &&
-    sourceItem.name === creditItem.name &&
-    Math.abs(sourceItem.unitPrice - creditItem.unitPrice) < 0.000001 &&
-    Math.abs(sourceItem.ivaRate - creditItem.ivaRate) < 0.000001;
-}
-
-function calculateGrossUnitPrice(item: SaleItem) {
-  return roundMoney(item.unitPrice * (1 + item.ivaRate));
-}
-
-function calculateLineGrossDiscount(item: SaleItem) {
-  return roundMoney(item.discount * (1 + item.ivaRate));
-}
-
-function getCreditedQuantityForLine(sales: Sale[], sourceSaleId: string, sourceItem: SaleItem, sourceIndex: number) {
-  const lineKey = getCreditLineKey(sourceItem, sourceIndex);
-  return sales
-    .filter((sale) => sale.documentType === "nota_credito" && sale.sourceSaleId === sourceSaleId && sale.status === "AUTORIZADA")
-    .flatMap((sale) => sale.items)
-    .filter((item) => item.sourceLineKey ? item.sourceLineKey === lineKey : sameCreditLine(sourceItem, item))
-    .reduce((sum, item) => sum + item.quantity, 0);
-}
-
-function getCreditLineAvailable(sales: Sale[], sourceSale: Sale, sourceItem: SaleItem, sourceIndex: number) {
-  return Math.max(0, sourceItem.quantity - getCreditedQuantityForLine(sales, sourceSale.id, sourceItem, sourceIndex));
-}
-
-function hasCreditNoteBalance(sales: Sale[], sourceSale: Sale) {
-  return sourceSale.items.some((item, index) => getCreditLineAvailable(sales, sourceSale, item, index) > 0.000001);
-}
-
-function buildCreditNoteItem(sourceItem: SaleItem, quantity: number, sourceLineKey: string): SaleItem {
-  const ratio = sourceItem.quantity > 0 ? quantity / sourceItem.quantity : 0;
-  return {
-    ...sourceItem,
-    quantity: Number(quantity.toFixed(6)),
-    discount: Number((sourceItem.discount * ratio).toFixed(2)),
-    sourceLineKey
-  };
-}
-
-function buildCreditNoteItemsFromQuantities(sourceSale: Sale, sales: Sale[], quantities: Record<string, string>) {
-  return sourceSale.items.flatMap((item, index) => {
-    const lineKey = getCreditLineKey(item, index);
-    const quantity = Math.max(0, parseDecimal(quantities[lineKey] || "0") || 0);
-    const available = getCreditLineAvailable(sales, sourceSale, item, index);
-    if (quantity <= 0 || quantity > available + 0.000001) return [];
-    return [buildCreditNoteItem(item, quantity, lineKey)];
-  });
-}
-
-function validateCreditNoteQuantities(sourceSale: Sale, sales: Sale[], quantities: Record<string, string>) {
-  const errors: string[] = [];
-  sourceSale.items.forEach((item, index) => {
-    const lineKey = getCreditLineKey(item, index);
-    const raw = quantities[lineKey] || "0";
-    const quantity = parseDecimal(raw);
-    const available = getCreditLineAvailable(sales, sourceSale, item, index);
-    if (raw.trim() && (!Number.isFinite(quantity) || quantity < 0)) {
-      errors.push(`${item.name}: cantidad invalida.`);
-    }
-    if (Number.isFinite(quantity) && quantity > available + 0.000001) {
-      errors.push(`${item.name}: maximo disponible ${formatQuantity(available)}.`);
-    }
-  });
-  return errors;
-}
-
 function getLocalVoidReason(defaultReason: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
     const reason = window.prompt("Motivo de anulacion local", defaultReason);
@@ -3353,18 +3275,6 @@ function getLocalVoidReason(defaultReason: string) {
   }
 
   return defaultReason;
-}
-
-function isFinalConsumerClient(client: Client) {
-  const identification = client.identification.trim();
-  return client.identificationType === "07" || identification === "9999999999999";
-}
-
-function canIssueCreditNoteForSale(sales: Sale[], sale: Sale, client: Client) {
-  return isInvoiceSale(sale) &&
-    sale.status === "AUTORIZADA" &&
-    !isFinalConsumerClient(client) &&
-    hasCreditNoteBalance(sales, sale);
 }
 
 function getRetryInfo(document: { retryHistory?: string[] }) {
