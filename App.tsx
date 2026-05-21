@@ -32,6 +32,7 @@ import { ListItem } from "./src/components/ListItem";
 import { MenuAction } from "./src/components/MenuAction";
 import { OnboardingStep } from "./src/components/OnboardingStep";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
+import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
 import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { OperationTile, StatBox } from "./src/components/metrics";
@@ -4667,92 +4668,6 @@ function SaleLineEditor({
               </View>
             ) : null}
             <PrimaryButton label="Guardar cambio" onPress={onSave} />
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function ProductPriceOptionsModal({
-  visible,
-  product,
-  quantity,
-  unitGrossPrice,
-  grossDiscount,
-  discountMode,
-  onQuantityChange,
-  onUnitGrossPriceChange,
-  onGrossDiscountChange,
-  onDiscountModeChange,
-  onAdd,
-  onClose
-}: {
-  visible: boolean;
-  product?: Product;
-  quantity: string;
-  unitGrossPrice: string;
-  grossDiscount: string;
-  discountMode: "amount" | "percent";
-  onQuantityChange: (value: string) => void;
-  onUnitGrossPriceChange: (value: string) => void;
-  onGrossDiscountChange: (value: string) => void;
-  onDiscountModeChange: (value: "amount" | "percent") => void;
-  onAdd: () => void;
-  onClose: () => void;
-}) {
-  const qty = Math.max(0, parseDecimal(quantity) || 0);
-  const grossPrice = Math.max(0, parseDecimal(unitGrossPrice) || 0);
-  const discountValue = Math.max(0, parseDecimal(grossDiscount) || 0);
-  const grossDiscountValue = discountMode === "percent" ? grossPrice * qty * discountValue / 100 : discountValue;
-  const unitPrice = product ? grossToNetUnitPrice(grossPrice, product.ivaRate) : 0;
-  const discount = product ? grossToNetUnitPrice(grossDiscountValue, product.ivaRate) : 0;
-  const previewItem = product ? {
-    productId: product.id,
-    code: product.code,
-    name: product.name,
-    quantity: qty,
-    unitPrice,
-    cost: productCost(product),
-    discount,
-    ivaRate: product.ivaRate
-  } : undefined;
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.creditModalBackdrop}>
-        <View style={styles.quickClientModal}>
-          <View style={styles.creditModalHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.creditModalTitle}>Precio y descuento</Text>
-              <Text style={styles.creditModalMeta}>{product ? `${product.code} - ${product.name}` : "Seleccione producto"}</Text>
-            </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled">
-            <Input label="Cantidad" value={quantity} onChangeText={onQuantityChange} keyboardType="decimal-pad" />
-            <Input label="Precio publico" value={unitGrossPrice} onChangeText={onUnitGrossPriceChange} keyboardType="decimal-pad" />
-            <Select
-              label="Tipo de descuento"
-              value={discountMode}
-              onChange={(value) => onDiscountModeChange(value as "amount" | "percent")}
-              options={[
-                { label: "Valor $", value: "amount" },
-                { label: "Porcentaje %", value: "percent" }
-              ]}
-            />
-            <Input label={discountMode === "percent" ? "Descuento %" : "Descuento publico"} value={grossDiscount} onChangeText={onGrossDiscountChange} keyboardType="decimal-pad" />
-            {previewItem ? (
-              <View style={styles.creditTotalsBox}>
-                <Text style={styles.totalLine}>Base: ${money(calculateLineSubtotal(previewItem))}</Text>
-                <Text style={styles.totalLine}>Descuento: ${money(calculateLineDiscount(previewItem))}</Text>
-                <Text style={styles.totalLine}>IVA: ${money(calculateLineTax(previewItem))}</Text>
-                <Text style={styles.totalStrong}>Total linea: ${money(calculateLineTotal(previewItem))}</Text>
-              </View>
-            ) : null}
-            <PrimaryButton label="Agregar producto" onPress={onAdd} />
           </ScrollView>
         </View>
       </View>
