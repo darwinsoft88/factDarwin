@@ -37,6 +37,7 @@ import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsMo
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
+import { TechnicalDetailModal } from "./src/components/TechnicalDetailModal";
 import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { OperationTile, StatBox } from "./src/components/metrics";
@@ -1353,19 +1354,7 @@ function AppContent() {
       />
 
       <Modal visible={Boolean(xmlPreview)} animationType="slide" onRequestClose={() => setXmlPreview("")}>
-        <SafeAreaView style={styles.screen}>
-          <View style={[styles.header, styles.xmlModalHeader, { paddingTop: headerTopPadding }]}>
-            <Text style={styles.title}>Detalle tecnico</Text>
-            <Pressable style={styles.smallButton} onPress={() => setXmlPreview("")}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.content}>
-            <Text selectable style={styles.xml}>
-              {xmlPreview}
-            </Text>
-          </ScrollView>
-        </SafeAreaView>
+        <TechnicalDetailModal value={xmlPreview} onClose={() => setXmlPreview("")} />
       </Modal>
     </SafeAreaView>
   );
@@ -4312,10 +4301,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderBottomWidth: 1,
     borderColor: "#e2e7f0"
-  },
-  xmlModalHeader: {
-    minHeight: 58,
-    paddingBottom: 10
   },
   brand: {
     fontSize: 21,
