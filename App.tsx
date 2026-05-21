@@ -42,6 +42,7 @@ import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
 import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal";
+import { SaleEditNotice } from "./src/components/SaleEditNotice";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
@@ -2705,21 +2706,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   return (
     <View style={styles.stack}>
       <Section title={sourceTicket ? `Facturando ticket ${sourceTicket.sequence}` : sourceProforma ? `Convirtiendo proforma ${sourceProforma.sequence}` : editingSale ? `Corrigiendo ${documentTypeLabel(editingSale)} ${editingSale.sequence}` : "Nueva venta"}>
-        {editingSale || sourceTicket || sourceProforma ? (
-          <View style={styles.editNoticeBox}>
-            <Text style={styles.noticeTitle}>{sourceTicket ? "Modo facturar ticket" : sourceProforma ? "Modo convertir proforma" : "Modo correccion"}</Text>
-            <Text style={styles.noticeText}>
-              {sourceTicket
-                ? "Se creara una factura SRI nueva con el siguiente secuencial de factura. Si autoriza, el ticket quedara convertido y no se duplicara el stock."
-                : sourceProforma
-                  ? "Se creara un nuevo documento desde la proforma. La proforma no toca inventario ni SRI hasta convertirse."
-                : "Puede corregir cliente, productos, precio, descuento o forma de pago. Se conservara la misma secuencia del documento."}
-            </Text>
-            <Pressable style={styles.smallButton} onPress={cancelEdit}>
-              <Text style={styles.smallButtonText}>{sourceTicket ? "Cancelar facturacion" : sourceProforma ? "Cancelar conversion" : "Cancelar correccion"}</Text>
-            </Pressable>
-          </View>
-        ) : null}
+        <SaleEditNotice sourceTicket={sourceTicket} sourceProforma={sourceProforma} editingSale={editingSale} onCancel={cancelEdit} />
         <View style={styles.saleGroupCompact}>
           <Select
             label="Seleccionar tipo de documento"
@@ -4750,14 +4737,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     backgroundColor: "#f0fdf4"
-  },
-  editNoticeBox: {
-    borderWidth: 1,
-    borderColor: "#fbbf24",
-    borderRadius: 8,
-    padding: 10,
-    backgroundColor: "#fffbeb",
-    gap: 8
   },
   noticeTitle: {
     color: "#166534",
