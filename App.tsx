@@ -25,6 +25,7 @@ import {
   View
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
+import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CrudSection } from "./src/components/CrudSection";
 import { ListItem } from "./src/components/ListItem";
 import { MenuAction } from "./src/components/MenuAction";
@@ -50,7 +51,6 @@ import { clearSession, initialData, loadData, loadSession, saveData, saveSession
 import { AppData, AppLicense, Client, DocumentType, InventoryMovement, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
 import { accountingMoney, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
 import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, licenseStatusLabel, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
-import { resolveCompanyLogoUrl } from "./src/utils/assets";
 import { appendAudit, AUDIT_LOG_LIMIT } from "./src/utils/audit";
 import { addedEstablishmentIds, mergeAppDataSnapshots } from "./src/utils/dataMerge";
 import { formatReceivedRetentionDetail, formatSaleDetail } from "./src/utils/documentDetails";
@@ -4759,25 +4759,6 @@ function ProductPriceOptionsModal({
   );
 }
 
-function CompanyLogoMark({ logoUrl, backendUrl }: { logoUrl: string; backendUrl: string }) {
-  const resolvedLogoUrl = resolveCompanyLogoUrl(logoUrl, backendUrl);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-  }, [resolvedLogoUrl]);
-
-  return (
-    <View style={[styles.brandMark, resolvedLogoUrl && !failed && styles.brandLogoMark]}>
-      {resolvedLogoUrl && !failed ? (
-        <Image source={{ uri: resolvedLogoUrl }} style={styles.brandLogoImage} resizeMode="contain" onError={() => setFailed(true)} />
-      ) : (
-        <Text style={styles.brandMarkText}>FD</Text>
-      )}
-    </View>
-  );
-}
-
 function CalendarDateInput({ label, value, onChange, allowClear = false }: { label: string; value: string; onChange: (value: string) => void; allowClear?: boolean }) {
   const parsedValue = parseInputDate(value, "start");
   const [visible, setVisible] = useState(false);
@@ -5122,29 +5103,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8
-  },
-  brandMark: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#0f766e",
-    overflow: "hidden"
-  },
-  brandLogoMark: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#ffffff"
-  },
-  brandLogoImage: {
-    width: "100%",
-    height: "100%"
-  },
-  brandMarkText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "900"
   },
   headerBrand: {
     fontSize: 16,
