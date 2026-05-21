@@ -23,6 +23,7 @@ import {
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
 import { AppMenuModal } from "./src/components/AppMenuModal";
+import { AuditLogList } from "./src/components/AuditLogList";
 import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
@@ -80,7 +81,7 @@ import { clearSession, initialData, loadData, loadSession, saveData, saveSession
 import { AppData, AppLicense, Client, DocumentType, InventoryMovement, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
 import { accountingMoney, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
 import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, licenseStatusLabel, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
-import { appendAudit, AUDIT_LOG_LIMIT } from "./src/utils/audit";
+import { appendAudit } from "./src/utils/audit";
 import { addedEstablishmentIds, mergeAppDataSnapshots } from "./src/utils/dataMerge";
 import { formatSaleDetail } from "./src/utils/documentDetails";
 import { buildCreditNoteRideHtml, buildInternalTicketHtml, buildProformaHtml } from "./src/utils/documentHtml";
@@ -3732,17 +3733,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         <TechnicalLogsList logs={technicalLogs} />
       </Section>
       <Section title="Auditoria">
-        <Text style={styles.paragraph}>Se guardan los ultimos {AUDIT_LOG_LIMIT} eventos. Mostrando {visibleAuditLogs.length}/{auditLogs.length}.</Text>
-        {auditLogs.length === 0 ? <Empty text="Aun no hay eventos de auditoria." /> : null}
-        {visibleAuditLogs.map((log) => (
-          <ListItem
-            key={log.id}
-            title={log.summary}
-            meta={`${formatAuditDate(log.createdAt)} | ${log.userName || "Sistema"} | ${log.event}${log.metadata ? ` | ${shortText(JSON.stringify(log.metadata), 90)}` : ""}`}
-            badge={log.entity}
-          />
-        ))}
-        {visibleAuditLogs.length < auditLogs.length ? <LoadMoreButton label="Cargar mas auditoria" onPress={() => setVisibleAuditCount((count) => count + LIST_BATCH_SIZE)} /> : null}
+        <AuditLogList logs={auditLogs} visibleLogs={visibleAuditLogs} onLoadMore={() => setVisibleAuditCount((count) => count + LIST_BATCH_SIZE)} />
       </Section>
       <NewEstablishmentModal
         visible={establishmentModalVisible}
