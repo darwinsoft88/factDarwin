@@ -29,6 +29,7 @@ import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CrudSection } from "./src/components/CrudSection";
 import { CreditNoteModal } from "./src/components/CreditNoteModal";
+import { DateRangeFilter } from "./src/components/DateRangeFilter";
 import { DeleteEstablishmentModal } from "./src/components/DeleteEstablishmentModal";
 import { EstablishmentPickerModal } from "./src/components/EstablishmentPickerModal";
 import { ListItem } from "./src/components/ListItem";
@@ -2865,26 +2866,16 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         </View>
         <Input label="Buscar documento" value={invoiceSearch} onChangeText={setInvoiceSearch} placeholder="Cliente, cedula, secuencial o clave" autoCapitalize="none" />
         <View style={styles.saleGroupCompact}>
-          <Text style={styles.groupTitle}>Fecha del documento</Text>
-          <View style={styles.row}>
-            <View style={styles.flex}>
-              <CalendarDateInput label="Desde" value={saleStartDate} onChange={setSaleStartDate} allowClear />
-            </View>
-            <View style={styles.flex}>
-              <CalendarDateInput label="Hasta" value={saleEndDate} onChange={setSaleEndDate} allowClear />
-            </View>
-          </View>
-          <View style={styles.actionGroup}>
-            <Pressable style={styles.smallButton} onPress={setSalesDateRangeToday}>
-              <Text style={styles.smallButtonText}>Hoy</Text>
-            </Pressable>
-            <Pressable style={styles.smallButton} onPress={setSalesDateRangeMonth}>
-              <Text style={styles.smallButtonText}>Este mes</Text>
-            </Pressable>
-            <Pressable style={styles.smallButton} onPress={clearSalesDateRange}>
-              <Text style={styles.smallButtonText}>Limpiar</Text>
-            </Pressable>
-          </View>
+          <DateRangeFilter
+            title="Fecha del documento"
+            startValue={saleStartDate}
+            endValue={saleEndDate}
+            onStartChange={setSaleStartDate}
+            onEndChange={setSaleEndDate}
+            onToday={setSalesDateRangeToday}
+            onMonth={setSalesDateRangeMonth}
+            onClear={clearSalesDateRange}
+          />
         </View>
         <Select
           label="Estado"
