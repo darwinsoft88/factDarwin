@@ -45,6 +45,7 @@ import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal"
 import { SaleEditNotice } from "./src/components/SaleEditNotice";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { SaleProductControls } from "./src/components/SaleProductControls";
+import { SaleTotalsBox } from "./src/components/SaleTotalsBox";
 import { SelectedClientCard } from "./src/components/SelectedClientCard";
 import { SelectedProductCard } from "./src/components/SelectedProductCard";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
@@ -2776,12 +2777,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         <View style={styles.saleGroupCompact}>
           <Select label="Forma de pago" value={paymentMethod} onChange={(value) => setPaymentMethod(value as PaymentMethod)} options={paymentOptions} />
         </View>
-        <View style={styles.totalBox}>
-          <Text style={styles.totalLine}>Subtotal: ${money(totals.subtotal)}</Text>
-          <Text style={styles.totalLine}>Descuento: ${money(calculateTotalDiscount(items))}</Text>
-          <Text style={styles.totalLine}>IVA: ${money(totals.tax)}</Text>
-          <Text style={styles.totalStrong}>Total: ${money(totals.total)}</Text>
-        </View>
+        <SaleTotalsBox subtotal={totals.subtotal} discount={calculateTotalDiscount(items)} tax={totals.tax} total={totals.total} />
         {issueNotice ? (
           <Pressable style={styles.issueNoticeBox} onPress={() => setIssueNotice("")}>
             <Text style={styles.issueNoticeText}>{issueNotice}</Text>
@@ -4478,18 +4474,6 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginTop: 4
   },
-  creditTotalsBox: {
-    borderRadius: 8,
-    backgroundColor: "#ecfdf5",
-    padding: 12,
-    gap: 4
-  },
-  totalBox: {
-    borderTopWidth: 1,
-    borderColor: "#e5e7eb",
-    paddingTop: 10,
-    gap: 4
-  },
   quickGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -4539,16 +4523,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     lineHeight: 17
-  },
-  totalLine: {
-    color: "#374151",
-    textAlign: "right"
-  },
-  totalStrong: {
-    color: "#111827",
-    fontWeight: "900",
-    textAlign: "right",
-    fontSize: 18
   },
   hint: {
     color: "#6b7280",
