@@ -71,6 +71,7 @@ import { MenuIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { IntegrationStatusInfo } from "./src/components/IntegrationStatusInfo";
 import { InvoiceStatsGrid } from "./src/components/InvoiceStatsGrid";
+import { IssuerActionButtons } from "./src/components/IssuerActionButtons";
 import { IssuerTaxSettings } from "./src/components/IssuerTaxSettings";
 import { OperationTile } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
@@ -3618,15 +3619,13 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         <IssuerTaxSettings issuer={issuer} onChange={setIssuer} />
         <Input label="URL del servidor" value={backendUrl} onChangeText={setBackendUrl} autoCapitalize="none" />
         <AutoBackupToggle enabled={autoBackupEnabled} onChange={setAutoBackupEnabled} />
-        <View style={styles.row}>
-          <View style={styles.flex}>
-            <PrimaryButton label="Guardar emisor" onPress={save} />
-          </View>
-          <View style={styles.flex}>
-            <PrimaryButton label={checkingConnection ? "Probando..." : "Probar conexion"} onPress={checkingConnection ? () => undefined : testConnection} />
-          </View>
-        </View>
-        <PrimaryButton label={testingEmail ? "Enviando prueba..." : "Probar correo"} onPress={testingEmail ? () => undefined : testCompanyEmail} />
+        <IssuerActionButtons
+          checkingConnection={checkingConnection}
+          testingEmail={testingEmail}
+          onSave={save}
+          onTestConnection={testConnection}
+          onTestEmail={testCompanyEmail}
+        />
         <ConnectionResultText value={connectionResult} />
       </Section>
       <Section title="Logo y firma electronica">
