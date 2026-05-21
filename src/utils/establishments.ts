@@ -1,3 +1,4 @@
+import { IdentityLookupResponse } from "../services/backend";
 import { AppData, Issuer, IssuerEstablishment, RemissionGuide, Sale } from "../types";
 
 export function activeIssuer(data: AppData): Issuer {
@@ -101,6 +102,30 @@ export function updateIssuerEstablishmentSequence(issuer: Issuer, establishmentI
     ...issuerWithEstablishment({ ...issuer, establishments, activeEstablishmentId: active.id }, active),
     establishments
   };
+}
+
+export function applyIdentityToIssuer(issuer: Issuer, result: IdentityLookupResponse): Issuer {
+  const establishments = normalizedEstablishments(issuer);
+  const active = activeEstablishment(issuer);
+  const firstRemote = Array.isArray(result.establishments) ? result.establishments.find((item) => item.establishment) : undefined;
+  const nextActive: IssuerEstablishment = {
+    ...active,
+    name: firstRemote?.tradeName || result.tradeName || active.name,
+    address: firstRemote?.address || result.address || active.address || issuer.address
+  };
+  const nextIssuer = issuerWithEstablishment({
+    ...issuer,
+    ruc: result.identification || issuer.ruc,
+    businessName: result.businessName || result.name || issuer.businessName,
+    tradeName: result.tradeName || result.businessName || result.name || issuer.tradeName,
+    address: result.address || issuer.address,
+    taxpayerType: result.taxpayerType || issuer.taxpayerType,
+    accountingRequired: result.accountingRequired || issuer.accountingRequired,
+    specialTaxpayer: result.specialTaxpayer || issuer.specialTaxpayer,
+    establishments: establishments.map((item) => item.id === active.id ? nextActive : item),
+    activeEstablishmentId: active.id
+  }, nextActive);
+  return { ...nextIssuer, establishments: normalizedEstablishments(nextIssuer) };
 }
 
 export function issuerForSale(issuer: Issuer, sale: Pick<Sale, "establishment" | "emissionPoint" | "establishmentName">): Issuer {
