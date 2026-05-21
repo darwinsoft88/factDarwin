@@ -70,6 +70,7 @@ import { MenuIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { IntegrationStatusInfo } from "./src/components/IntegrationStatusInfo";
 import { InvoiceStatsGrid } from "./src/components/InvoiceStatsGrid";
+import { IssuerTaxSettings } from "./src/components/IssuerTaxSettings";
 import { OperationTile } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
@@ -3613,37 +3614,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
           onAdd={openEstablishmentModal}
           onDelete={requestDeleteSelectedEstablishment}
         />
-        <Select label="Ambiente" value={issuer.environment} onChange={(environment) => setIssuer({ ...issuer, environment: environment as "1" | "2" })} options={[{ label: "Pruebas", value: "1" }, { label: "Produccion", value: "2" }]} />
-        <Select
-          label="Tipo contribuyente"
-          value={issuer.taxpayerType}
-          onChange={(taxpayerType) => setIssuer({ ...issuer, taxpayerType: taxpayerType as "natural" | "juridica" })}
-          options={[
-            { label: "Persona natural", value: "natural" },
-            { label: "Persona juridica", value: "juridica" }
-          ]}
-        />
-        <Select
-          label="Obligado a contabilidad"
-          value={issuer.accountingRequired}
-          onChange={(accountingRequired) => setIssuer({ ...issuer, accountingRequired: accountingRequired as "SI" | "NO" })}
-          options={[
-            { label: "No", value: "NO" },
-            { label: "Si", value: "SI" }
-          ]}
-        />
-        <Select
-          label="Contribuyente especial"
-          value={issuer.specialTaxpayer}
-          onChange={(specialTaxpayer) => setIssuer({ ...issuer, specialTaxpayer: specialTaxpayer as "SI" | "NO" })}
-          options={[
-            { label: "No", value: "NO" },
-            { label: "Si", value: "SI" }
-          ]}
-        />
-        {issuer.specialTaxpayer === "SI" ? (
-          <Input label="Resolucion contribuyente especial" value={issuer.specialTaxpayerResolution} onChangeText={(specialTaxpayerResolution) => setIssuer({ ...issuer, specialTaxpayerResolution })} keyboardType="number-pad" />
-        ) : null}
+        <IssuerTaxSettings issuer={issuer} onChange={setIssuer} />
         <Input label="URL del servidor" value={backendUrl} onChangeText={setBackendUrl} autoCapitalize="none" />
         <Select
           label="Respaldo automatico"
