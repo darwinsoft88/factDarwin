@@ -39,6 +39,7 @@ import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsMo
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
+import { SupportModal } from "./src/components/SupportModal";
 import { SyncCenterModal } from "./src/components/SyncCenterModal";
 import { TechnicalDetailModal } from "./src/components/TechnicalDetailModal";
 import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
@@ -1200,33 +1201,14 @@ function AppContent() {
         onTestServer={() => { void testSyncServer(); }}
       />
 
-      <Modal visible={supportVisible} transparent animationType="slide" onRequestClose={() => setSupportVisible(false)}>
-        <View style={styles.creditModalBackdrop}>
-          <View style={styles.diagnosticModal}>
-            <View style={styles.creditModalHeader}>
-              <View style={styles.flex}>
-                <Text style={styles.creditModalTitle}>Soporte</Text>
-                <Text style={styles.creditModalMeta}>Diagnostico para revisar conexion, licencia y sincronizacion.</Text>
-              </View>
-              <Pressable style={styles.smallButton} onPress={() => setSupportVisible(false)}>
-                <Text style={styles.smallButtonText}>Cerrar</Text>
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.creditModalContent}>
-              <View style={styles.buttonRow}>
-                <Pressable style={[styles.primaryButton, supportLoading && styles.disabledButton]} onPress={() => { void refreshSupportDiagnostic(); }} disabled={supportLoading}>
-                  <Text style={styles.primaryButtonText}>{supportLoading ? "Revisando..." : "Actualizar diagnostico"}</Text>
-                </Pressable>
-                <Pressable style={styles.secondaryActionButton} onPress={() => { void shareSupportDiagnostic(); }}>
-                  <Text style={styles.secondaryActionText}>Compartir</Text>
-                </Pressable>
-              </View>
-              {supportLoading ? <Text style={styles.inlineInfo}>Consultando backend y logs tecnicos...</Text> : null}
-              <Text selectable style={styles.diagnosticText}>{supportDiagnostic || buildSupportDiagnostic(data, session, syncState)}</Text>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      <SupportModal
+        visible={supportVisible}
+        loading={supportLoading}
+        diagnosticText={supportDiagnostic || buildSupportDiagnostic(data, session, syncState)}
+        onClose={() => setSupportVisible(false)}
+        onRefresh={() => { void refreshSupportDiagnostic(); }}
+        onShare={() => { void shareSupportDiagnostic(); }}
+      />
 
       <EstablishmentPickerModal
         visible={establishmentSwitcherVisible}
@@ -4859,17 +4841,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900",
     marginTop: 4
-  },
-  diagnosticText: {
-    fontFamily: "monospace",
-    color: "#111827",
-    backgroundColor: "#f8fafc",
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    padding: 12,
-    fontSize: 11,
-    lineHeight: 17
   },
   creditSelectAllButton: {
     minHeight: 42,
