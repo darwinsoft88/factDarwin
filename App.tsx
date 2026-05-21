@@ -26,6 +26,7 @@ import {
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
 import { ListItem } from "./src/components/ListItem";
+import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
 import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { OperationTile, StatBox } from "./src/components/metrics";
@@ -4766,20 +4767,6 @@ function ProductPriceOptionsModal({
   );
 }
 
-function ProcessingOverlay({ visible, message }: { visible: boolean; message: string }) {
-  return (
-    <Modal visible={visible} transparent animationType="fade">
-      <View style={styles.processingBackdrop}>
-        <View style={styles.processingCard}>
-          <ActivityIndicator size="large" color="#0f766e" />
-          <Text style={styles.processingTitle}>Procesando</Text>
-          <Text style={styles.processingText}>{message || "Espere un momento..."}</Text>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 function MenuAction({ icon, label, tone = "default", onPress }: { icon: string; label: string; tone?: "default" | "danger"; onPress: () => void }) {
   const danger = tone === "danger";
   return (
@@ -4980,36 +4967,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#f5f7fb"
-  },
-  processingBackdrop: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-    backgroundColor: "rgba(15, 23, 42, 0.35)"
-  },
-  processingCard: {
-    width: "100%",
-    maxWidth: 320,
-    alignItems: "center",
-    gap: 10,
-    padding: 20,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#dbe4ee",
-    backgroundColor: "#ffffff"
-  },
-  processingTitle: {
-    color: "#102033",
-    fontSize: 16,
-    fontWeight: "900"
-  },
-  processingText: {
-    color: "#475569",
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 18,
-    textAlign: "center"
   },
   loginPanel: {
     flex: 1,
