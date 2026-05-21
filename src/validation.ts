@@ -26,6 +26,46 @@ export function findDuplicateProductCode(products: Product[], code: string, curr
   return products.find((product) => product.id !== currentId && normalizeProductCode(product.code) === normalized);
 }
 
+export function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+export function isValidUrl(value: string) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function isValidCedula(value: string) {
+  if (!/^\d{10}$/.test(value)) return false;
+  const province = Number(value.slice(0, 2));
+  const thirdDigit = Number(value[2]);
+  if (!((province >= 1 && province <= 24) || province === 30) || thirdDigit >= 6) return false;
+
+  const coefficients = [2, 1, 2, 1, 2, 1, 2, 1, 2];
+  const total = coefficients.reduce((sum, coefficient, index) => {
+    const multiplied = Number(value[index]) * coefficient;
+    return sum + (multiplied > 9 ? multiplied - 9 : multiplied);
+  }, 0);
+  const verifier = total % 10 === 0 ? 0 : 10 - (total % 10);
+
+  return verifier === Number(value[9]);
+}
+
+export function isValidRuc(value: string) {
+  if (!/^\d{13}$/.test(value) || !value.endsWith("001")) return false;
+  const thirdDigit = Number(value[2]);
+
+  if (thirdDigit < 6) return isValidCedula(value.slice(0, 10));
+  if (thirdDigit === 6) return validateMod11(value, [3, 2, 7, 6, 5, 4, 3, 2], 8);
+  if (thirdDigit === 9) return validateMod11(value, [4, 3, 2, 7, 6, 5, 4, 3, 2], 9);
+
+  return false;
+}
+
 export function sanitizeAppData(data: AppData): AppData {
   const deletedIds = normalizeDeletedIds(data.deletedIds, data.auditLogs || []);
   const deletedClients = new Set(deletedIds.clients);
@@ -90,6 +130,14 @@ export function sanitizeAppData(data: AppData): AppData {
     deletedIds,
     license: sanitizeLicense(data.license)
   };
+}
+
+function validateMod11(value: string, coefficients: number[], verifierIndex: number) {
+  const total = coefficients.reduce((sum, coefficient, index) => sum + Number(value[index]) * coefficient, 0);
+  const remainder = total % 11;
+  const verifier = remainder === 0 ? 0 : 11 - remainder;
+
+  return verifier === Number(value[verifierIndex]);
 }
 
 function normalizeDeletedIds(deletedIds: AppData["deletedIds"], auditLogs: AppData["auditLogs"]) {
