@@ -15,6 +15,63 @@ export function estimateTicketPageHeightMm(sale: Sale) {
   return Math.min(300, Math.max(120, 102 + itemLines * 8));
 }
 
+export async function handlePdfDocument(html: string, dialogTitle: string, documentTitle: string) {
+  const file = await Print.printToFileAsync({ html, base64: false });
+  const uri = await prepareGeneratedFile(file.uri, documentTitle, "pdf");
+
+  if (Platform.OS === "web") return;
+
+  Alert.alert(`${documentTitle} listo`, "Elija que desea hacer con el PDF.", [
+    {
+      text: "Ver",
+      onPress: () => {
+        void openPdfFile(uri, documentTitle);
+      }
+    },
+    {
+      text: "Enviar/guardar",
+      onPress: () => {
+        void shareGeneratedFile(uri, "application/pdf", dialogTitle, documentTitle);
+      }
+    },
+    { text: "Cerrar", style: "cancel" }
+  ]);
+}
+
+export async function handleTicketDocument(html: string, dialogTitle: string, pageHeightMm: number) {
+  if (Platform.OS === "web") return;
+  const ticketPrintOptions = {
+    html,
+    width: mmToPrintPx(TICKET_PRINT_WIDTH_MM),
+    height: mmToPrintPx(pageHeightMm),
+    margins: { top: 0, right: 0, bottom: 0, left: 0 }
+  };
+
+  Alert.alert("Ticket POS listo", "Elija como desea sacar el ticket.", [
+    {
+      text: "Imprimir 80mm",
+      onPress: () => {
+        void Print.printAsync(ticketPrintOptions).catch((error) => {
+          Alert.alert("No se pudo imprimir", error instanceof Error ? error.message : "Revise la impresora e intente nuevamente.");
+        });
+      }
+    },
+    {
+      text: "Guardar PDF",
+      onPress: async () => {
+        try {
+          const file = await Print.printToFileAsync({ ...ticketPrintOptions, base64: false });
+          const uri = await prepareGeneratedFile(file.uri, "Ticket POS", "pdf");
+          await shareGeneratedFile(uri, "application/pdf", dialogTitle, "Ticket POS");
+        } catch (error) {
+          Alert.alert("No se pudo guardar", error instanceof Error ? error.message : "Intente nuevamente.");
+        }
+      }
+    },
+    { text: "Cerrar", style: "cancel" }
+  ]);
+}
+
 export async function createPdfBase64(html: string) {
   if (Platform.OS === "web") return "";
   const file = await Print.printToFileAsync({ html, base64: true });
@@ -22,6 +79,8 @@ export async function createPdfBase64(html: string) {
   if (file.uri) return FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
   return "";
 }
+
+const TICKET_PRINT_WIDTH_MM = 80;
 
 export function openHtmlViewer(html: string, title: string) {
   if (typeof window === "undefined" || !("document" in window)) return;

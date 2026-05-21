@@ -47,7 +47,7 @@ import { pickWebFile, readWebFileBase64 } from "./src/utils/files";
 import { buildCalendarDays, dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, sanitizeFileName, shortText, toInputDate } from "./src/utils/format";
 import { buildStockCredits, buildStockMovements, createInventoryMovement, getAvailableStockForSale, movementReason, movementTypeLabel, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
-import { createPdfBase64, estimateTicketPageHeightMm, mmToPrintPx, openHtmlViewer, openPdfFile, prepareGeneratedFile, shareGeneratedFile } from "./src/utils/printFiles";
+import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleTicketDocument, openHtmlViewer, shareGeneratedFile } from "./src/utils/printFiles";
 import { buildMobileReportHtml, buildReportCsv, buildReportExcelHtml, buildReportHtml, formatIva104Report, formatSalesReport, paymentLabel } from "./src/utils/reportFormats";
 import { buildSalesReport } from "./src/utils/reports";
 import { buildCreditNoteItem, buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
@@ -3265,65 +3265,6 @@ function getLocalVoidReason(defaultReason: string) {
 
   return defaultReason;
 }
-
-async function handlePdfDocument(html: string, dialogTitle: string, documentTitle: string) {
-  const file = await Print.printToFileAsync({ html, base64: false });
-  const uri = await prepareGeneratedFile(file.uri, documentTitle, "pdf");
-
-  if (Platform.OS === "web") return;
-
-  Alert.alert(`${documentTitle} listo`, "Elija que desea hacer con el PDF.", [
-    {
-      text: "Ver",
-      onPress: () => {
-        void openPdfFile(uri, documentTitle);
-      }
-    },
-    {
-      text: "Enviar/guardar",
-      onPress: () => {
-        void shareGeneratedFile(uri, "application/pdf", dialogTitle, documentTitle);
-      }
-    },
-    { text: "Cerrar", style: "cancel" }
-  ]);
-}
-
-async function handleTicketDocument(html: string, dialogTitle: string, pageHeightMm: number) {
-  if (Platform.OS === "web") return;
-  const ticketPrintOptions = {
-    html,
-    width: mmToPrintPx(TICKET_PRINT_WIDTH_MM),
-    height: mmToPrintPx(pageHeightMm),
-    margins: { top: 0, right: 0, bottom: 0, left: 0 }
-  };
-
-  Alert.alert("Ticket POS listo", "Elija como desea sacar el ticket.", [
-    {
-      text: "Imprimir 80mm",
-      onPress: () => {
-        void Print.printAsync(ticketPrintOptions).catch((error) => {
-          Alert.alert("No se pudo imprimir", error instanceof Error ? error.message : "Revise la impresora e intente nuevamente.");
-        });
-      }
-    },
-    {
-      text: "Guardar PDF",
-      onPress: async () => {
-        try {
-          const file = await Print.printToFileAsync({ ...ticketPrintOptions, base64: false });
-          const uri = await prepareGeneratedFile(file.uri, "Ticket POS", "pdf");
-          await shareGeneratedFile(uri, "application/pdf", dialogTitle, "Ticket POS");
-        } catch (error) {
-          Alert.alert("No se pudo guardar", error instanceof Error ? error.message : "Intente nuevamente.");
-        }
-      }
-    },
-    { text: "Cerrar", style: "cancel" }
-  ]);
-}
-
-const TICKET_PRINT_WIDTH_MM = 80;
 
 function buildInternalTicketHtml(sale: Sale, client: Client, issuer: Issuer, pageHeightMm = estimateTicketPageHeightMm(sale)) {
   const rows = sale.items
