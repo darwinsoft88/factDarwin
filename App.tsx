@@ -26,6 +26,7 @@ import {
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
+import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CrudSection } from "./src/components/CrudSection";
 import { ListItem } from "./src/components/ListItem";
 import { MenuAction } from "./src/components/MenuAction";
@@ -35,7 +36,7 @@ import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { OperationTile, StatBox } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
-import { documentTypeOptions, monthOptions, paymentOptions, retentionTaxOptions } from "./src/constants/options";
+import { documentTypeOptions, paymentOptions, retentionTaxOptions } from "./src/constants/options";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
 import { ReportsScreen } from "./src/screens/ReportsScreen";
 import { CashClosingScreen } from "./src/screens/CashClosingScreen";
@@ -60,7 +61,7 @@ import { confirmAction, getLocalVoidReason, showMessage } from "./src/utils/dial
 import { activeEstablishment, activeIssuer, applyIdentityToIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { isBackendConnectionError, loginErrorMessage } from "./src/utils/errors";
 import { pickWebFile, readWebFileBase64 } from "./src/utils/files";
-import { buildCalendarDays, dateKey, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
+import { dateKey, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
 import { generateId } from "./src/utils/id";
 import { buildStockCredits, buildStockMovements, getAvailableStockForSale, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense } from "./src/utils/license";
@@ -4759,82 +4760,6 @@ function ProductPriceOptionsModal({
   );
 }
 
-function CalendarDateInput({ label, value, onChange, allowClear = false }: { label: string; value: string; onChange: (value: string) => void; allowClear?: boolean }) {
-  const parsedValue = parseInputDate(value, "start");
-  const [visible, setVisible] = useState(false);
-  const [cursorDate, setCursorDate] = useState(parsedValue || new Date());
-  const year = cursorDate.getFullYear();
-  const month = cursorDate.getMonth();
-  const days = buildCalendarDays(year, month);
-  const monthLabel = `${monthOptions[month]?.label || ""} ${year}`;
-
-  useEffect(() => {
-    if (!visible) return;
-    setCursorDate(parsedValue || new Date());
-  }, [parsedValue?.getTime(), visible]);
-
-  const moveMonth = (amount: number) => {
-    setCursorDate((current) => new Date(current.getFullYear(), current.getMonth() + amount, 1));
-  };
-
-  const selectDate = (date: Date) => {
-    onChange(toInputDate(date));
-    setVisible(false);
-  };
-
-  return (
-    <View style={styles.inputGroup}>
-      <Text style={styles.label}>{label}</Text>
-      <Pressable style={styles.dateField} onPress={() => setVisible(true)}>
-        <Text style={[styles.dateFieldText, !value && styles.dateFieldPlaceholder]}>{value || "Seleccionar fecha"}</Text>
-      </Pressable>
-      <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
-        <Pressable style={styles.calendarBackdrop} onPress={() => setVisible(false)}>
-          <Pressable style={styles.calendarSheet}>
-            <View style={styles.calendarHeader}>
-              <Pressable style={styles.calendarNavButton} onPress={() => moveMonth(-1)}>
-                <Text style={styles.calendarNavText}>{"<"}</Text>
-              </Pressable>
-              <Text style={styles.calendarTitle}>{monthLabel}</Text>
-              <Pressable style={styles.calendarNavButton} onPress={() => moveMonth(1)}>
-                <Text style={styles.calendarNavText}>{">"}</Text>
-              </Pressable>
-            </View>
-            <View style={styles.calendarWeekRow}>
-              {["Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Do"].map((day) => (
-                <Text key={day} style={styles.calendarWeekText}>{day}</Text>
-              ))}
-            </View>
-            <View style={styles.calendarGrid}>
-              {days.map((date, index) => {
-                const isCurrentMonth = date.getMonth() === month;
-                const dateValue = toInputDate(date);
-                const selected = value === dateValue;
-                const today = dateValue === toInputDate(new Date());
-                return (
-                  <Pressable key={`${dateValue}-${index}`} style={[styles.calendarDay, selected && styles.calendarDaySelected, today && !selected && styles.calendarDayToday]} onPress={() => selectDate(date)}>
-                    <Text style={[styles.calendarDayText, !isCurrentMonth && styles.calendarDayMuted, selected && styles.calendarDaySelectedText]}>{date.getDate()}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={styles.calendarActions}>
-              {allowClear ? (
-                <Pressable style={styles.actionSheetCancel} onPress={() => { onChange(""); setVisible(false); }}>
-                  <Text style={styles.actionSheetCancelText}>Limpiar</Text>
-                </Pressable>
-              ) : null}
-              <Pressable style={styles.actionSheetButton} onPress={() => selectDate(new Date())}>
-                <Text style={styles.actionSheetButtonText}>Hoy</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </View>
-  );
-}
-
 function BarcodeScannerModal({ visible, title, onClose, onScan }: { visible: boolean; title: string; onClose: () => void; onScan: (code: string) => void }) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -5590,108 +5515,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#0f766e"
   },
-  dateField: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    backgroundColor: "#fbfdff",
-    justifyContent: "center"
-  },
-  dateFieldText: {
-    color: "#111827",
-    fontWeight: "800"
-  },
-  dateFieldPlaceholder: {
-    color: "#7d8796",
-    fontWeight: "600"
-  },
-  calendarBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.38)",
-    justifyContent: "flex-end",
-    padding: 14
-  },
-  calendarSheet: {
-    borderRadius: 12,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    padding: 14,
-    gap: 10
-  },
-  calendarHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10
-  },
-  calendarTitle: {
-    color: "#111827",
-    fontSize: 17,
-    fontWeight: "900",
-    textTransform: "capitalize"
-  },
-  calendarNavButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 8,
-    backgroundColor: "#f1f5f9",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  calendarNavText: {
-    color: "#0f172a",
-    fontSize: 22,
-    fontWeight: "900",
-    lineHeight: 24
-  },
-  calendarWeekRow: {
-    flexDirection: "row",
-    gap: 6
-  },
-  calendarWeekText: {
-    flex: 1,
-    textAlign: "center",
-    color: "#64748b",
-    fontSize: 11,
-    fontWeight: "900"
-  },
-  calendarGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6
-  },
-  calendarDay: {
-    width: "13.33%",
-    aspectRatio: 1,
-    borderRadius: 8,
-    backgroundColor: "#f8fafc",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  calendarDayToday: {
-    borderWidth: 1,
-    borderColor: "#0f766e"
-  },
-  calendarDaySelected: {
-    backgroundColor: "#0f766e"
-  },
-  calendarDayText: {
-    color: "#111827",
-    fontWeight: "900"
-  },
-  calendarDayMuted: {
-    color: "#94a3b8"
-  },
-  calendarDaySelectedText: {
-    color: "#ffffff"
-  },
-  calendarActions: {
-    flexDirection: "row",
-    gap: 8
-  },
   scannerBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.5)",
@@ -5840,18 +5663,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "flex-end",
     flexShrink: 0
-  },
-  actionSheetButton: {
-    minHeight: 44,
-    borderRadius: 8,
-    backgroundColor: "#f1f5f9",
-    justifyContent: "center",
-    paddingHorizontal: 12
-  },
-  actionSheetButtonText: {
-    color: "#0f172a",
-    fontWeight: "900",
-    textAlign: "center"
   },
   actionSheetCancel: {
     minHeight: 44,
