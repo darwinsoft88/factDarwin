@@ -33,7 +33,6 @@ import { CompanyAssetsSection } from "./src/components/CompanyAssetsSection";
 import { ConnectionResultText } from "./src/components/ConnectionResultText";
 import { CrudSection } from "./src/components/CrudSection";
 import { CreditNoteModal } from "./src/components/CreditNoteModal";
-import { DateRangeFilter } from "./src/components/DateRangeFilter";
 import { DeleteEstablishmentModal } from "./src/components/DeleteEstablishmentModal";
 import { DismissibleNotice } from "./src/components/DismissibleNotice";
 import { DocumentTypeSelector } from "./src/components/DocumentTypeSelector";
@@ -60,6 +59,7 @@ import { SaleProductControls } from "./src/components/SaleProductControls";
 import { SaleProductPicker } from "./src/components/SaleProductPicker";
 import { SaleSubmitButton } from "./src/components/SaleSubmitButton";
 import { SaleTotalsBox } from "./src/components/SaleTotalsBox";
+import { SalesFilters } from "./src/components/SalesFilters";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
 import { SyncCenterModal } from "./src/components/SyncCenterModal";
@@ -2790,34 +2790,18 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       <Section title="Facturas">
         <DismissibleNotice message={notice} tone="success" title="Factura enviada" onDismiss={() => setNotice("")} />
         <InvoiceStatsGrid stats={invoiceStats} />
-        <Input label="Buscar documento" value={invoiceSearch} onChangeText={setInvoiceSearch} placeholder="Cliente, cedula, secuencial o clave" autoCapitalize="none" />
-        <View style={styles.saleGroupCompact}>
-          <DateRangeFilter
-            title="Fecha del documento"
-            startValue={saleStartDate}
-            endValue={saleEndDate}
-            onStartChange={setSaleStartDate}
-            onEndChange={setSaleEndDate}
-            onToday={setSalesDateRangeToday}
-            onMonth={setSalesDateRangeMonth}
-            onClear={clearSalesDateRange}
-          />
-        </View>
-        <Select
-          label="Estado"
-          value={statusFilter}
-          onChange={setStatusFilter}
-          options={[
-            { label: "Todas", value: "TODAS" },
-            { label: "Autorizadas", value: "AUTORIZADA" },
-            { label: "Rechazadas", value: "RECHAZADA" },
-            { label: "Recibidas", value: "RECIBIDA" },
-            { label: "Firmadas", value: "FIRMADA" },
-            { label: "Anuladas", value: "ANULADA" },
-            { label: "Notas venta", value: "INTERNA" },
-            { label: "Proformas", value: "PROFORMA" },
-            { label: "Notas credito", value: "NOTA_CREDITO" }
-          ]}
+        <SalesFilters
+          search={invoiceSearch}
+          startDate={saleStartDate}
+          endDate={saleEndDate}
+          status={statusFilter}
+          onSearchChange={setInvoiceSearch}
+          onStartDateChange={setSaleStartDate}
+          onEndDateChange={setSaleEndDate}
+          onToday={setSalesDateRangeToday}
+          onMonth={setSalesDateRangeMonth}
+          onClearDates={clearSalesDateRange}
+          onStatusChange={setStatusFilter}
         />
         {data.sales.length === 0 ? <Empty text="Aun no hay ventas." /> : null}
         {data.sales.length > 0 && filteredSales.length === 0 ? <Empty text="No hay documentos con ese filtro." /> : null}
