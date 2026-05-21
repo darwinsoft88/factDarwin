@@ -1,5 +1,4 @@
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
-import { CameraView, useCameraPermissions } from "expo-camera";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Network from "expo-network";
 import * as Print from "expo-print";
@@ -25,6 +24,7 @@ import {
   View
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
+import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CrudSection } from "./src/components/CrudSection";
@@ -4760,68 +4760,6 @@ function ProductPriceOptionsModal({
   );
 }
 
-function BarcodeScannerModal({ visible, title, onClose, onScan }: { visible: boolean; title: string; onClose: () => void; onScan: (code: string) => void }) {
-  const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState(false);
-
-  useEffect(() => {
-    if (visible) setScanned(false);
-  }, [visible]);
-
-  const handleOpenPermission = async () => {
-    const result = await requestPermission();
-    if (!result.granted) {
-      Alert.alert("Camara sin permiso", "Active el permiso de camara para escanear codigos.");
-    }
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.scannerBackdrop}>
-        <View style={styles.scannerSheet}>
-          <View style={styles.scannerHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.scannerTitle}>{title}</Text>
-              <Text style={styles.scannerMeta}>Apunte al codigo de barras o QR del producto.</Text>
-            </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
-            </Pressable>
-          </View>
-          {!permission?.granted ? (
-            <View style={styles.scannerPermission}>
-              <Text style={styles.paragraph}>La app necesita permiso de camara para escanear codigos.</Text>
-              <PrimaryButton label="Permitir camara" onPress={handleOpenPermission} />
-            </View>
-          ) : (
-            <View style={styles.scannerCameraWrap}>
-              <CameraView
-                style={styles.scannerCamera}
-                facing="back"
-                barcodeScannerSettings={{
-                  barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e", "code128", "code39", "itf14", "qr"]
-                }}
-                onBarcodeScanned={scanned ? undefined : ({ data }) => {
-                  const code = normalizeProductCode(String(data || ""));
-                  if (!code) return;
-                  setScanned(true);
-                  onScan(code);
-                }}
-              />
-              <View style={styles.scannerFrame} />
-            </View>
-          )}
-          {scanned ? (
-            <Pressable style={styles.scanButton} onPress={() => setScanned(false)}>
-              <Text style={styles.scanButtonText}>Escanear otro</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 export default function App() {
   return (
     <StartupErrorBoundary>
@@ -5311,19 +5249,6 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: "#ffffff"
   },
-  scanButton: {
-    minHeight: 42,
-    borderRadius: 8,
-    backgroundColor: "#0f766e",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12
-  },
-  scanButtonText: {
-    color: "#ffffff",
-    fontWeight: "900",
-    textAlign: "center"
-  },
   groupTitle: {
     color: "#0f766e",
     fontWeight: "900",
@@ -5514,59 +5439,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#0f766e"
-  },
-  scannerBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.5)",
-    justifyContent: "flex-end",
-    padding: 12
-  },
-  scannerSheet: {
-    borderRadius: 12,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    overflow: "hidden"
-  },
-  scannerHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb"
-  },
-  scannerTitle: {
-    color: "#111827",
-    fontSize: 18,
-    fontWeight: "900"
-  },
-  scannerMeta: {
-    color: "#64748b",
-    fontSize: 12,
-    marginTop: 3
-  },
-  scannerPermission: {
-    padding: 14,
-    gap: 12
-  },
-  scannerCameraWrap: {
-    height: 360,
-    backgroundColor: "#020617"
-  },
-  scannerCamera: {
-    flex: 1
-  },
-  scannerFrame: {
-    position: "absolute",
-    left: "12%",
-    right: "12%",
-    top: "36%",
-    height: 92,
-    borderWidth: 2,
-    borderColor: "#22c55e",
-    borderRadius: 10,
-    backgroundColor: "transparent"
   },
   row: {
     flexDirection: "row",
