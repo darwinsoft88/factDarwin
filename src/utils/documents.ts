@@ -1,6 +1,10 @@
+import { AuthorizationResponse } from "../services/backend";
 import { AppData, CashClosing, Issuer, RemissionGuide, Sale } from "../types";
+import { dateKey } from "./format";
 import { activeEstablishment, issuerForGuide, issuerForSale } from "./establishments";
 import { isCreditNoteSale, isInvoiceSale } from "./sales";
+
+export const MAX_DAILY_RETRIES = 3;
 
 export function documentNumber(sale: Sale, issuer: Issuer) {
   const scopedIssuer = issuerForSale(issuer, sale);
@@ -24,6 +28,31 @@ export function sequenceSortValue(sequence: string) {
 export function guideNumber(guide: RemissionGuide, issuer: Issuer) {
   const scopedIssuer = issuerForGuide(issuer, guide);
   return guide.establishment && guide.emissionPoint ? `${scopedIssuer.establishment}-${scopedIssuer.emissionPoint}-${guide.sequence}` : guide.sequence;
+}
+
+export function resolveInvoiceStatus(result: AuthorizationResponse): Sale["status"] {
+  const raw = `${result.authorizationStatus || ""} ${result.sriMessage || ""} ${JSON.stringify(result)}`.toUpperCase();
+
+  if (result.ok === false) return "RECHAZADA";
+  if (result.authorizationStatus === "AUTORIZADO" || raw.includes("<ESTADO>AUTORIZADO</ESTADO>")) return "AUTORIZADA";
+  if (raw.includes("DEVUELTA") || raw.includes("RECHAZADA") || raw.includes("ERROR")) return "RECHAZADA";
+  if (result.sent) return "RECIBIDA";
+  return "FIRMADA";
+}
+
+export function isAccessKeyUsed(data: AppData, accessKey: string, currentId = "") {
+  if (!accessKey) return false;
+  return data.sales.some((sale) => sale.id !== currentId && sale.accessKey === accessKey) || (data.guides || []).some((guide) => guide.id !== currentId && guide.accessKey === accessKey);
+}
+
+export function getRetryInfo(document: { retryHistory?: string[] }) {
+  const today = dateKey(new Date());
+  const todayAttempts = (document.retryHistory || []).filter((item) => dateKey(new Date(item)) === today).length;
+
+  return {
+    today: todayAttempts,
+    remaining: Math.max(0, MAX_DAILY_RETRIES - todayAttempts)
+  };
 }
 
 export function activeScopeId(data: AppData) {

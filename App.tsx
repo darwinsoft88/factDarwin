@@ -39,7 +39,7 @@ import { appendAudit, AUDIT_LOG_LIMIT } from "./src/utils/audit";
 import { buildCashClosingSummary } from "./src/utils/cash";
 import { addedEstablishmentIds, mergeAppDataSnapshots } from "./src/utils/dataMerge";
 import { buildDashboard } from "./src/utils/dashboard";
-import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, guideInActiveScope, guideNumber, saleInActiveScope, scopedReportData } from "./src/utils/documents";
+import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, getRetryInfo, guideInActiveScope, guideNumber, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, applyIdentityToIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { isBackendConnectionError, loginErrorMessage } from "./src/utils/errors";
 import { buildCalendarDays, dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, sanitizeFileName, shortText, toInputDate } from "./src/utils/format";
@@ -58,7 +58,6 @@ type ActionHandler = () => void | Promise<void>;
 const uid = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const parseDecimal = (value: string) => Number(value.replace(",", "."));
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
-const MAX_DAILY_RETRIES = 3;
 const LIST_BATCH_SIZE = 25;
 const AUTO_BACKUP_DEBOUNCE_MS = Platform.OS === "web" ? 3000 : 1000;
 const REMOTE_REFRESH_THROTTLE_MS = Platform.OS === "web" ? 5000 : 30000;
@@ -3255,21 +3254,6 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   );
 }
 
-function resolveInvoiceStatus(result: AuthorizationResponse): Sale["status"] {
-  const raw = `${result.authorizationStatus || ""} ${result.sriMessage || ""} ${JSON.stringify(result)}`.toUpperCase();
-
-  if (result.ok === false) return "RECHAZADA";
-  if (result.authorizationStatus === "AUTORIZADO" || raw.includes("<ESTADO>AUTORIZADO</ESTADO>")) return "AUTORIZADA";
-  if (raw.includes("DEVUELTA") || raw.includes("RECHAZADA") || raw.includes("ERROR")) return "RECHAZADA";
-  if (result.sent) return "RECIBIDA";
-  return "FIRMADA";
-}
-
-function isAccessKeyUsed(data: AppData, accessKey: string, currentId = "") {
-  if (!accessKey) return false;
-  return data.sales.some((sale) => sale.id !== currentId && sale.accessKey === accessKey) || (data.guides || []).some((guide) => guide.id !== currentId && guide.accessKey === accessKey);
-}
-
 function getLocalVoidReason(defaultReason: string) {
   if (Platform.OS === "web" && typeof window !== "undefined") {
     const reason = window.prompt("Motivo de anulacion local", defaultReason);
@@ -3277,16 +3261,6 @@ function getLocalVoidReason(defaultReason: string) {
   }
 
   return defaultReason;
-}
-
-function getRetryInfo(document: { retryHistory?: string[] }) {
-  const today = dateKey(new Date());
-  const todayAttempts = (document.retryHistory || []).filter((item) => dateKey(new Date(item)) === today).length;
-
-  return {
-    today: todayAttempts,
-    remaining: Math.max(0, MAX_DAILY_RETRIES - todayAttempts)
-  };
 }
 
 async function handlePdfDocument(html: string, dialogTitle: string, documentTitle: string) {
