@@ -22,6 +22,7 @@ import {
   View
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
+import { ActivePlanInfo } from "./src/components/ActivePlanInfo";
 import { AppMenuModal } from "./src/components/AppMenuModal";
 import { AuditLogList } from "./src/components/AuditLogList";
 import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
@@ -3703,9 +3704,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         <ProductionChecklist checklist={productionChecklist} />
       </Section>
       <Section title="Plan activo">
-        <Text style={styles.paragraph}>El plan comercial se administra desde el panel SaaS de DarwinSoft.</Text>
-        <Text style={[styles.inlineInfo, !appLicenseStatus(license).active && styles.errorText]}>{licenseStatusLabel(license)}</Text>
-        <Text style={styles.paragraph}>Usuarios: {license.maxUsers || 1} | Dispositivos: {license.maxDevices || 1} | Puntos de emision: {maxEmissionPointsForLicense(license)}</Text>
+        <ActivePlanInfo license={license} />
       </Section>
       <Section title="Base de datos">
         <Text style={styles.paragraph}>Respalda o restaura usuarios, clientes, productos, ventas, guias, retenciones, inventario y configuracion.</Text>
