@@ -49,12 +49,12 @@ import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsMo
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal";
 import { ReceivedRetentionsList } from "./src/components/ReceivedRetentionsList";
+import { SaleClientPicker } from "./src/components/SaleClientPicker";
 import { SaleEditNotice } from "./src/components/SaleEditNotice";
 import { SaleItemsList } from "./src/components/SaleItemsList";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { SaleProductControls } from "./src/components/SaleProductControls";
 import { SaleTotalsBox } from "./src/components/SaleTotalsBox";
-import { SelectedClientCard } from "./src/components/SelectedClientCard";
 import { SelectedProductCard } from "./src/components/SelectedProductCard";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
@@ -2731,11 +2731,18 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
           />
         </View>
         <View style={styles.saleGroup}>
-          <Input label="Buscar cliente" value={clientSearch} onChangeText={setClientSearch} placeholder="Nombre, cedula o RUC" autoCapitalize="none" />
-          <Select label={`Seleccionar cliente (${visibleClientsForSale.length}/${filteredClientsForSale.length})`} value={clientId} onChange={setClientId} options={visibleClientsForSale.map((item) => ({ label: item.name, value: item.id }))} />
-          {filteredClientsForSale.length === 0 ? <Empty text="No hay clientes con esa busqueda." /> : null}
-          {visibleClientsForSale.length < filteredClientsForSale.length ? <LoadMoreButton label="Cargar mas clientes" onPress={() => setVisibleClientCount((count) => count + LIST_BATCH_SIZE)} /> : null}
-          <SelectedClientCard client={selectedClient} onEdit={openQuickClientEditor} />
+          <SaleClientPicker
+            search={clientSearch}
+            selectedClientId={clientId}
+            visibleClients={visibleClientsForSale}
+            filteredClientCount={filteredClientsForSale.length}
+            selectedClient={selectedClient}
+            canLoadMore={visibleClientsForSale.length < filteredClientsForSale.length}
+            onSearchChange={setClientSearch}
+            onClientChange={setClientId}
+            onLoadMore={() => setVisibleClientCount((count) => count + LIST_BATCH_SIZE)}
+            onEditClient={openQuickClientEditor}
+          />
         </View>
 
         <View style={styles.saleGroup}>
