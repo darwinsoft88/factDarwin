@@ -29,10 +29,11 @@ import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { OperationTile, StatBox } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
-import { documentTypeOptions, monthOptions, paymentOptions, retentionTaxOptions, roleOptions } from "./src/constants/options";
+import { documentTypeOptions, monthOptions, paymentOptions, retentionTaxOptions } from "./src/constants/options";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
 import { ReportsScreen } from "./src/screens/ReportsScreen";
 import { CashClosingScreen } from "./src/screens/CashClosingScreen";
+import { UsersScreen } from "./src/screens/UsersScreen";
 import { AuthorizationResponse, BackendCompanyOption, TechnicalLog, authorizeInvoice, authorizeRemissionGuide, backupAppData, changeBackendPassword, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, loginBackend, lookupIdentityData, mergeBackendData, registerBackend, requestPasswordReset, reserveDocumentSequence, restoreAppData, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
 import { buildRideHtml } from "./src/services/ride";
 import { hashPassword } from "./src/services/security";
@@ -1201,7 +1202,7 @@ function AppContent() {
           {tab === "inventario" && <InventoryView data={data} user={session} backendToken={backendToken} persist={persist} />}
           {tab === "caja" && <CashClosingScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
           {tab === "guias" && <GuidesView data={data} user={session} backendToken={backendToken} persist={persist} onXml={setXmlPreview} />}
-          {tab === "usuarios" && session.role === "admin" && <UsersView data={data} user={session} backendToken={backendToken} persist={persist} />}
+          {tab === "usuarios" && session.role === "admin" && <UsersScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} CrudSectionComponent={CrudSection} />}
           {tab === "reportes" && <ReportsScreen data={data} onReport={setXmlPreview} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
           {tab === "sri" && session.role === "admin" && <SriView data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persist={persist} onRefreshBackend={() => refreshFromBackend("manual")} />}
         </ScrollView>
@@ -4187,119 +4188,6 @@ function GuidesView({ data, user, backendToken, persist, onXml }: { data: AppDat
       </Section>
       <ProcessingOverlay visible={Boolean(processingMessage)} message={processingMessage} />
     </View>
-  );
-}
-
-function UsersView({ data, user: currentUser, backendToken, persist }: { data: AppData; user: User; backendToken: string; persist: (data: AppData) => Promise<void> }) {
-  const emptyForm = { name: "", email: "", password: "", role: "vendedor" as UserRole };
-  const [form, setForm] = useState(emptyForm);
-  const [editingId, setEditingId] = useState("");
-  const [userSearch, setUserSearch] = useState("");
-  const [visibleUserCount, setVisibleUserCount] = useState(LIST_BATCH_SIZE);
-  const filteredUsers = useMemo(() => {
-    const search = userSearch.trim().toLowerCase();
-    if (!search) return data.users;
-    return data.users.filter((user) => [user.name, user.email, user.role, roleLabel(user.role)].some((value) => value.toLowerCase().includes(search)));
-  }, [data.users, userSearch]);
-  const visibleUsers = filteredUsers.slice(0, visibleUserCount);
-
-  useEffect(() => {
-    setVisibleUserCount(LIST_BATCH_SIZE);
-  }, [userSearch]);
-
-  useEffect(() => {
-    if (!editingId) setForm(emptyForm);
-  }, [editingId, data.users.length]);
-
-  const save = async () => {
-    if (!form.name || !form.email || (!editingId && !form.password)) {
-      Alert.alert("Datos incompletos", editingId ? "Ingrese nombre y correo." : "Ingrese nombre, correo y contrasena.");
-      return;
-    }
-    const email = form.email.trim().toLowerCase();
-    if (data.users.some((user) => user.id !== editingId && user.email.trim().toLowerCase() === email)) {
-      Alert.alert("Usuario duplicado", "Ya existe un usuario con ese correo.");
-      return;
-    }
-
-    if (editingId) {
-      const passwordHash = form.password ? await hashPassword(form.password) : undefined;
-      const updatedUser = data.users.find((user) => user.id === editingId);
-      const finalUser = {
-        ...updatedUser,
-        id: editingId,
-        name: form.name.trim(),
-        email,
-        role: form.role,
-        ...(passwordHash ? { password: undefined, passwordHash } : {})
-      } as User;
-      const nextData = appendAudit({
-        ...data,
-        users: data.users.map((user) => user.id === editingId ? finalUser : user)
-      }, currentUser, "USER_UPDATED", "user", editingId, `Usuario actualizado: ${form.name.trim()}`);
-      await persist(nextData);
-      await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, users: [finalUser], auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario pendiente de sincronizar", nextData, persist);
-      showMessage("Usuario actualizado", "El usuario se edito con exito.");
-    } else {
-      const passwordHash = await hashPassword(form.password);
-      const createdUser: User = { id: uid(), name: form.name.trim(), email, role: form.role, passwordHash };
-      const nextData = appendAudit({ ...data, users: [createdUser, ...data.users] }, currentUser, "USER_CREATED", "user", createdUser.id, `Usuario creado: ${createdUser.name}`);
-      await persist(nextData);
-      await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, users: [createdUser], auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario pendiente de sincronizar", nextData, persist);
-      showMessage("Usuario guardado", "El usuario se guardo con exito.");
-    }
-
-    setEditingId("");
-    setForm(emptyForm);
-  };
-
-  const edit = (user: User) => {
-    setEditingId(user.id);
-    setForm({
-      name: user.name,
-      email: user.email,
-      password: "",
-      role: user.role
-    });
-  };
-
-  return (
-    <CrudSection title="Usuarios" onSave={save}>
-      <Input key={`user-name-${editingId || "new"}`} label="Nombre" value={form.name} onChangeText={(name) => setForm({ ...form, name })} autoComplete="off" />
-      <Input key={`user-email-${editingId || "new"}`} label="Correo" value={form.email} onChangeText={(email) => setForm({ ...form, email })} autoCapitalize="none" autoComplete="off" textContentType="none" importantForAutofill="no" />
-      <Input key={`user-password-${editingId || "new"}`} label={editingId ? "Nueva contrasena (opcional)" : "Contrasena"} value={form.password} onChangeText={(password) => setForm({ ...form, password })} secureTextEntry autoComplete="new-password" textContentType="none" importantForAutofill="no" />
-      <Select label="Rol" value={form.role} onChange={(role) => setForm({ ...form, role: role as UserRole })} options={roleOptions} />
-      {editingId ? (
-        <Pressable style={styles.smallButton} onPress={() => { setEditingId(""); setForm(emptyForm); }}>
-          <Text style={styles.smallButtonText}>Cancelar edicion</Text>
-        </Pressable>
-      ) : null}
-      <Input label="Buscar usuarios" value={userSearch} onChangeText={setUserSearch} placeholder="Nombre, correo o rol" autoCapitalize="none" />
-      {data.users.length === 0 ? <Empty text="Aun no hay usuarios." /> : null}
-      {data.users.length > 0 && filteredUsers.length === 0 ? <Empty text="No hay usuarios con esa busqueda." /> : null}
-      {visibleUsers.map((user) => (
-        <ListItem
-          key={user.id}
-          title={user.name}
-          meta={`${user.email} | ${roleLabel(user.role)}`}
-          editLabel="Editar"
-          onEdit={() => edit(user)}
-          onDelete={user.id === currentUser.id ? undefined : () => confirmAction("Eliminar usuario", `Seguro que desea eliminar a ${user.name}? Esta accion quedara registrada en auditoria.`, () => {
-            void (async () => {
-            if (user.role === "admin" && data.users.filter((item) => item.role === "admin").length <= 1) {
-              showMessage("Admin requerido", "Debe existir al menos un usuario administrador.");
-              return;
-            }
-            const nextData = appendAudit({ ...data, users: data.users.filter((item) => item.id !== user.id), deletedIds: { ...(data.deletedIds || {}), users: Array.from(new Set([...(data.deletedIds?.users || []), user.id])) } }, currentUser, "USER_DELETED", "user", user.id, `Usuario eliminado: ${user.name}`);
-            await persist(nextData);
-            await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, deletions: { users: [user.id] }, auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario eliminado pendiente de sincronizar", nextData, persist);
-            showMessage("Usuario eliminado", "El usuario se elimino con exito.");
-            })();
-          })}
-        />
-      ))}
-      {visibleUsers.length < filteredUsers.length ? <LoadMoreButton label="Cargar mas usuarios" onPress={() => setVisibleUserCount((count) => count + LIST_BATCH_SIZE)} /> : null}
-    </CrudSection>
   );
 }
 
