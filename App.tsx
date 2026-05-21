@@ -31,7 +31,7 @@ import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CrudSection } from "./src/components/CrudSection";
 import { ListItem } from "./src/components/ListItem";
 import { LoginErrorModal } from "./src/components/LoginErrorModal";
-import { OnboardingStep } from "./src/components/OnboardingStep";
+import { OnboardingModal } from "./src/components/OnboardingModal";
 import { PasswordChangeModal } from "./src/components/PasswordChangeModal";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
 import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
@@ -1287,27 +1287,11 @@ function AppContent() {
         </View>
       </Modal>
 
-      <Modal visible={onboardingVisible} transparent animationType="fade" onRequestClose={() => setOnboardingVisible(false)}>
-        <View style={styles.onboardingBackdrop}>
-          <View style={styles.onboardingCard}>
-            <Text style={styles.onboardingEyebrow}>Cuenta lista</Text>
-            <Text style={styles.onboardingTitle}>Preparemos la empresa</Text>
-            <Text style={styles.onboardingText}>Complete estos pasos para que la app quede lista para facturar con su marca y datos SRI.</Text>
-            <View style={styles.onboardingSteps}>
-              <OnboardingStep number="1" title="Datos de empresa" text="RUC, razon social, direccion y secuenciales." />
-              <OnboardingStep number="2" title="Logo del negocio" text="Se usara en RIDE, guias y reportes." />
-              <OnboardingStep number="3" title="Firma electronica .p12" text="Necesaria para firmar y autorizar comprobantes." />
-              <OnboardingStep number="4" title="Ambiente SRI" text="Empiece en pruebas y pase a produccion cuando todo este validado." />
-            </View>
-            <Pressable style={styles.onboardingPrimary} onPress={() => { setOnboardingVisible(false); setTab("sri"); }}>
-              <Text style={styles.onboardingPrimaryText}>Configurar ahora</Text>
-            </Pressable>
-            <Pressable style={styles.onboardingSecondary} onPress={() => setOnboardingVisible(false)}>
-              <Text style={styles.onboardingSecondaryText}>Despues</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      <OnboardingModal
+        visible={onboardingVisible}
+        onConfigure={() => { setOnboardingVisible(false); setTab("sri"); }}
+        onClose={() => setOnboardingVisible(false)}
+      />
 
       <Modal visible={establishmentOptionsVisible} transparent animationType="fade" onRequestClose={() => undefined}>
         <View style={styles.smallNoticeBackdrop}>
@@ -4367,63 +4351,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#f8fafc"
-  },
-  onboardingBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.38)",
-    padding: 18,
-    justifyContent: "center"
-  },
-  onboardingCard: {
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#ffffff",
-    padding: 18,
-    gap: 12
-  },
-  onboardingEyebrow: {
-    color: "#0f766e",
-    fontSize: 12,
-    fontWeight: "900",
-    textTransform: "uppercase"
-  },
-  onboardingTitle: {
-    color: "#111827",
-    fontSize: 22,
-    lineHeight: 26,
-    fontWeight: "900"
-  },
-  onboardingText: {
-    color: "#475569",
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: "700"
-  },
-  onboardingSteps: {
-    gap: 8
-  },
-  onboardingPrimary: {
-    minHeight: 44,
-    borderRadius: 9,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#0f766e"
-  },
-  onboardingPrimaryText: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  onboardingSecondary: {
-    minHeight: 36,
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  onboardingSecondaryText: {
-    color: "#64748b",
-    fontSize: 13,
-    fontWeight: "800"
   },
   checkRow: {
     borderWidth: 1,
