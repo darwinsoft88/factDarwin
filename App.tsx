@@ -56,6 +56,7 @@ import { SelectedProductCard } from "./src/components/SelectedProductCard";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
 import { SyncCenterModal } from "./src/components/SyncCenterModal";
+import { TechnicalLogsList } from "./src/components/TechnicalLogsList";
 import { XmlPreviewModal } from "./src/components/XmlPreviewModal";
 import { CameraIcon, MenuIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
@@ -96,7 +97,7 @@ import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleT
 import { parseDecimal, roundMoney } from "./src/utils/numbers";
 import { buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
 import { explainSriResult, formatSriResult, sriUserMessage, userFriendlyActionError } from "./src/utils/sriMessages";
-import { buildSupportDiagnostic, formatAuditDate, formatBackendHealth, formatBackupSummary, formatSyncStatus, formatTechnicalLogMeta, summarizeAppData, SyncState } from "./src/utils/support";
+import { buildSupportDiagnostic, formatAuditDate, formatBackendHealth, formatBackupSummary, formatSyncStatus, summarizeAppData, SyncState } from "./src/utils/support";
 import { syncPatchToBackend, syncSalePatchToBackend } from "./src/utils/sync";
 import { buildProductionChecklist, findDuplicateClient, isValidCedula, isValidEmail, isValidRuc, isValidUrl, normalizeClientForInvoice, normalizeClientIdentification, normalizeProductCode, sanitizeAppData, validateBeforeInternalSale, validateBeforeIssue, validateBeforeProforma, validateEmissionPointLicense, validateIssuer } from "./src/validation";
 
@@ -3728,16 +3729,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
       <Section title="Logs tecnicos">
         <Text style={styles.paragraph}>Para soporte: muestra errores, reintentos, login, correo, SRI y respuestas lentas del servidor. No guarda claves ni documentos completos.</Text>
         <PrimaryButton label={loadingTechnicalLogs ? "Cargando..." : "Cargar logs tecnicos"} onPress={loadingTechnicalLogs ? () => undefined : loadTechnicalLogs} />
-        {technicalLogs.length === 0 ? <Empty text="Cargue los logs para revisar eventos tecnicos recientes." /> : null}
-        {technicalLogs.map((log, index) => (
-          <ListItem
-            key={`${log.time || "log"}-${index}`}
-            title={`${(log.level || "info").toUpperCase()} | ${log.event || "evento"}`}
-            meta={formatTechnicalLogMeta(log)}
-            badge={log.statusCode && log.statusCode >= 500 ? "ERROR" : log.level || "LOG"}
-            onOpen={() => Alert.alert("Log tecnico", JSON.stringify(log, null, 2))}
-          />
-        ))}
+        <TechnicalLogsList logs={technicalLogs} />
       </Section>
       <Section title="Auditoria">
         <Text style={styles.paragraph}>Se guardan los ultimos {AUDIT_LOG_LIMIT} eventos. Mostrando {visibleAuditLogs.length}/{auditLogs.length}.</Text>
