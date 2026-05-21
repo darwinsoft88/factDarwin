@@ -33,6 +33,7 @@ import { DeleteEstablishmentModal } from "./src/components/DeleteEstablishmentMo
 import { EstablishmentPickerModal } from "./src/components/EstablishmentPickerModal";
 import { ListItem } from "./src/components/ListItem";
 import { LoginErrorModal } from "./src/components/LoginErrorModal";
+import { NewEstablishmentModal } from "./src/components/NewEstablishmentModal";
 import { OnboardingModal } from "./src/components/OnboardingModal";
 import { PasswordChangeModal } from "./src/components/PasswordChangeModal";
 import { PlanUpgradeModal } from "./src/components/PlanUpgradeModal";
@@ -3930,37 +3931,13 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         ))}
         {visibleAuditLogs.length < auditLogs.length ? <LoadMoreButton label="Cargar mas auditoria" onPress={() => setVisibleAuditCount((count) => count + LIST_BATCH_SIZE)} /> : null}
       </Section>
-      <Modal visible={establishmentModalVisible} transparent animationType="slide" onRequestClose={() => setEstablishmentModalVisible(false)}>
-        <View style={styles.creditModalBackdrop}>
-          <View style={styles.establishmentModal}>
-            <View style={styles.creditModalHeader}>
-              <View style={styles.flex}>
-                <Text style={styles.creditModalTitle}>Nuevo establecimiento</Text>
-                <Text style={styles.creditModalMeta}>Disponible para clientes con plan Pro activo.</Text>
-              </View>
-              <Pressable style={styles.smallButton} onPress={() => setEstablishmentModalVisible(false)}>
-                <Text style={styles.smallButtonText}>Cerrar</Text>
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled">
-              <Input label="Nombre establecimiento" value={establishmentForm.name} onChangeText={(name) => setEstablishmentForm({ ...establishmentForm, name })} />
-              <View style={styles.row}>
-                <View style={styles.flex}>
-                  <Input label="Estab." value={establishmentForm.establishment} onChangeText={(establishment) => setEstablishmentForm({ ...establishmentForm, establishment })} keyboardType="number-pad" />
-                </View>
-                <View style={styles.flex}>
-                  <Input label="Pto. emi." value={establishmentForm.emissionPoint} onChangeText={(emissionPoint) => setEstablishmentForm({ ...establishmentForm, emissionPoint })} keyboardType="number-pad" />
-                </View>
-              </View>
-              <Input label="Direccion establecimiento" value={establishmentForm.address} onChangeText={(address) => setEstablishmentForm({ ...establishmentForm, address })} />
-              <Input label="Siguiente secuencial" value={establishmentForm.sequential} onChangeText={(sequential) => setEstablishmentForm({ ...establishmentForm, sequential })} keyboardType="number-pad" />
-              <Input label="Siguiente secuencial guia" value={establishmentForm.remissionSequential} onChangeText={(remissionSequential) => setEstablishmentForm({ ...establishmentForm, remissionSequential })} keyboardType="number-pad" />
-              <Input label="Siguiente secuencial nota credito" value={establishmentForm.creditNoteSequential} onChangeText={(creditNoteSequential) => setEstablishmentForm({ ...establishmentForm, creditNoteSequential })} keyboardType="number-pad" />
-              <PrimaryButton label="Guardar establecimiento" onPress={() => { void saveNewEstablishment(); }} />
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      <NewEstablishmentModal
+        visible={establishmentModalVisible}
+        form={establishmentForm}
+        onChange={setEstablishmentForm}
+        onClose={() => setEstablishmentModalVisible(false)}
+        onSave={() => { void saveNewEstablishment(); }}
+      />
       <DeleteEstablishmentModal
         visible={deleteEstablishmentModalVisible}
         establishment={selectedEstablishment}
@@ -4680,14 +4657,6 @@ const styles = StyleSheet.create({
     overflow: "hidden"
   },
   quickClientModal: {
-    maxHeight: "92%",
-    borderRadius: 12,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    overflow: "hidden"
-  },
-  establishmentModal: {
     maxHeight: "92%",
     borderRadius: 12,
     backgroundColor: "#ffffff",
