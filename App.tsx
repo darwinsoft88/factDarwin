@@ -61,6 +61,7 @@ import { TechnicalLogsList } from "./src/components/TechnicalLogsList";
 import { XmlPreviewModal } from "./src/components/XmlPreviewModal";
 import { CameraIcon, MenuIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
+import { IntegrationStatusInfo } from "./src/components/IntegrationStatusInfo";
 import { InvoiceStatsGrid } from "./src/components/InvoiceStatsGrid";
 import { OperationTile } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
@@ -3722,10 +3723,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         <PrimaryButton label="Actualizar datos" onPress={onRefreshBackend} />
       </Section>
       <Section title="Estado de integracion">
-        <Text style={styles.paragraph}>La app genera la factura y el servidor confirma la autorizacion del SRI.</Text>
-        <Text style={styles.paragraph}>Ambiente actual: {issuer.environment === "1" ? "Pruebas" : "Produccion"}</Text>
-        <Text style={styles.paragraph}>Tipo: {issuer.taxpayerType === "natural" ? "Persona natural" : "Persona juridica"} | Contabilidad: {issuer.accountingRequired} | Especial: {issuer.specialTaxpayer}</Text>
-        <Text style={styles.paragraph}>Para produccion, el ambiente de la app y del servidor deben estar en Produccion.</Text>
+        <IntegrationStatusInfo issuer={issuer} />
       </Section>
       <Section title="Logs tecnicos">
         <Text style={styles.paragraph}>Para soporte: muestra errores, reintentos, login, correo, SRI y respuestas lentas del servidor. No guarda claves ni documentos completos.</Text>
