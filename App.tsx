@@ -30,6 +30,7 @@ import { CrudSection } from "./src/components/CrudSection";
 import { CreditNoteModal } from "./src/components/CreditNoteModal";
 import { DateRangeFilter } from "./src/components/DateRangeFilter";
 import { DeleteEstablishmentModal } from "./src/components/DeleteEstablishmentModal";
+import { DismissibleNotice } from "./src/components/DismissibleNotice";
 import { DocumentTypeSelector } from "./src/components/DocumentTypeSelector";
 import { EstablishmentPickerModal } from "./src/components/EstablishmentPickerModal";
 import { ListItem } from "./src/components/ListItem";
@@ -2778,11 +2779,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
           <Select label="Forma de pago" value={paymentMethod} onChange={(value) => setPaymentMethod(value as PaymentMethod)} options={paymentOptions} />
         </View>
         <SaleTotalsBox subtotal={totals.subtotal} discount={calculateTotalDiscount(items)} tax={totals.tax} total={totals.total} />
-        {issueNotice ? (
-          <Pressable style={styles.issueNoticeBox} onPress={() => setIssueNotice("")}>
-            <Text style={styles.issueNoticeText}>{issueNotice}</Text>
-          </Pressable>
-        ) : null}
+        <DismissibleNotice message={issueNotice} onDismiss={() => setIssueNotice("")} />
         <PrimaryButton
           label={issuing ? "Procesando..." : sourceTicket ? "Facturar ticket" : sourceProforma ? (documentType === "factura" ? "Facturar proforma" : "Crear ticket desde proforma") : editingSale ? (editingSale.documentType === "nota_venta" || editingSale.documentType === "proforma" ? "Guardar correccion" : "Guardar y reintentar") : documentType === "proforma" ? "Guardar proforma" : documentType === "nota_venta" ? "Guardar nota de venta" : "Emitir factura"}
           onPress={issuing ? () => undefined : issue}
@@ -2790,12 +2787,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       </Section>
 
       <Section title="Facturas">
-        {notice ? (
-          <Pressable style={styles.noticeBox} onPress={() => setNotice("")}>
-            <Text style={styles.noticeTitle}>Factura enviada</Text>
-            <Text style={styles.noticeText}>{notice}</Text>
-          </Pressable>
-        ) : null}
+        <DismissibleNotice message={notice} tone="success" title="Factura enviada" onDismiss={() => setNotice("")} />
         <InvoiceStatsGrid stats={invoiceStats} />
         <Input label="Buscar documento" value={invoiceSearch} onChangeText={setInvoiceSearch} placeholder="Cliente, cedula, secuencial o clave" autoCapitalize="none" />
         <View style={styles.saleGroupCompact}>
@@ -4528,34 +4520,6 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     textAlign: "center",
     marginTop: 8
-  },
-  noticeBox: {
-    borderWidth: 1,
-    borderColor: "#86efac",
-    borderRadius: 8,
-    padding: 10,
-    backgroundColor: "#f0fdf4"
-  },
-  noticeTitle: {
-    color: "#166534",
-    fontWeight: "900"
-  },
-  noticeText: {
-    color: "#166534",
-    marginTop: 3,
-    lineHeight: 18
-  },
-  issueNoticeBox: {
-    borderWidth: 1,
-    borderColor: "#fbbf24",
-    borderRadius: 8,
-    padding: 10,
-    backgroundColor: "#fffbeb"
-  },
-  issueNoticeText: {
-    color: "#92400e",
-    fontWeight: "800",
-    lineHeight: 18
   },
   xml: {
     fontFamily: "monospace",
