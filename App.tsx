@@ -42,6 +42,7 @@ import { buildDashboard } from "./src/utils/dashboard";
 import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, getRetryInfo, guideInActiveScope, guideNumber, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, applyIdentityToIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { isBackendConnectionError, loginErrorMessage } from "./src/utils/errors";
+import { pickWebFile, readWebFileBase64 } from "./src/utils/files";
 import { buildCalendarDays, dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, sanitizeFileName, shortText, toInputDate } from "./src/utils/format";
 import { buildStockCredits, buildStockMovements, createInventoryMovement, getAvailableStockForSale, movementReason, movementTypeLabel, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
@@ -3467,29 +3468,6 @@ async function shareGeneratedFile(uri: string, mimeType: string, dialogTitle: st
   } else {
     Alert.alert(fallbackTitle, uri);
   }
-}
-
-function pickWebFile(accept: string): Promise<File | null> {
-  if (typeof document === "undefined") return Promise.resolve(null);
-  return new Promise((resolve) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = accept;
-    input.onchange = () => resolve(input.files?.[0] || null);
-    input.click();
-  });
-}
-
-function readWebFileBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
-    reader.onload = () => {
-      const result = String(reader.result || "");
-      resolve(result.includes(",") ? result.split(",").pop() || "" : result);
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 function formatSaleDetail(sale: Sale, client: Client, issuer: AppData["issuer"]) {
