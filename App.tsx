@@ -41,6 +41,7 @@ import { LoginErrorModal } from "./src/components/LoginErrorModal";
 import { NewEstablishmentModal } from "./src/components/NewEstablishmentModal";
 import { OnboardingModal } from "./src/components/OnboardingModal";
 import { PasswordChangeModal } from "./src/components/PasswordChangeModal";
+import { PaymentMethodPicker } from "./src/components/PaymentMethodPicker";
 import { PlanLimitCard } from "./src/components/PlanLimitCard";
 import { PlanUpgradeModal } from "./src/components/PlanUpgradeModal";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
@@ -67,7 +68,6 @@ import { IntegrationStatusInfo } from "./src/components/IntegrationStatusInfo";
 import { InvoiceStatsGrid } from "./src/components/InvoiceStatsGrid";
 import { OperationTile } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
-import { paymentOptions } from "./src/constants/options";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
 import { ReportsScreen } from "./src/screens/ReportsScreen";
 import { CashClosingScreen } from "./src/screens/CashClosingScreen";
@@ -2777,7 +2777,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
 
         <SaleItemsList items={items} onEdit={openLineEditor} onDelete={(index) => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
         <View style={styles.saleGroupCompact}>
-          <Select label="Forma de pago" value={paymentMethod} onChange={(value) => setPaymentMethod(value as PaymentMethod)} options={paymentOptions} />
+          <PaymentMethodPicker value={paymentMethod} onChange={setPaymentMethod} />
         </View>
         <SaleTotalsBox subtotal={totals.subtotal} discount={calculateTotalDiscount(items)} tax={totals.tax} total={totals.total} />
         <DismissibleNotice message={issueNotice} onDismiss={() => setIssueNotice("")} />
