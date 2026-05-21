@@ -55,6 +55,7 @@ import { buildSalesReport } from "./src/utils/reports";
 import { buildCreditNoteItem, buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
 import { explainSriResult, formatSriResult, sriUserMessage, userFriendlyActionError } from "./src/utils/sriMessages";
 import { buildSupportDiagnostic, formatAuditDate, formatBackendHealth, formatBackupSummary, formatSyncStatus, formatTechnicalLogMeta, summarizeAppData, SyncState } from "./src/utils/support";
+import { syncPatchToBackend, syncSalePatchToBackend } from "./src/utils/sync";
 import { buildProductionChecklist, findDuplicateClient, findDuplicateProductCode, isValidCedula, isValidEmail, isValidRuc, isValidUrl, normalizeClientForInvoice, normalizeClientIdentification, normalizeProductCode, sanitizeAppData, validateBeforeInternalSale, validateBeforeIssue, validateBeforeProforma, validateEmissionPointLicense, validateGuideForm, validateIssuer } from "./src/validation";
 
 type Tab = AppTab;
@@ -3486,40 +3487,6 @@ function AlertRow({ title, detail, tone }: { title: string; detail: string; tone
       <Text style={[styles.alertDetail, tone === "danger" ? styles.alertDangerText : styles.alertWarningText]}>{detail}</Text>
     </View>
   );
-}
-
-type IncrementalPatch = Partial<AppData> & { baseData: AppData; deletions?: Partial<Record<keyof AppData, string[]>> };
-
-async function syncPatchToBackend(backendUrl: string, backendToken: string, patch: IncrementalPatch, pendingTitle = "Cambio pendiente de sincronizar", localData?: AppData, persist?: (data: AppData) => Promise<void>) {
-  try {
-    await mergeBackendData(backendUrl, patch, backendToken);
-  } catch (error) {
-    const message = userFriendlyActionError(error, "sync");
-    if (localData && persist) {
-      await enqueuePendingSync(localData, persist, patch, pendingTitle, message);
-    }
-    showMessage(pendingTitle, message);
-  }
-}
-
-async function syncSalePatchToBackend(backendUrl: string, backendToken: string, patch: IncrementalPatch, localData?: AppData, persist?: (data: AppData) => Promise<void>) {
-  await syncPatchToBackend(backendUrl, backendToken, patch, "Documento pendiente de sincronizar", localData, persist);
-}
-
-async function enqueuePendingSync(localData: AppData, persist: (data: AppData) => Promise<void>, patch: IncrementalPatch, title: string, errorMessage: string) {
-  const pending: PendingSyncItem = {
-    id: uid(),
-    createdAt: new Date().toISOString(),
-    attempts: 0,
-    title,
-    lastError: shortText(errorMessage, 180),
-    patch
-  };
-  await persist({
-    ...localData,
-    pendingSync: [pending, ...(localData.pendingSync || [])].slice(0, 100),
-    autoBackupLastError: `${title}: ${shortText(errorMessage, 140)}`
-  });
 }
 
 function ClientsView({ data, user, backendToken, getBackendToken, persist }: { data: AppData; user: User; backendToken: string; getBackendToken: (backendUrl: string) => Promise<string>; persist: (data: AppData) => Promise<void> }) {
