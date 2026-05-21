@@ -44,7 +44,7 @@ import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentN
 import { activeEstablishment, activeIssuer, applyIdentityToIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { isBackendConnectionError, loginErrorMessage } from "./src/utils/errors";
 import { pickWebFile, readWebFileBase64 } from "./src/utils/files";
-import { buildCalendarDays, dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, sanitizeFileName, shortText, toInputDate } from "./src/utils/format";
+import { buildCalendarDays, dateKey, escapeHtml, formatGuideDate, formatShortDate, formatSriDate, parseInputDate, sanitizeFileName, shortText, toInputDate } from "./src/utils/format";
 import { buildStockCredits, buildStockMovements, createInventoryMovement, getAvailableStockForSale, movementReason, movementTypeLabel, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
 import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleTicketDocument, openHtmlViewer, shareGeneratedFile } from "./src/utils/printFiles";
@@ -53,7 +53,7 @@ import { buildSalesReport } from "./src/utils/reports";
 import { buildCreditNoteItem, buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
 import { explainSriResult, formatSriResult, sriUserMessage, userFriendlyActionError } from "./src/utils/sriMessages";
 import { buildSupportDiagnostic, formatAuditDate, formatBackendHealth, formatBackupSummary, formatSyncStatus, formatTechnicalLogMeta, summarizeAppData, SyncState } from "./src/utils/support";
-import { buildProductionChecklist, findDuplicateClient, findDuplicateProductCode, isValidCedula, isValidEmail, isValidRuc, isValidUrl, normalizeClientForInvoice, normalizeClientIdentification, normalizeProductCode, sanitizeAppData, validateBeforeInternalSale, validateBeforeIssue, validateBeforeProforma, validateEmissionPointLicense, validateIssuer } from "./src/validation";
+import { buildProductionChecklist, findDuplicateClient, findDuplicateProductCode, isValidCedula, isValidEmail, isValidRuc, isValidUrl, normalizeClientForInvoice, normalizeClientIdentification, normalizeProductCode, sanitizeAppData, validateBeforeInternalSale, validateBeforeIssue, validateBeforeProforma, validateEmissionPointLicense, validateGuideForm, validateIssuer } from "./src/validation";
 
 type Tab = AppTab;
 type ActionHandler = () => void | Promise<void>;
@@ -3559,28 +3559,6 @@ function buildCreditNoteRideHtml(sale: Sale, client: Client, issuer: Issuer, sou
 </html>`;
 }
 
-function validateGuideForm(transporterName: string, transporterIdentification: string, transporterType: "04" | "05" | "06", plate: string, startAddress: string, endAddress: string, route: string, reason: string, startDate: string, endDate: string) {
-  const errors: string[] = [];
-  const identification = transporterIdentification.trim();
-  const start = parseInputDate(startDate, "start");
-  const end = parseInputDate(endDate, "end");
-
-  if (!transporterName.trim()) errors.push("Ingrese transportista.");
-  if (transporterType === "04" && !isValidRuc(identification)) errors.push("El RUC del transportista no es valido.");
-  if (transporterType === "05" && !isValidCedula(identification)) errors.push("La cedula del transportista no es valida.");
-  if (transporterType === "06" && identification.length < 4) errors.push("El pasaporte del transportista es muy corto.");
-  if (!plate.trim()) errors.push("Ingrese placa.");
-  if (!startAddress.trim()) errors.push("Ingrese direccion de partida.");
-  if (!endAddress.trim()) errors.push("Ingrese direccion de destino.");
-  if (!route.trim()) errors.push("Ingrese ruta.");
-  if (!reason.trim()) errors.push("Ingrese motivo de traslado.");
-  if (!start) errors.push("Fecha inicio invalida. Use YYYY-MM-DD.");
-  if (!end) errors.push("Fecha fin invalida. Use YYYY-MM-DD.");
-  if (start && end && end < start) errors.push("La fecha fin no puede ser menor a la fecha inicio.");
-
-  return errors;
-}
-
 function formatGuideDetail(guide: RemissionGuide, client: Client | undefined, issuer: Issuer, source?: Sale) {
   return [
     "GUIA DE REMISION",
@@ -3734,12 +3712,6 @@ function buildGuideRideHtml(guide: RemissionGuide, client: Client, issuer: Issue
   </div>
 </body>
 </html>`;
-}
-
-function formatGuideDate(value: string) {
-  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
-  return formatShortDate(value);
 }
 
 function showMessage(title: string, message: string) {

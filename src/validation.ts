@@ -1,6 +1,7 @@
 import { calculateLineDiscount, calculateTotals, money } from "./services/sri";
 import { AppData, AppLicense, Client, Issuer, LicensePlan, LicenseStatus, Product, SaleItem, UserRole } from "./types";
 import { canUseEmissionScope } from "./utils/license";
+import { parseInputDate } from "./utils/format";
 
 const validRoles = new Set<UserRole>(["admin", "vendedor", "cajero", "contador"]);
 const validLicenseStatuses = new Set<LicenseStatus>(["trial", "active", "expired", "suspended"]);
@@ -183,6 +184,28 @@ export function normalizeClientForInvoice(client: Client): Client {
   }
 
   return { ...client, identification };
+}
+
+export function validateGuideForm(transporterName: string, transporterIdentification: string, transporterType: "04" | "05" | "06", plate: string, startAddress: string, endAddress: string, route: string, reason: string, startDate: string, endDate: string) {
+  const errors: string[] = [];
+  const identification = transporterIdentification.trim();
+  const start = parseInputDate(startDate, "start");
+  const end = parseInputDate(endDate, "end");
+
+  if (!transporterName.trim()) errors.push("Ingrese transportista.");
+  if (transporterType === "04" && !isValidRuc(identification)) errors.push("El RUC del transportista no es valido.");
+  if (transporterType === "05" && !isValidCedula(identification)) errors.push("La cedula del transportista no es valida.");
+  if (transporterType === "06" && identification.length < 4) errors.push("El pasaporte del transportista es muy corto.");
+  if (!plate.trim()) errors.push("Ingrese placa.");
+  if (!startAddress.trim()) errors.push("Ingrese direccion de partida.");
+  if (!endAddress.trim()) errors.push("Ingrese direccion de destino.");
+  if (!route.trim()) errors.push("Ingrese ruta.");
+  if (!reason.trim()) errors.push("Ingrese motivo de traslado.");
+  if (!start) errors.push("Fecha inicio invalida. Use YYYY-MM-DD.");
+  if (!end) errors.push("Fecha fin invalida. Use YYYY-MM-DD.");
+  if (start && end && end < start) errors.push("La fecha fin no puede ser menor a la fecha inicio.");
+
+  return errors;
 }
 
 export function sanitizeAppData(data: AppData): AppData {
