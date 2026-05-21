@@ -31,6 +31,7 @@ import { CrudSection } from "./src/components/CrudSection";
 import { ListItem } from "./src/components/ListItem";
 import { MenuAction } from "./src/components/MenuAction";
 import { OnboardingStep } from "./src/components/OnboardingStep";
+import { PasswordChangeModal } from "./src/components/PasswordChangeModal";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
 import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
@@ -1338,35 +1339,18 @@ function AppContent() {
         </View>
       </Modal>
 
-      <Modal visible={passwordChangeVisible} transparent animationType="fade" onRequestClose={() => undefined}>
-        <View style={styles.smallNoticeBackdrop}>
-          <View style={styles.smallNoticeModal}>
-            <Text style={styles.smallNoticeTitle}>Crear nueva contrasena</Text>
-            <Text style={styles.smallNoticeText}>Ingresaste con una clave temporal. Para continuar, define una contrasena propia.</Text>
-            <Input
-              label="Nueva contrasena"
-              value={newPasswordForm.password}
-              onChangeText={(value) => setNewPasswordForm({ ...newPasswordForm, password: value })}
-              secureTextEntry={!newPasswordVisible}
-              autoCapitalize="none"
-              autoComplete="new-password"
-              rightElement={<PasswordVisibilityButton visible={newPasswordVisible} onPress={() => setNewPasswordVisible((visible) => !visible)} />}
-            />
-            <Input
-              label="Confirmar contrasena"
-              value={newPasswordForm.confirm}
-              onChangeText={(value) => setNewPasswordForm({ ...newPasswordForm, confirm: value })}
-              secureTextEntry={!newPasswordVisible}
-              autoCapitalize="none"
-              autoComplete="new-password"
-            />
-            {passwordChangeStatus ? <Text style={[styles.authFeedback, passwordChangeStatus.tone === "error" && styles.authFeedbackError, passwordChangeStatus.tone === "success" && styles.authFeedbackSuccess]}>{passwordChangeStatus.message}</Text> : null}
-            <Pressable style={styles.primaryButton} onPress={() => { void submitNewPassword(); }} disabled={changingPassword}>
-              <Text style={styles.primaryButtonText}>{changingPassword ? "Guardando..." : "Guardar nueva contrasena"}</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      <PasswordChangeModal
+        visible={passwordChangeVisible}
+        password={newPasswordForm.password}
+        confirm={newPasswordForm.confirm}
+        passwordVisible={newPasswordVisible}
+        status={passwordChangeStatus}
+        saving={changingPassword}
+        onPasswordChange={(value) => setNewPasswordForm({ ...newPasswordForm, password: value })}
+        onConfirmChange={(value) => setNewPasswordForm({ ...newPasswordForm, confirm: value })}
+        onToggleVisible={() => setNewPasswordVisible((visible) => !visible)}
+        onSubmit={() => { void submitNewPassword(); }}
+      />
 
       <Modal visible={Boolean(xmlPreview)} animationType="slide" onRequestClose={() => setXmlPreview("")}>
         <SafeAreaView style={styles.screen}>
