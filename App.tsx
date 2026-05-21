@@ -27,13 +27,14 @@ import {
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
 import { documentTypeOptions, licensePlanOptions, monthOptions, paymentOptions, retentionTaxOptions, roleOptions } from "./src/constants/options";
-import { AuthorizationResponse, BackendCompanyOption, BackendHealthResponse, BackupSummary, BackendLicenseStatus, IdentityLookupResponse, TechnicalLog, authorizeInvoice, authorizeRemissionGuide, backupAppData, changeBackendPassword, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, loginBackend, lookupIdentityData, mergeBackendData, registerBackend, requestPasswordReset, reserveDocumentSequence, restoreAppData, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
+import { AuthorizationResponse, BackendCompanyOption, BackendHealthResponse, BackupSummary, IdentityLookupResponse, TechnicalLog, authorizeInvoice, authorizeRemissionGuide, backupAppData, changeBackendPassword, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, loginBackend, lookupIdentityData, mergeBackendData, registerBackend, requestPasswordReset, reserveDocumentSequence, restoreAppData, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
 import { buildRideHtml } from "./src/services/ride";
 import { hashPassword } from "./src/services/security";
 import { buildCreditNoteXml, buildInvoiceXml, buildRemissionGuideXml, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal, calculateTotalDiscount, calculateTotals, createAccessKey, createCreditNoteAccessKey, createGuideAccessKey, grossToNetUnitPrice, money, nextSequence } from "./src/services/sri";
 import { clearSession, initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
 import { AppData, AppLicense, AuditLog, CashClosing, Client, DocumentType, InventoryMovement, InventoryMovementType, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
 import { accountingMoney, accountingValue, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
+import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canDeleteCatalog, canEditCatalog, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, licenseStatusLabel, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
 import { buildDashboard } from "./src/utils/dashboard";
 import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, guideInActiveScope, guideNumber, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
@@ -45,7 +46,7 @@ import { buildSalesReport } from "./src/utils/reports";
 import { canEditSale, documentTypeLabel, isCreditNoteSale, isEffectiveReportSale, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock } from "./src/utils/sales";
 import { findDuplicateClient, findDuplicateProductCode, normalizeClientIdentification, normalizeProductCode, sanitizeAppData } from "./src/validation";
 
-type Tab = "dashboard" | "ventas" | "clientes" | "productos" | "inventario" | "caja" | "guias" | "usuarios" | "reportes" | "sri";
+type Tab = AppTab;
 type SyncState = "synced" | "pending" | "syncing" | "error";
 type ActionHandler = () => void | Promise<void>;
 
@@ -61,102 +62,6 @@ const WEB_REMOTE_REFRESH_INTERVAL_MS = 7000;
 const CONNECTIVITY_SYNC_THROTTLE_MS = 6000;
 const APP_BRAND = "FactuDarwin";
 const APP_TAGLINE = "Facturacion electronica Ecuador";
-function tabLabel(tab: Tab) {
-  const labels: Record<Tab, string> = {
-    dashboard: "INICIO",
-    ventas: "VENTAS",
-    clientes: "CLIENTES",
-    productos: "PRODUCTOS",
-    inventario: "INVENTARIO",
-    caja: "CAJA",
-    guias: "GUIAS",
-    usuarios: "USUARIOS",
-    reportes: "REPORTES",
-    sri: "SRI"
-  };
-
-  return labels[tab];
-}
-
-function roleLabel(role: UserRole) {
-  return roleOptions.find((option) => option.value === role)?.label || "Vendedor";
-}
-
-function appLicenseStatus(license?: AppLicense | BackendLicenseStatus) {
-  const today = new Date();
-  const expires = parseInputDate(String(license?.expiresAt || ""), "end");
-  const expiredByDate = expires ? expires.getTime() < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() : false;
-  const rawStatus = String(license?.status || "trial");
-  const effectiveStatus = rawStatus === "suspended" ? "suspended" : expiredByDate || rawStatus === "expired" ? "expired" : rawStatus;
-  const active = (rawStatus === "active" || rawStatus === "trial") && !expiredByDate;
-  const daysLeft = expires ? Math.ceil((expires.getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86400000) : 0;
-  return { active, effectiveStatus, daysLeft };
-}
-
-function licenseStatusLabel(license?: AppLicense | BackendLicenseStatus) {
-  const status = appLicenseStatus(license);
-  if (status.effectiveStatus === "suspended") return "Licencia suspendida";
-  if (status.effectiveStatus === "expired") return "Licencia vencida";
-  const plan = licensePlanOptions.find((option) => option.value === normalizeLicensePlanValue(license?.plan))?.label || "Demo";
-  return `${plan} | vence ${license?.expiresAt || "sin fecha"} | ${Math.max(0, status.daysLeft)} dias`;
-}
-
-function compactLicenseStatusLabel(license?: AppLicense | BackendLicenseStatus) {
-  const status = appLicenseStatus(license);
-  if (status.effectiveStatus === "suspended") return "Suspendida";
-  if (status.effectiveStatus === "expired") return "Vencida";
-  const plan = licensePlanOptions.find((option) => option.value === normalizeLicensePlanValue(license?.plan))?.label || "Demo";
-  return `${plan} activo`;
-}
-
-function tabsForRole(role: UserRole): Tab[] {
-  if (role === "admin") return ["dashboard", "ventas", "clientes", "productos", "inventario", "caja", "guias", "reportes", "usuarios", "sri"];
-  if (role === "cajero") return ["dashboard", "ventas", "clientes", "caja", "reportes"];
-  if (role === "contador") return ["dashboard", "caja", "reportes"];
-  return ["dashboard", "ventas", "clientes", "productos", "inventario", "caja", "guias", "reportes"];
-}
-
-function filterTabsByLicense(tabs: Tab[], license: AppLicense | undefined, role: UserRole) {
-  if (role === "admin") return tabs;
-  const status = appLicenseStatus(license);
-  if (!status.active) return tabs.filter((tab) => ["dashboard", "reportes"].includes(tab));
-  const features = license?.features;
-  return tabs.filter((tab) => {
-    if (tab === "ventas" && features?.sales === false) return false;
-    if (tab === "guias" && (features?.sales === false || features?.sri === false)) return false;
-    if (tab === "inventario" && features?.inventory === false) return false;
-    if (tab === "reportes" && features?.reports === false) return false;
-    return true;
-  });
-}
-
-function canDeleteCatalog(role: UserRole) {
-  return role === "admin";
-}
-
-function canAccessSensitiveSupport(role: UserRole) {
-  return role === "admin" || role === "contador";
-}
-
-function canManageFiscalAdjustments(role: UserRole) {
-  return role === "admin" || role === "contador";
-}
-
-function canRetryDocuments(role: UserRole) {
-  return role === "admin" || role === "contador";
-}
-
-function canVoidDocuments(role: UserRole) {
-  return role === "admin" || role === "contador";
-}
-
-function canIssueFromInternalDocuments(role: UserRole) {
-  return role === "admin" || role === "vendedor" || role === "cajero";
-}
-
-function canEditCatalog(role: UserRole) {
-  return role === "admin" || role === "vendedor" || role === "cajero";
-}
 type StartupErrorBoundaryState = {
   message: string;
 };
