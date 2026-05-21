@@ -25,6 +25,7 @@ import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./
 import { ActivePlanInfo } from "./src/components/ActivePlanInfo";
 import { AppMenuModal } from "./src/components/AppMenuModal";
 import { AuditLogList } from "./src/components/AuditLogList";
+import { AutoBackupToggle } from "./src/components/AutoBackupToggle";
 import { BackupStatusInfo } from "./src/components/BackupStatusInfo";
 import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
@@ -3616,15 +3617,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         />
         <IssuerTaxSettings issuer={issuer} onChange={setIssuer} />
         <Input label="URL del servidor" value={backendUrl} onChangeText={setBackendUrl} autoCapitalize="none" />
-        <Select
-          label="Respaldo automatico"
-          value={autoBackupEnabled ? "SI" : "NO"}
-          onChange={(value) => setAutoBackupEnabled(value === "SI")}
-          options={[
-            { label: "Activo", value: "SI" },
-            { label: "Inactivo", value: "NO" }
-          ]}
-        />
+        <AutoBackupToggle enabled={autoBackupEnabled} onChange={setAutoBackupEnabled} />
         <View style={styles.row}>
           <View style={styles.flex}>
             <PrimaryButton label="Guardar emisor" onPress={save} />
