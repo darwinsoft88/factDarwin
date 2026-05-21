@@ -45,11 +45,12 @@ import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal";
 import { SaleEditNotice } from "./src/components/SaleEditNotice";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
+import { SelectedClientCard } from "./src/components/SelectedClientCard";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
 import { SyncCenterModal } from "./src/components/SyncCenterModal";
 import { XmlPreviewModal } from "./src/components/XmlPreviewModal";
-import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
+import { CameraIcon, MenuIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { InvoiceStatsGrid } from "./src/components/InvoiceStatsGrid";
 import { OperationTile } from "./src/components/metrics";
@@ -2722,17 +2723,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
           <Select label={`Seleccionar cliente (${visibleClientsForSale.length}/${filteredClientsForSale.length})`} value={clientId} onChange={setClientId} options={visibleClientsForSale.map((item) => ({ label: item.name, value: item.id }))} />
           {filteredClientsForSale.length === 0 ? <Empty text="No hay clientes con esa busqueda." /> : null}
           {visibleClientsForSale.length < filteredClientsForSale.length ? <LoadMoreButton label="Cargar mas clientes" onPress={() => setVisibleClientCount((count) => count + LIST_BATCH_SIZE)} /> : null}
-          {selectedClient ? (
-            <View style={styles.inlineCard}>
-              <View style={styles.flex}>
-                <Text style={styles.inlineInfo}>{selectedClient.identification} | {selectedClient.email || "sin email"}</Text>
-                <Text style={styles.inlineInfo}>{selectedClient.address || "sin direccion"}</Text>
-              </View>
-              <Pressable accessibilityRole="button" accessibilityLabel="Editar cliente" style={styles.quickEditButton} onPress={openQuickClientEditor}>
-                <PencilIcon />
-              </Pressable>
-            </View>
-          ) : null}
+          <SelectedClientCard client={selectedClient} onEdit={openQuickClientEditor} />
         </View>
 
         <View style={styles.saleGroup}>
@@ -4263,16 +4254,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     lineHeight: 18
   },
-  inlineCard: {
-    borderWidth: 1,
-    borderColor: "#dbe4ee",
-    borderRadius: 8,
-    padding: 10,
-    backgroundColor: "#ffffff",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10
-  },
   productSummaryCard: {
     borderWidth: 1,
     borderColor: "#bbf7d0",
@@ -4295,14 +4276,6 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 12,
     fontWeight: "900"
-  },
-  quickEditButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#0f766e"
   },
   secondaryActionButton: {
     minHeight: 44,
