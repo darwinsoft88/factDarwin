@@ -27,26 +27,26 @@ import {
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
 import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
-import { OperationTile, ReportRow, StatBox } from "./src/components/metrics";
+import { OperationTile, StatBox } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
 import { documentTypeOptions, monthOptions, paymentOptions, retentionTaxOptions, roleOptions } from "./src/constants/options";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
 import { ReportsScreen } from "./src/screens/ReportsScreen";
+import { CashClosingScreen } from "./src/screens/CashClosingScreen";
 import { AuthorizationResponse, BackendCompanyOption, TechnicalLog, authorizeInvoice, authorizeRemissionGuide, backupAppData, changeBackendPassword, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, loginBackend, lookupIdentityData, mergeBackendData, registerBackend, requestPasswordReset, reserveDocumentSequence, restoreAppData, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
 import { buildRideHtml } from "./src/services/ride";
 import { hashPassword } from "./src/services/security";
 import { buildCreditNoteXml, buildInvoiceXml, buildRemissionGuideXml, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal, calculateTotalDiscount, calculateTotals, createAccessKey, createCreditNoteAccessKey, createGuideAccessKey, grossToNetUnitPrice, money, nextSequence } from "./src/services/sri";
 import { clearSession, initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
-import { AppData, AppLicense, CashClosing, Client, DocumentType, InventoryMovement, InventoryMovementType, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
+import { AppData, AppLicense, Client, DocumentType, InventoryMovement, InventoryMovementType, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
 import { accountingMoney, accountingValue, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
 import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canDeleteCatalog, canEditCatalog, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, licenseStatusLabel, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
 import { resolveCompanyLogoUrl } from "./src/utils/assets";
 import { appendAudit, AUDIT_LOG_LIMIT } from "./src/utils/audit";
-import { buildCashClosingSummary } from "./src/utils/cash";
 import { addedEstablishmentIds, mergeAppDataSnapshots } from "./src/utils/dataMerge";
 import { formatReceivedRetentionDetail, formatSaleDetail } from "./src/utils/documentDetails";
 import { buildCreditNoteRideHtml, buildGuideRideHtml, buildInternalTicketHtml, buildProformaHtml, formatGuideDetail } from "./src/utils/documentHtml";
-import { closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, getRetryInfo, guideInActiveScope, guideNumber, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus, saleInActiveScope } from "./src/utils/documents";
+import { compareSalesNewestFirst, documentNumber, documentScopeId, getRetryInfo, guideInActiveScope, guideNumber, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus, saleInActiveScope } from "./src/utils/documents";
 import { confirmAction, getLocalVoidReason, showMessage } from "./src/utils/dialogs";
 import { activeEstablishment, activeIssuer, applyIdentityToIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { isBackendConnectionError, loginErrorMessage } from "./src/utils/errors";
@@ -56,7 +56,6 @@ import { generateId } from "./src/utils/id";
 import { buildStockCredits, buildStockMovements, createInventoryMovement, getAvailableStockForSale, movementReason, movementTypeLabel, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense } from "./src/utils/license";
 import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleTicketDocument, openHtmlViewer, shareGeneratedFile } from "./src/utils/printFiles";
-import { paymentLabel } from "./src/utils/reportFormats";
 import { parseDecimal, roundMoney } from "./src/utils/numbers";
 import { buildCreditNoteItem, buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
 import { explainSriResult, formatSriResult, sriUserMessage, userFriendlyActionError } from "./src/utils/sriMessages";
@@ -1200,7 +1199,7 @@ function AppContent() {
           {tab === "clientes" && <ClientsView data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persist={persist} />}
           {tab === "productos" && <ProductsView data={data} user={session} backendToken={backendToken} persist={persist} />}
           {tab === "inventario" && <InventoryView data={data} user={session} backendToken={backendToken} persist={persist} />}
-          {tab === "caja" && <CashClosingView data={data} user={session} backendToken={backendToken} persist={persist} />}
+          {tab === "caja" && <CashClosingScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
           {tab === "guias" && <GuidesView data={data} user={session} backendToken={backendToken} persist={persist} onXml={setXmlPreview} />}
           {tab === "usuarios" && session.role === "admin" && <UsersView data={data} user={session} backendToken={backendToken} persist={persist} />}
           {tab === "reportes" && <ReportsScreen data={data} onReport={setXmlPreview} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
@@ -3253,98 +3252,6 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         }}
       />
       <ProcessingOverlay visible={Boolean(processingMessage)} message={processingMessage} />
-    </View>
-  );
-}
-
-function CashClosingView({ data, user, backendToken, persist }: { data: AppData; user: User; backendToken: string; persist: (data: AppData) => Promise<void> }) {
-  const [closingDate, setClosingDate] = useState(toInputDate(new Date()));
-  const [cashCountedText, setCashCountedText] = useState("");
-  const [notes, setNotes] = useState("");
-  const [visibleClosingCount, setVisibleClosingCount] = useState(LIST_BATCH_SIZE);
-  const summary = useMemo(() => buildCashClosingSummary(data, closingDate), [data, closingDate]);
-  const cashCounted = roundMoney(parseDecimal(cashCountedText || "0"));
-  const difference = roundMoney(cashCounted - summary.cashExpected);
-  const currentEstablishment = activeEstablishment(data.issuer);
-  const closings = [...(data.cashClosings || [])].filter((closing) => closingInActiveScope(closing, data)).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  const visibleClosings = closings.slice(0, visibleClosingCount);
-  const existingClosing = closings.find((closing) => closing.date === closingDate);
-
-  useEffect(() => {
-    setCashCountedText(money(summary.cashExpected));
-  }, [closingDate, summary.cashExpected]);
-
-  const saveClosing = async () => {
-    if (!Number.isFinite(cashCounted) || cashCounted < 0) {
-      showMessage("Efectivo invalido", "Ingrese el efectivo contado en caja.");
-      return;
-    }
-
-    const closing: CashClosing = {
-      id: uid(),
-      establishment: currentEstablishment.establishment,
-      emissionPoint: currentEstablishment.emissionPoint,
-      establishmentName: currentEstablishment.name,
-      date: closingDate,
-      startAt: summary.startAt,
-      endAt: summary.endAt,
-      userId: user.id,
-      userName: user.name,
-      documentCount: summary.documentCount,
-      total: summary.total,
-      cashExpected: summary.cashExpected,
-      cashCounted,
-      difference,
-      byPayment: summary.byPayment,
-      notes: notes.trim(),
-      createdAt: new Date().toISOString()
-    };
-
-    const nextData = appendAudit({ ...data, cashClosings: [closing, ...(data.cashClosings || [])] }, user, "CASH_CLOSING_CREATED", "cash_closing", closing.id, `Cierre de caja ${closing.date}: total $${money(closing.total)}, diferencia $${money(closing.difference)}`, { date: closing.date, total: closing.total, difference: closing.difference });
-    await persist(nextData);
-    await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, cashClosings: [closing], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cierre pendiente de sincronizar", nextData, persist);
-    setNotes("");
-    showMessage("Cierre guardado", "El cierre de caja quedo registrado y se sincronizara con la base de datos.");
-  };
-
-  return (
-    <View style={styles.stack}>
-      <Section title="Cierre de caja">
-        <Text style={styles.inlineInfo}>Establecimiento: {currentEstablishment.name} {currentEstablishment.establishment}-{currentEstablishment.emissionPoint}</Text>
-        <CalendarDateInput label="Fecha de cierre" value={closingDate} onChange={setClosingDate} />
-        {existingClosing ? <Text style={styles.inlineInfo}>Ya existe un cierre para esta fecha. Puede guardar otro si necesita dejar una correccion auditada.</Text> : null}
-        <View style={styles.statsGrid}>
-          <StatBox label="Documentos" value={String(summary.documentCount)} />
-          <StatBox label="Total ventas" value={`$${money(summary.total)}`} />
-          <StatBox label="Efectivo esperado" value={`$${money(summary.cashExpected)}`} />
-          <StatBox label="Efectivo contado" value={`$${money(cashCounted)}`} />
-          <StatBox label="Diferencia" value={`$${money(difference)}`} />
-          <StatBox label="Pagos" value={String(Object.keys(summary.byPayment).length)} />
-        </View>
-        <Input label="Efectivo contado" value={cashCountedText} onChangeText={setCashCountedText} keyboardType="decimal-pad" />
-        <Input label="Notas del cierre" value={notes} onChangeText={setNotes} multiline />
-        <PrimaryButton label="Guardar cierre de caja" onPress={saveClosing} />
-      </Section>
-
-      <Section title="Formas de pago del dia">
-        {Object.keys(summary.byPayment).length === 0 ? <Empty text="No hay movimientos con valor para esta fecha." /> : null}
-        {Object.entries(summary.byPayment).map(([code, total]) => (
-          <ReportRow key={code} label={paymentLabel(code)} value={`$${money(total)}`} strong={code === "01"} />
-        ))}
-      </Section>
-
-      <Section title="Cierres guardados">
-        {visibleClosings.length === 0 ? <Empty text="Aun no hay cierres de caja." /> : null}
-        {visibleClosings.map((closing) => (
-          <ListItem
-            key={closing.id}
-            title={`${formatShortDate(closing.createdAt)} - ${closing.userName}`}
-            meta={`Fecha ${closing.date} | Docs ${closing.documentCount} | Total $${money(closing.total)} | Efectivo $${money(closing.cashCounted)} | Dif. $${money(closing.difference)}${closing.notes ? ` | ${closing.notes}` : ""}`}
-            badge={closing.difference === 0 ? "CUADRADO" : "DIFERENCIA"}
-          />
-        ))}
-        {visibleClosings.length < closings.length ? <LoadMoreButton label="Cargar mas cierres" onPress={() => setVisibleClosingCount((count) => count + LIST_BATCH_SIZE)} /> : null}
-      </Section>
     </View>
   );
 }
