@@ -36,6 +36,7 @@ import { AppData, AppLicense, CashClosing, Client, DocumentType, InventoryMoveme
 import { accountingMoney, accountingValue, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
 import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canDeleteCatalog, canEditCatalog, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, licenseStatusLabel, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
 import { appendAudit, AUDIT_LOG_LIMIT } from "./src/utils/audit";
+import { buildCashClosingSummary } from "./src/utils/cash";
 import { buildDashboard } from "./src/utils/dashboard";
 import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, guideInActiveScope, guideNumber, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
@@ -4451,21 +4452,6 @@ function CashClosingView({ data, user, backendToken, persist }: { data: AppData;
       </Section>
     </View>
   );
-}
-
-function buildCashClosingSummary(data: AppData, closingDate: string) {
-  const start = parseInputDate(closingDate, "start") || new Date();
-  const end = parseInputDate(closingDate, "end") || new Date();
-  const report = buildSalesReport(scopedReportData(data), "custom", String(start.getFullYear()), String(start.getMonth() + 1), "1", closingDate, closingDate, "operational", "all");
-
-  return {
-    startAt: start.toISOString(),
-    endAt: end.toISOString(),
-    documentCount: report.effectiveCount,
-    total: report.total,
-    cashExpected: report.byPayment["01"] || 0,
-    byPayment: report.byPayment
-  };
 }
 
 function QuickAction({ label, onPress }: { label: string; onPress: () => void }) {
