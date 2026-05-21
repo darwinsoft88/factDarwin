@@ -46,6 +46,7 @@ import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal"
 import { SaleEditNotice } from "./src/components/SaleEditNotice";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { SelectedClientCard } from "./src/components/SelectedClientCard";
+import { SelectedProductCard } from "./src/components/SelectedProductCard";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
 import { SyncCenterModal } from "./src/components/SyncCenterModal";
@@ -2745,14 +2746,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
           <Select label={`Seleccionar producto (${visibleProductsForSale.length}/${filteredProductsForSale.length})`} value={productId} onChange={setProductId} options={visibleProductsForSale.map((item) => ({ label: `${item.code} - ${item.name}`, value: item.id }))} />
           {filteredProductsForSale.length === 0 ? <Empty text="No hay productos con esa busqueda." /> : null}
           {visibleProductsForSale.length < filteredProductsForSale.length ? <LoadMoreButton label="Cargar mas productos" onPress={() => setVisibleProductCount((count) => count + LIST_BATCH_SIZE)} /> : null}
-          {selectedProduct ? (
-            <View style={styles.productSummaryCard}>
-              <View style={styles.flex}>
-                <Text style={styles.itemTitle}>{selectedProduct.name}</Text>
-                <Text style={styles.inlineInfo}>Stock {selectedProduct.stock} | Min. {productMinStock(selectedProduct)} | Publico ${money(selectedProduct.price)} | IVA {money(selectedProduct.ivaRate * 100)}%</Text>
-              </View>
-            </View>
-          ) : null}
+          <SelectedProductCard product={selectedProduct} />
           <View style={styles.saleControlsRow}>
             <View style={styles.quantityBlock}>
               <Text style={styles.label}>Cantidad</Text>
@@ -4254,16 +4248,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     lineHeight: 18
   },
-  productSummaryCard: {
-    borderWidth: 1,
-    borderColor: "#bbf7d0",
-    borderRadius: 8,
-    padding: 10,
-    backgroundColor: "#f0fdf4",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10
-  },
   iconButton: {
     minHeight: 38,
     borderRadius: 8,
@@ -4494,11 +4478,6 @@ const styles = StyleSheet.create({
   smallButtonText: {
     color: "#0f5f59",
     fontWeight: "900"
-  },
-  itemTitle: {
-    color: "#111827",
-    fontWeight: "900",
-    flexShrink: 1
   },
   actionGroup: {
     flexDirection: "row",
