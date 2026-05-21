@@ -48,6 +48,7 @@ import { activeEstablishment, activeIssuer, applyIdentityToIssuer, editableEstab
 import { isBackendConnectionError, loginErrorMessage } from "./src/utils/errors";
 import { pickWebFile, readWebFileBase64 } from "./src/utils/files";
 import { buildCalendarDays, dateKey, formatShortDate, formatSriDate, parseInputDate, sanitizeFileName, shortText, toInputDate } from "./src/utils/format";
+import { generateId } from "./src/utils/id";
 import { buildStockCredits, buildStockMovements, createInventoryMovement, getAvailableStockForSale, movementReason, movementTypeLabel, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
 import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleTicketDocument, openHtmlViewer, shareGeneratedFile } from "./src/utils/printFiles";
@@ -63,7 +64,7 @@ import { buildProductionChecklist, findDuplicateClient, findDuplicateProductCode
 type Tab = AppTab;
 type ActionHandler = () => void | Promise<void>;
 
-const uid = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const uid = generateId;
 type StartupErrorBoundaryState = {
   message: string;
 };

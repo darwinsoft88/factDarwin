@@ -2,11 +2,10 @@ import { mergeBackendData } from "../services/backend";
 import { AppData, PendingSyncItem } from "../types";
 import { showMessage } from "./dialogs";
 import { shortText } from "./format";
+import { generateId } from "./id";
 import { userFriendlyActionError } from "./sriMessages";
 
 export type IncrementalPatch = Partial<AppData> & { baseData: AppData; deletions?: Partial<Record<keyof AppData, string[]>> };
-
-const pendingSyncId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 export async function syncPatchToBackend(backendUrl: string, backendToken: string, patch: IncrementalPatch, pendingTitle = "Cambio pendiente de sincronizar", localData?: AppData, persist?: (data: AppData) => Promise<void>) {
   try {
@@ -26,7 +25,7 @@ export async function syncSalePatchToBackend(backendUrl: string, backendToken: s
 
 async function enqueuePendingSync(localData: AppData, persist: (data: AppData) => Promise<void>, patch: IncrementalPatch, title: string, errorMessage: string) {
   const pending: PendingSyncItem = {
-    id: pendingSyncId(),
+    id: generateId(),
     createdAt: new Date().toISOString(),
     attempts: 0,
     title,
