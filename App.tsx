@@ -35,6 +35,7 @@ import { clearSession, initialData, loadData, loadSession, saveData, saveSession
 import { AppData, AppLicense, CashClosing, Client, DocumentType, InventoryMovement, InventoryMovementType, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
 import { accountingMoney, accountingValue, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
 import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canDeleteCatalog, canEditCatalog, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, licenseStatusLabel, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
+import { resolveCompanyLogoUrl } from "./src/utils/assets";
 import { appendAudit, AUDIT_LOG_LIMIT } from "./src/utils/audit";
 import { buildCashClosingSummary } from "./src/utils/cash";
 import { addedEstablishmentIds, mergeAppDataSnapshots } from "./src/utils/dataMerge";
@@ -4106,22 +4107,6 @@ function confirmAction(title: string, message: string, onConfirm: () => void) {
     { text: "Cancelar", style: "cancel" },
     { text: "Eliminar", style: "destructive", onPress: onConfirm }
   ]);
-}
-
-function resolveCompanyLogoUrl(logoUrl: string, backendUrl: string) {
-  const value = String(logoUrl || "").trim();
-  const base = String(backendUrl || "").trim().replace(/\/$/, "");
-  if (!value) return "";
-  if (value.startsWith("/")) return base ? `${base}${value}` : value;
-  if (/^https?:\/\//i.test(value) && value.includes("/api/company/logo") && base) {
-    try {
-      const parsed = new URL(value);
-      return `${base}${parsed.pathname}${parsed.search}`;
-    } catch {
-      return value;
-    }
-  }
-  return value;
 }
 
 function DashboardView({ data, user, onNavigate }: { data: AppData; user: User; onNavigate: (tab: Tab) => void }) {
