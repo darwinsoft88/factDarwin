@@ -40,6 +40,7 @@ import { PlanUpgradeModal } from "./src/components/PlanUpgradeModal";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
 import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
+import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
@@ -49,7 +50,7 @@ import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { OperationTile, StatBox } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
-import { documentTypeOptions, paymentOptions, retentionTaxOptions } from "./src/constants/options";
+import { documentTypeOptions, paymentOptions } from "./src/constants/options";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
 import { ReportsScreen } from "./src/screens/ReportsScreen";
 import { CashClosingScreen } from "./src/screens/CashClosingScreen";
@@ -3021,49 +3022,33 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         </View>
       </Modal>
 
-      <Modal visible={Boolean(retentionSale)} transparent animationType="slide" onRequestClose={closeRetentionForm}>
-        <View style={styles.creditModalBackdrop}>
-          <View style={styles.creditModal}>
-            <View style={styles.creditModalHeader}>
-              <View style={styles.flex}>
-                <Text style={styles.creditModalTitle}>Retencion recibida</Text>
-                <Text style={styles.creditModalMeta}>
-                  {retentionSale ? `Factura ${documentNumber(retentionSale, data.issuer)} | ${retentionClient?.name || "Cliente"}` : ""}
-                </Text>
-              </View>
-              <Pressable style={styles.smallButton} onPress={closeRetentionForm}>
-                <Text style={styles.smallButtonText}>Cerrar</Text>
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.creditModalContent}>
-              <Select label="Impuesto retenido" value={retentionTaxType} onChange={(value) => {
-                const nextType = value as RetentionTaxType;
-                setRetentionTaxType(nextType);
-                if (retentionSale) setRetentionBase(money(nextType === "IVA" ? retentionSale.tax : retentionSale.subtotal));
-              }} options={retentionTaxOptions} />
-              <Input label="No. comprobante recibido" value={retentionDocumentNumber} onChangeText={setRetentionDocumentNumber} placeholder="Ej: 001-001-000000123" />
-              <Input label="Autorizacion" value={retentionAuthorizationNumber} onChangeText={setRetentionAuthorizationNumber} placeholder="Opcional" keyboardType="number-pad" />
-              <CalendarDateInput label="Fecha recepcion" value={retentionReceivedAt} onChange={setRetentionReceivedAt} />
-              <View style={styles.row}>
-                <View style={styles.flex}>
-                  <Input label="Base" value={retentionBase} onChangeText={setRetentionBase} keyboardType="decimal-pad" />
-                </View>
-                <View style={styles.flex}>
-                  <Input label="Porcentaje" value={retentionPercentage} onChangeText={setRetentionPercentage} keyboardType="decimal-pad" />
-                </View>
-              </View>
-              <Input label="Valor retenido" value={retentionAmount} onChangeText={setRetentionAmount} placeholder="Se calcula si lo deja vacio" keyboardType="decimal-pad" />
-              <Input label="Notas" value={retentionNotes} onChangeText={setRetentionNotes} placeholder="Opcional" />
-              <View style={styles.creditTotalsBox}>
-                <Text style={styles.totalLine}>Base: ${money(parseDecimal(retentionBase || "0") || 0)}</Text>
-                <Text style={styles.totalLine}>Porcentaje: {money(parseDecimal(retentionPercentage || "0") || 0)}%</Text>
-                <Text style={styles.totalStrong}>Valor estimado: ${money((parseDecimal(retentionBase || "0") || 0) * ((parseDecimal(retentionPercentage || "0") || 0) / 100))}</Text>
-              </View>
-              <PrimaryButton label="Guardar retencion" onPress={saveReceivedRetention} />
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      <ReceivedRetentionModal
+        sale={retentionSale}
+        clientName={retentionClient?.name}
+        issuer={data.issuer}
+        taxType={retentionTaxType}
+        documentNumberText={retentionDocumentNumber}
+        authorizationNumber={retentionAuthorizationNumber}
+        receivedAt={retentionReceivedAt}
+        base={retentionBase}
+        percentage={retentionPercentage}
+        amount={retentionAmount}
+        notes={retentionNotes}
+        CalendarDateInputComponent={CalendarDateInput}
+        onTaxTypeChange={(nextType) => {
+          setRetentionTaxType(nextType);
+          if (retentionSale) setRetentionBase(money(nextType === "IVA" ? retentionSale.tax : retentionSale.subtotal));
+        }}
+        onDocumentNumberChange={setRetentionDocumentNumber}
+        onAuthorizationNumberChange={setRetentionAuthorizationNumber}
+        onReceivedAtChange={setRetentionReceivedAt}
+        onBaseChange={setRetentionBase}
+        onPercentageChange={setRetentionPercentage}
+        onAmountChange={setRetentionAmount}
+        onNotesChange={setRetentionNotes}
+        onClose={closeRetentionForm}
+        onSave={saveReceivedRetention}
+      />
       <QuickClientEditor
         visible={quickClientVisible}
         form={quickClientForm}
