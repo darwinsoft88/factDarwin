@@ -38,6 +38,7 @@ import { LoginErrorModal } from "./src/components/LoginErrorModal";
 import { NewEstablishmentModal } from "./src/components/NewEstablishmentModal";
 import { OnboardingModal } from "./src/components/OnboardingModal";
 import { PasswordChangeModal } from "./src/components/PasswordChangeModal";
+import { PlanLimitCard } from "./src/components/PlanLimitCard";
 import { PlanUpgradeModal } from "./src/components/PlanUpgradeModal";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
 import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
@@ -3612,16 +3613,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         <Input label="Siguiente secuencial" value={sequentialText} onChangeText={setSequentialText} keyboardType="number-pad" />
         <Input label="Siguiente secuencial guia" value={remissionSequentialText} onChangeText={setRemissionSequentialText} keyboardType="number-pad" />
         <Input label="Siguiente secuencial nota credito" value={creditNoteSequentialText} onChangeText={setCreditNoteSequentialText} keyboardType="number-pad" />
-        {!canManageEstablishments ? (
-          <View style={styles.planLockCard}>
-            <View style={styles.planLockHeader}>
-              <Text style={styles.planLockKicker}>Plan actual</Text>
-              <Text style={styles.planLockBadge}>{compactLicenseStatusLabel(license)}</Text>
-            </View>
-            <Text style={styles.planLockTitle}>1 punto de emision incluido</Text>
-            <Text style={styles.planLockText}>Para manejar sucursales o varios puntos de emision, active Plan Pro desde el panel SaaS.</Text>
-          </View>
-        ) : null}
+        {!canManageEstablishments ? <PlanLimitCard licenseLabel={compactLicenseStatusLabel(license)} /> : null}
         {establishmentStatus ? <Text style={[styles.inlineInfo, establishmentStatus.tone === "success" && styles.successText, establishmentStatus.tone === "error" && styles.errorText]}>{establishmentStatus.message}</Text> : null}
         <View style={styles.row}>
           <View style={styles.flex}>
@@ -4463,46 +4455,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8
-  },
-  planLockCard: {
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-    borderRadius: 8,
-    padding: 12,
-    gap: 7,
-    backgroundColor: "#eff6ff"
-  },
-  planLockHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8
-  },
-  planLockKicker: {
-    color: "#1d4ed8",
-    fontSize: 11,
-    fontWeight: "900"
-  },
-  planLockBadge: {
-    color: "#0f766e",
-    backgroundColor: "#ccfbf1",
-    borderRadius: 8,
-    overflow: "hidden",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    fontSize: 10,
-    fontWeight: "900"
-  },
-  planLockTitle: {
-    color: "#0f172a",
-    fontSize: 15,
-    fontWeight: "900"
-  },
-  planLockText: {
-    color: "#475569",
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 17
   },
   hint: {
     color: "#6b7280",
