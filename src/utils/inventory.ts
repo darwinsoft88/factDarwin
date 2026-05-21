@@ -1,4 +1,4 @@
-import { InventoryMovementType, Product, Sale } from "../types";
+import { InventoryMovement, InventoryMovementType, Product, Sale } from "../types";
 import { saleStatusReducesStock } from "./sales";
 
 export function buildStockCredits(sale?: Sale) {
@@ -23,6 +23,22 @@ export function restoreSaleStock(products: Product[], sale: Sale) {
     const quantity = credits.get(product.id) || 0;
     return quantity > 0 ? { ...product, stock: product.stock + quantity } : product;
   });
+}
+
+export function createInventoryMovement(product: Product, type: InventoryMovementType, quantity: number, stockAfter: number, reason: string, userId: string, stockBefore = product.stock, reference?: string): InventoryMovement {
+  return {
+    id: inventoryMovementId(),
+    productId: product.id,
+    productName: product.name,
+    type,
+    quantity,
+    stockBefore,
+    stockAfter,
+    reason,
+    reference,
+    userId,
+    createdAt: new Date().toISOString()
+  };
 }
 
 export function buildStockMovements(products: Product[], sale: Sale, type: InventoryMovementType, reason: string, userId: string, createdAt: string, createId: () => string) {
@@ -51,3 +67,17 @@ export function buildStockMovements(products: Product[], sale: Sale, type: Inven
     }];
   });
 }
+
+export function movementReason(type: InventoryMovementType) {
+  if (type === "entrada") return "Compra o ingreso de mercaderia";
+  if (type === "salida") return "Merma, uso interno o salida manual";
+  return "Correccion de stock";
+}
+
+export function movementTypeLabel(type: InventoryMovementType) {
+  if (type === "entrada") return "Entrada";
+  if (type === "salida") return "Salida";
+  return "Ajuste";
+}
+
+const inventoryMovementId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;

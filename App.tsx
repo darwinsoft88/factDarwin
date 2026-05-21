@@ -41,7 +41,7 @@ import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentN
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { isBackendConnectionError, loginErrorMessage } from "./src/utils/errors";
 import { buildCalendarDays, dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, sanitizeFileName, shortText, toInputDate } from "./src/utils/format";
-import { buildStockCredits, buildStockMovements, getAvailableStockForSale, restoreSaleStock } from "./src/utils/inventory";
+import { buildStockCredits, buildStockMovements, createInventoryMovement, getAvailableStockForSale, movementReason, movementTypeLabel, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
 import { buildMobileReportHtml, buildReportCsv, buildReportExcelHtml, buildReportHtml, formatIva104Report, formatSalesReport, paymentLabel } from "./src/utils/reportFormats";
 import { buildSalesReport } from "./src/utils/reports";
@@ -4701,22 +4701,6 @@ function AlertRow({ title, detail, tone }: { title: string; detail: string; tone
   );
 }
 
-function createInventoryMovement(product: Product, type: InventoryMovementType, quantity: number, stockAfter: number, reason: string, userId: string, stockBefore = product.stock, reference?: string): InventoryMovement {
-  return {
-    id: uid(),
-    productId: product.id,
-    productName: product.name,
-    type,
-    quantity,
-    stockBefore,
-    stockAfter,
-    reason,
-    reference,
-    userId,
-    createdAt: new Date().toISOString()
-  };
-}
-
 type IncrementalPatch = Partial<AppData> & { baseData: AppData; deletions?: Partial<Record<keyof AppData, string[]>> };
 
 async function syncPatchToBackend(backendUrl: string, backendToken: string, patch: IncrementalPatch, pendingTitle = "Cambio pendiente de sincronizar", localData?: AppData, persist?: (data: AppData) => Promise<void>) {
@@ -5316,18 +5300,6 @@ function InventoryView({ data, user, backendToken, persist }: { data: AppData; u
       </Section>
     </View>
   );
-}
-
-function movementReason(type: InventoryMovementType) {
-  if (type === "entrada") return "Compra o ingreso de mercaderia";
-  if (type === "salida") return "Merma, uso interno o salida manual";
-  return "Correccion de stock";
-}
-
-function movementTypeLabel(type: InventoryMovementType) {
-  if (type === "entrada") return "Entrada";
-  if (type === "salida") return "Salida";
-  return "Ajuste";
 }
 
 function GuidesView({ data, user, backendToken, persist, onXml }: { data: AppData; user: User; backendToken: string; persist: (data: AppData) => Promise<void>; onXml: (value: string) => void }) {
