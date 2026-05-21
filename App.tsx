@@ -32,9 +32,10 @@ import { buildRideHtml } from "./src/services/ride";
 import { hashPassword } from "./src/services/security";
 import { buildCreditNoteXml, buildInvoiceXml, buildRemissionGuideXml, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal, calculateTotalDiscount, calculateTotals, createAccessKey, createCreditNoteAccessKey, createGuideAccessKey, grossToNetUnitPrice, money, nextSequence } from "./src/services/sri";
 import { clearSession, initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
-import { AppData, AppLicense, AuditLog, CashClosing, Client, DocumentType, InventoryMovement, InventoryMovementType, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
+import { AppData, AppLicense, CashClosing, Client, DocumentType, InventoryMovement, InventoryMovementType, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RemissionGuide, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
 import { accountingMoney, accountingValue, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
 import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canDeleteCatalog, canEditCatalog, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, licenseStatusLabel, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
+import { appendAudit, AUDIT_LOG_LIMIT } from "./src/utils/audit";
 import { buildDashboard } from "./src/utils/dashboard";
 import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, guideInActiveScope, guideNumber, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
@@ -56,7 +57,6 @@ const parseDecimal = (value: string) => Number(value.replace(",", "."));
 const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 const MAX_DAILY_RETRIES = 3;
 const LIST_BATCH_SIZE = 25;
-const AUDIT_LOG_LIMIT = 500;
 const AUTO_BACKUP_DEBOUNCE_MS = Platform.OS === "web" ? 3000 : 1000;
 const REMOTE_REFRESH_THROTTLE_MS = Platform.OS === "web" ? 5000 : 30000;
 const WEB_REMOTE_REFRESH_INTERVAL_MS = 7000;
@@ -4714,25 +4714,6 @@ function createInventoryMovement(product: Product, type: InventoryMovementType, 
     reference,
     userId,
     createdAt: new Date().toISOString()
-  };
-}
-
-function appendAudit(data: AppData, user: User | undefined, event: string, entity: string, entityId: string | undefined, summary: string, metadata?: Record<string, unknown>): AppData {
-  const log: AuditLog = {
-    id: uid(),
-    event,
-    entity,
-    entityId,
-    summary,
-    userId: user?.id,
-    userName: user?.name,
-    createdAt: new Date().toISOString(),
-    metadata
-  };
-
-  return {
-    ...data,
-    auditLogs: [log, ...(data.auditLogs || [])].slice(0, AUDIT_LOG_LIMIT)
   };
 }
 
