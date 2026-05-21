@@ -12,7 +12,6 @@ import {
   KeyboardAvoidingView,
   Image,
   Linking,
-  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -46,7 +45,7 @@ import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
 import { SyncCenterModal } from "./src/components/SyncCenterModal";
-import { TechnicalDetailModal } from "./src/components/TechnicalDetailModal";
+import { XmlPreviewModal } from "./src/components/XmlPreviewModal";
 import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { OperationTile, StatBox } from "./src/components/metrics";
@@ -1256,9 +1255,7 @@ function AppContent() {
         onSubmit={() => { void submitNewPassword(); }}
       />
 
-      <Modal visible={Boolean(xmlPreview)} animationType="slide" onRequestClose={() => setXmlPreview("")}>
-        <TechnicalDetailModal value={xmlPreview} onClose={() => setXmlPreview("")} />
-      </Modal>
+      <XmlPreviewModal value={xmlPreview} onClose={() => setXmlPreview("")} />
     </SafeAreaView>
   );
 }
