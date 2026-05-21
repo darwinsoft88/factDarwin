@@ -36,6 +36,7 @@ import { CreditNoteModal } from "./src/components/CreditNoteModal";
 import { DeleteEstablishmentModal } from "./src/components/DeleteEstablishmentModal";
 import { DismissibleNotice } from "./src/components/DismissibleNotice";
 import { DocumentTypeSelector } from "./src/components/DocumentTypeSelector";
+import { EstablishmentActions } from "./src/components/EstablishmentActions";
 import { EstablishmentPickerModal } from "./src/components/EstablishmentPickerModal";
 import { ListItem } from "./src/components/ListItem";
 import { LoginErrorModal } from "./src/components/LoginErrorModal";
@@ -3605,20 +3606,13 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         <Input label="Siguiente secuencial guia" value={remissionSequentialText} onChangeText={setRemissionSequentialText} keyboardType="number-pad" />
         <Input label="Siguiente secuencial nota credito" value={creditNoteSequentialText} onChangeText={setCreditNoteSequentialText} keyboardType="number-pad" />
         {!canManageEstablishments ? <PlanLimitCard licenseLabel={compactLicenseStatusLabel(license)} /> : null}
-        {establishmentStatus ? <Text style={[styles.inlineInfo, establishmentStatus.tone === "success" && styles.successText, establishmentStatus.tone === "error" && styles.errorText]}>{establishmentStatus.message}</Text> : null}
-        <View style={styles.row}>
-          <View style={styles.flex}>
-            <Pressable style={[styles.primaryButton, !canManageEstablishments && styles.disabledButton]} onPress={openEstablishmentModal}>
-              <Text style={styles.primaryButtonText}>Agregar establecimiento</Text>
-            </Pressable>
-          </View>
-          <View style={styles.flex}>
-            <Pressable style={styles.establishmentDeleteButton} onPress={requestDeleteSelectedEstablishment}>
-              <Text style={styles.establishmentDeleteButtonText}>Eliminar establecimiento</Text>
-            </Pressable>
-          </View>
-        </View>
-        {selectedEstablishmentDocumentCount > 0 ? <Text style={styles.inlineInfo}>Este establecimiento tiene {selectedEstablishmentDocumentCount} documento(s); no se puede eliminar.</Text> : null}
+        <EstablishmentActions
+          canManage={canManageEstablishments}
+          documentCount={selectedEstablishmentDocumentCount}
+          status={establishmentStatus}
+          onAdd={openEstablishmentModal}
+          onDelete={requestDeleteSelectedEstablishment}
+        />
         <Select label="Ambiente" value={issuer.environment} onChange={(environment) => setIssuer({ ...issuer, environment: environment as "1" | "2" })} options={[{ label: "Pruebas", value: "1" }, { label: "Produccion", value: "2" }]} />
         <Select
           label="Tipo contribuyente"
@@ -4111,21 +4105,6 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 12,
     fontWeight: "900"
-  },
-  establishmentDeleteButton: {
-    minHeight: 48,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fff1f2",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12
-  },
-  establishmentDeleteButtonText: {
-    color: "#991b1b",
-    fontWeight: "900",
-    textAlign: "center"
   },
   errorText: {
     color: "#b91c1c"
