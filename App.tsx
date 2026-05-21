@@ -29,6 +29,7 @@ import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CrudSection } from "./src/components/CrudSection";
+import { DeleteEstablishmentModal } from "./src/components/DeleteEstablishmentModal";
 import { EstablishmentPickerModal } from "./src/components/EstablishmentPickerModal";
 import { ListItem } from "./src/components/ListItem";
 import { LoginErrorModal } from "./src/components/LoginErrorModal";
@@ -3960,32 +3961,15 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
           </View>
         </View>
       </Modal>
-      <Modal visible={deleteEstablishmentModalVisible} transparent animationType="fade" onRequestClose={() => { if (!deletingEstablishment) setDeleteEstablishmentModalVisible(false); }}>
-        <View style={styles.creditModalBackdrop}>
-          <View style={styles.establishmentModal}>
-            <View style={styles.creditModalHeader}>
-              <View style={styles.flex}>
-                <Text style={styles.creditModalTitle}>Eliminar establecimiento</Text>
-                <Text style={styles.creditModalMeta}>Esta accion solo esta disponible si no existen documentos asociados.</Text>
-              </View>
-              <Pressable style={[styles.smallButton, deletingEstablishment && styles.disabledButton]} onPress={() => { if (!deletingEstablishment) setDeleteEstablishmentModalVisible(false); }} disabled={deletingEstablishment}>
-                <Text style={styles.smallButtonText}>Cerrar</Text>
-              </Pressable>
-            </View>
-            <View style={styles.creditModalContent}>
-              <Text style={styles.paragraph}>Para eliminar {selectedEstablishment.name} escriba exactamente {selectedEstablishment.id}.</Text>
-              <Input label="Confirmar codigo" value={deleteEstablishmentConfirmText} onChangeText={setDeleteEstablishmentConfirmText} autoCapitalize="characters" />
-              <Pressable
-                style={[styles.establishmentDeleteButton, (deleteEstablishmentConfirmText.trim() !== selectedEstablishment.id || deletingEstablishment) && styles.disabledDangerButton]}
-                onPress={confirmDeleteSelectedEstablishment}
-                disabled={deleteEstablishmentConfirmText.trim() !== selectedEstablishment.id || deletingEstablishment}
-              >
-                <Text style={styles.establishmentDeleteButtonText}>{deletingEstablishment ? "Eliminando..." : "Eliminar definitivamente"}</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <DeleteEstablishmentModal
+        visible={deleteEstablishmentModalVisible}
+        establishment={selectedEstablishment}
+        confirmText={deleteEstablishmentConfirmText}
+        deleting={deletingEstablishment}
+        onConfirmTextChange={setDeleteEstablishmentConfirmText}
+        onClose={() => setDeleteEstablishmentModalVisible(false)}
+        onConfirm={confirmDeleteSelectedEstablishment}
+      />
       <PlanUpgradeModal
         visible={proEstablishmentModalVisible}
         message={planUpgradeMessage}
@@ -4465,9 +4449,6 @@ const styles = StyleSheet.create({
     color: "#991b1b",
     fontWeight: "900",
     textAlign: "center"
-  },
-  disabledDangerButton: {
-    opacity: 0.55
   },
   quantityBlock: {
     width: 152,
