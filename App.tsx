@@ -49,7 +49,8 @@ import { SyncCenterModal } from "./src/components/SyncCenterModal";
 import { XmlPreviewModal } from "./src/components/XmlPreviewModal";
 import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
-import { OperationTile, StatBox } from "./src/components/metrics";
+import { InvoiceStatsGrid } from "./src/components/InvoiceStatsGrid";
+import { OperationTile } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
 import { documentTypeOptions, paymentOptions } from "./src/constants/options";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
@@ -2854,16 +2855,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
             <Text style={styles.noticeText}>{notice}</Text>
           </Pressable>
         ) : null}
-        <View style={styles.statsGrid}>
-          <StatBox label="Emitidas" value={String(invoiceStats.count)} />
-          <StatBox label="Autorizadas" value={String(invoiceStats.authorized)} />
-          <StatBox label="Notas credito" value={String(invoiceStats.creditNotes)} />
-          <StatBox label="Notas venta" value={String(invoiceStats.internal)} />
-          <StatBox label="Proformas" value={String(invoiceStats.proformas)} />
-          <StatBox label="Rechazadas" value={String(invoiceStats.rejected)} />
-          <StatBox label="Total aut." value={`$${money(invoiceStats.totalAuthorized)}`} />
-          <StatBox label="Retenciones" value={`$${money(invoiceStats.retentionTotal)}`} />
-        </View>
+        <InvoiceStatsGrid stats={invoiceStats} />
         <Input label="Buscar documento" value={invoiceSearch} onChangeText={setInvoiceSearch} placeholder="Cliente, cedula, secuencial o clave" autoCapitalize="none" />
         <View style={styles.saleGroupCompact}>
           <DateRangeFilter
@@ -4686,11 +4678,6 @@ const styles = StyleSheet.create({
     color: "#075985",
     fontSize: 12,
     fontWeight: "800"
-  },
-  statsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8
   },
   quickGrid: {
     flexDirection: "row",
