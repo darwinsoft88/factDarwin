@@ -43,6 +43,7 @@ import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
 import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal";
+import { ReceivedRetentionsList } from "./src/components/ReceivedRetentionsList";
 import { SaleEditNotice } from "./src/components/SaleEditNotice";
 import { SaleItemsList } from "./src/components/SaleItemsList";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
@@ -78,7 +79,7 @@ import { accountingMoney, productCost, productMinStock, saleCostValue, saleProfi
 import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, licenseStatusLabel, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
 import { appendAudit, AUDIT_LOG_LIMIT } from "./src/utils/audit";
 import { addedEstablishmentIds, mergeAppDataSnapshots } from "./src/utils/dataMerge";
-import { formatReceivedRetentionDetail, formatSaleDetail } from "./src/utils/documentDetails";
+import { formatSaleDetail } from "./src/utils/documentDetails";
 import { buildCreditNoteRideHtml, buildInternalTicketHtml, buildProformaHtml } from "./src/utils/documentHtml";
 import { compareSalesNewestFirst, documentNumber, documentScopeId, getRetryInfo, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus, saleInActiveScope } from "./src/utils/documents";
 import { confirmAction, getLocalVoidReason, showMessage } from "./src/utils/dialogs";
@@ -2856,20 +2857,15 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       </Section>
 
       <Section title="Retenciones recibidas">
-        {(data.receivedRetentions || []).length === 0 ? <Empty text="Aun no hay retenciones recibidas." /> : null}
-        {(data.receivedRetentions || []).slice(0, LIST_BATCH_SIZE).map((retention) => {
-          const sale = data.sales.find((item) => item.id === retention.saleId);
-          const client = data.clients.find((item) => item.id === retention.clientId);
-          return (
-            <ListItem
-              key={retention.id}
-              title={`${retention.taxType} ${retention.documentNumber}`}
-              meta={`${formatShortDate(retention.receivedAt)} | ${client?.name || "Cliente"} | Factura ${sale ? documentNumber(sale, data.issuer) : ""} | Base $${money(retention.base)} | ${money(retention.percentage)}% | Retenido $${money(retention.amount)}`}
-              badge="RETENCION"
-              onOpen={canAccessSensitiveSupport(user.role) ? () => onXml(formatReceivedRetentionDetail(retention, sale, client, data.issuer)) : undefined}
-            />
-          );
-        })}
+        <ReceivedRetentionsList
+          retentions={data.receivedRetentions || []}
+          sales={data.sales}
+          clients={data.clients}
+          issuer={data.issuer}
+          visibleCount={LIST_BATCH_SIZE}
+          canOpenDetail={canAccessSensitiveSupport(user.role)}
+          onOpenDetail={onXml}
+        />
       </Section>
 
       <CreditNoteModal
