@@ -1,4 +1,5 @@
 import { Client, Sale, SaleItem } from "../types";
+import { parseDecimal, roundMoney } from "./numbers";
 
 export function saleStatusReducesStock(status: Sale["status"]) {
   return status === "AUTORIZADA" || status === "RECIBIDA" || status === "FIRMADA" || status === "INTERNA";
@@ -146,12 +147,4 @@ function getCreditedQuantityForLine(sales: Sale[], sourceSaleId: string, sourceI
     .flatMap((sale) => sale.items)
     .filter((item) => item.sourceLineKey ? item.sourceLineKey === lineKey : sameCreditLine(sourceItem, item))
     .reduce((sum, item) => sum + item.quantity, 0);
-}
-
-function parseDecimal(value: string) {
-  return Number(value.replace(",", "."));
-}
-
-function roundMoney(value: number) {
-  return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
 }

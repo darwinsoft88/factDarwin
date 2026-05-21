@@ -25,6 +25,7 @@ import {
   View
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
+import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
 import { documentTypeOptions, licensePlanOptions, monthOptions, paymentOptions, retentionTaxOptions, roleOptions } from "./src/constants/options";
 import { AuthorizationResponse, BackendCompanyOption, TechnicalLog, authorizeInvoice, authorizeRemissionGuide, backupAppData, changeBackendPassword, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, loginBackend, lookupIdentityData, mergeBackendData, registerBackend, requestPasswordReset, reserveDocumentSequence, restoreAppData, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
 import { buildRideHtml } from "./src/services/ride";
@@ -51,6 +52,7 @@ import { buildStockCredits, buildStockMovements, createInventoryMovement, getAva
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
 import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleTicketDocument, openHtmlViewer, shareGeneratedFile } from "./src/utils/printFiles";
 import { buildMobileReportHtml, buildReportCsv, buildReportExcelHtml, buildReportHtml, formatIva104Report, formatSalesReport, paymentLabel } from "./src/utils/reportFormats";
+import { parseDecimal, roundMoney } from "./src/utils/numbers";
 import { buildSalesReport } from "./src/utils/reports";
 import { buildCreditNoteItem, buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
 import { explainSriResult, formatSriResult, sriUserMessage, userFriendlyActionError } from "./src/utils/sriMessages";
@@ -62,15 +64,6 @@ type Tab = AppTab;
 type ActionHandler = () => void | Promise<void>;
 
 const uid = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-const parseDecimal = (value: string) => Number(value.replace(",", "."));
-const roundMoney = (value: number) => Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
-const LIST_BATCH_SIZE = 25;
-const AUTO_BACKUP_DEBOUNCE_MS = Platform.OS === "web" ? 3000 : 1000;
-const REMOTE_REFRESH_THROTTLE_MS = Platform.OS === "web" ? 5000 : 30000;
-const WEB_REMOTE_REFRESH_INTERVAL_MS = 7000;
-const CONNECTIVITY_SYNC_THROTTLE_MS = 6000;
-const APP_BRAND = "FactuDarwin";
-const APP_TAGLINE = "Facturacion electronica Ecuador";
 type StartupErrorBoundaryState = {
   message: string;
 };
