@@ -29,6 +29,7 @@ import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CrudSection } from "./src/components/CrudSection";
+import { CreditNoteModal } from "./src/components/CreditNoteModal";
 import { DeleteEstablishmentModal } from "./src/components/DeleteEstablishmentModal";
 import { EstablishmentPickerModal } from "./src/components/EstablishmentPickerModal";
 import { ListItem } from "./src/components/ListItem";
@@ -82,7 +83,7 @@ import { buildStockCredits, buildStockMovements, getAvailableStockForSale, resto
 import { canUseEmissionScope, maxEmissionPointsForLicense } from "./src/utils/license";
 import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleTicketDocument, openHtmlViewer, shareGeneratedFile } from "./src/utils/printFiles";
 import { parseDecimal, roundMoney } from "./src/utils/numbers";
-import { buildCreditNoteItem, buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
+import { buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
 import { explainSriResult, formatSriResult, sriUserMessage, userFriendlyActionError } from "./src/utils/sriMessages";
 import { buildSupportDiagnostic, formatAuditDate, formatBackendHealth, formatBackupSummary, formatSyncStatus, formatTechnicalLogMeta, summarizeAppData, SyncState } from "./src/utils/support";
 import { syncPatchToBackend, syncSalePatchToBackend } from "./src/utils/sync";
@@ -2966,61 +2967,20 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         })}
       </Section>
 
-      <Modal visible={Boolean(creditNoteSource)} transparent animationType="slide" onRequestClose={closeCreditNoteForm}>
-        <View style={styles.creditModalBackdrop}>
-          <View style={styles.creditModal}>
-            <View style={styles.creditModalHeader}>
-              <View style={styles.flex}>
-                <Text style={styles.creditModalTitle}>Nota de credito</Text>
-                <Text style={styles.creditModalMeta}>
-                  {creditNoteSource ? `Factura ${documentNumber(creditNoteSource, data.issuer)}` : ""}
-                </Text>
-              </View>
-              <Pressable style={styles.smallButton} onPress={closeCreditNoteForm}>
-                <Text style={styles.smallButtonText}>Cerrar</Text>
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.creditModalContent}>
-              <Input label="Motivo" value={creditNoteReason} onChangeText={setCreditNoteReason} placeholder="Ej: devolucion parcial" />
-              <Pressable style={styles.creditSelectAllButton} onPress={fillCreditNoteTotal}>
-                <Text style={styles.creditSelectAllText}>Seleccionar todo disponible</Text>
-              </Pressable>
-              {creditNoteSource?.items.map((item, index) => {
-                const lineKey = getCreditLineKey(item, index);
-                const available = getCreditLineAvailable(data.sales, creditNoteSource, item, index);
-                const selectedQuantity = Math.max(0, parseDecimal(creditNoteQuantities[lineKey] || "0") || 0);
-                const selectedItem = selectedQuantity > 0 ? buildCreditNoteItem(item, selectedQuantity, lineKey) : undefined;
-                return (
-                  <View key={lineKey} style={styles.creditLineCard}>
-                    <Text style={styles.creditLineTitle}>{item.code} - {item.name}</Text>
-                    <Text style={styles.creditLineMeta}>Facturado: {formatQuantity(item.quantity)} | Disponible: {formatQuantity(available)} | Total linea: ${money(calculateLineTotal(item))}</Text>
-                    <View style={styles.row}>
-                      <View style={styles.flex}>
-                        <Input
-                          label="Cantidad a devolver"
-                          value={creditNoteQuantities[lineKey] || "0"}
-                          onChangeText={(value) => setCreditNoteQuantities((current) => ({ ...current, [lineKey]: value }))}
-                          keyboardType="decimal-pad"
-                        />
-                      </View>
-                      <View style={styles.creditLineTotalBox}>
-                        <Text style={styles.creditLineMeta}>Valor</Text>
-                        <Text style={styles.creditLineTotal}>{selectedItem ? `$${money(calculateLineTotal(selectedItem))}` : "$0.00"}</Text>
-                      </View>
-                    </View>
-                  </View>
-                );
-              })}
-              <View style={styles.creditTotalsBox}>
-                <Text style={styles.totalLine}>Subtotal: ${money(creditNotePreviewTotals.subtotal)}</Text>
-                <Text style={styles.totalLine}>IVA: ${money(creditNotePreviewTotals.tax)}</Text>
-                <Text style={styles.totalStrong}>Total nota credito: ${money(creditNotePreviewTotals.total)}</Text>
-              </View>
-              <PrimaryButton label={issuingCreditNote ? "Procesando..." : "Emitir nota de credito"} onPress={issuingCreditNote ? () => undefined : issueCreditNote} />
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      <CreditNoteModal
+        source={creditNoteSource}
+        issuer={data.issuer}
+        sales={data.sales}
+        reason={creditNoteReason}
+        quantities={creditNoteQuantities}
+        totals={creditNotePreviewTotals}
+        issuing={issuingCreditNote}
+        onReasonChange={setCreditNoteReason}
+        onQuantityChange={(lineKey, value) => setCreditNoteQuantities((current) => ({ ...current, [lineKey]: value }))}
+        onSelectAll={fillCreditNoteTotal}
+        onClose={closeCreditNoteForm}
+        onIssue={issueCreditNote}
+      />
 
       <ReceivedRetentionModal
         sale={retentionSale}
@@ -4714,48 +4674,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900",
     marginTop: 4
-  },
-  creditSelectAllButton: {
-    minHeight: 42,
-    borderRadius: 8,
-    backgroundColor: "#eef2ff",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12
-  },
-  creditSelectAllText: {
-    color: "#3730a3",
-    fontWeight: "900"
-  },
-  creditLineCard: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 8,
-    padding: 10,
-    gap: 8,
-    backgroundColor: "#fbfdff"
-  },
-  creditLineTitle: {
-    color: "#0f172a",
-    fontWeight: "900"
-  },
-  creditLineMeta: {
-    color: "#64748b",
-    fontSize: 12,
-    lineHeight: 17
-  },
-  creditLineTotalBox: {
-    minWidth: 100,
-    minHeight: 46,
-    borderRadius: 8,
-    backgroundColor: "#f1f5f9",
-    justifyContent: "center",
-    paddingHorizontal: 10
-  },
-  creditLineTotal: {
-    color: "#0f766e",
-    fontWeight: "900",
-    fontSize: 16
   },
   creditTotalsBox: {
     borderRadius: 8,
