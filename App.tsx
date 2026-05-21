@@ -41,6 +41,7 @@ import { PasswordChangeModal } from "./src/components/PasswordChangeModal";
 import { PlanLimitCard } from "./src/components/PlanLimitCard";
 import { PlanUpgradeModal } from "./src/components/PlanUpgradeModal";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
+import { ProductionChecklist } from "./src/components/ProductionChecklist";
 import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal";
@@ -3696,25 +3697,7 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
       </Section>
       <Section title="Estado de configuracion">
         <Text style={styles.paragraph}>Modo actual: {issuer.environment === "1" ? "PRUEBAS" : "PRODUCCION"}. Los avisos de produccion son informativos mientras siga trabajando en pruebas.</Text>
-        <Text style={styles.groupTitle}>Listo para trabajar</Text>
-        {productionChecklist.baseChecks.map((item) => (
-          <View key={item.label} style={[styles.checkRow, item.ok ? styles.checkOk : styles.checkPending]}>
-            <Text style={[styles.checkText, item.ok ? styles.checkOkText : styles.checkPendingText]}>{item.ok ? "OK" : "REVISAR"} | {item.label}</Text>
-          </View>
-        ))}
-        <Text style={styles.groupTitle}>Conexion y firma</Text>
-        <Text style={styles.paragraph}>Use Probar conexion cuando cambie servidor, certificado o ambiente. No es obligatorio tocarlo cada vez que entra a la app.</Text>
-        {productionChecklist.connectionChecks.map((item) => (
-          <View key={item.label} style={[styles.checkRow, item.ok ? styles.checkOk : styles.checkInfo]}>
-            <Text style={[styles.checkText, item.ok ? styles.checkOkText : styles.checkInfoText]}>{item.ok ? "OK" : item.pendingLabel} | {item.label}</Text>
-          </View>
-        ))}
-        <Text style={styles.groupTitle}>Pendiente solo para produccion</Text>
-        {productionChecklist.productionChecks.map((item) => (
-          <View key={item.label} style={[styles.checkRow, item.ok ? styles.checkOk : styles.checkInfo]}>
-            <Text style={[styles.checkText, item.ok ? styles.checkOkText : styles.checkInfoText]}>{item.ok ? "OK" : item.pendingLabel} | {item.label}</Text>
-          </View>
-        ))}
+        <ProductionChecklist checklist={productionChecklist} />
       </Section>
       <Section title="Plan activo">
         <Text style={styles.paragraph}>El plan comercial se administra desde el panel SaaS de DarwinSoft.</Text>
@@ -4063,37 +4046,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#f8fafc"
-  },
-  checkRow: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 9
-  },
-  checkOk: {
-    backgroundColor: "#ecfdf5",
-    borderColor: "#86efac"
-  },
-  checkPending: {
-    backgroundColor: "#fff7ed",
-    borderColor: "#fdba74"
-  },
-  checkInfo: {
-    backgroundColor: "#eff6ff",
-    borderColor: "#bfdbfe"
-  },
-  checkText: {
-    fontSize: 12,
-    fontWeight: "900"
-  },
-  checkOkText: {
-    color: "#047857"
-  },
-  checkPendingText: {
-    color: "#c2410c"
-  },
-  checkInfoText: {
-    color: "#1d4ed8"
   },
   tabs: {
     backgroundColor: "#ffffff",
