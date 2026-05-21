@@ -29,6 +29,7 @@ import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CrudSection } from "./src/components/CrudSection";
+import { EstablishmentPickerModal } from "./src/components/EstablishmentPickerModal";
 import { ListItem } from "./src/components/ListItem";
 import { LoginErrorModal } from "./src/components/LoginErrorModal";
 import { OnboardingModal } from "./src/components/OnboardingModal";
@@ -1107,23 +1108,15 @@ function AppContent() {
           </ScrollView>
         </KeyboardAvoidingView>
         <LoginErrorModal message={loginErrorModalMessage} onClose={() => setLoginErrorModalMessage("")} />
-        <Modal visible={establishmentOptionsVisible} transparent animationType="fade" onRequestClose={() => undefined}>
-          <View style={styles.smallNoticeBackdrop}>
-            <View style={styles.establishmentPickerModal}>
-              <Text style={styles.smallNoticeTitle}>Elija establecimiento</Text>
-              <Text style={styles.smallNoticeText}>Seleccione con que sucursal o punto de emision va a trabajar.</Text>
-              {(pendingLogin ? normalizedEstablishments(pendingLogin.data.issuer).filter((item) => item.active !== false) : []).map((item) => (
-                <Pressable key={item.id} style={styles.establishmentPickerOption} onPress={() => { void chooseLoginEstablishment(item.id); }}>
-                  <Text style={styles.companyChoiceTitle}>{item.name}</Text>
-                  <Text style={styles.companyChoiceMeta}>{item.establishment}-{item.emissionPoint} | Sec. factura {item.sequential}</Text>
-                </Pressable>
-              ))}
-              <Pressable style={styles.secondaryActionButton} onPress={() => { setPendingLogin(null); setEstablishmentOptionsVisible(false); }}>
-                <Text style={styles.secondaryActionText}>Cancelar</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Modal>
+        <EstablishmentPickerModal
+          visible={establishmentOptionsVisible}
+          title="Elija establecimiento"
+          subtitle="Seleccione con que sucursal o punto de emision va a trabajar."
+          establishments={pendingLogin ? normalizedEstablishments(pendingLogin.data.issuer).filter((item) => item.active !== false) : []}
+          cancelLabel="Cancelar"
+          onSelect={(id) => { void chooseLoginEstablishment(id); }}
+          onCancel={() => { setPendingLogin(null); setEstablishmentOptionsVisible(false); }}
+        />
       </SafeAreaView>
     );
   }
@@ -1266,26 +1259,17 @@ function AppContent() {
         </View>
       </Modal>
 
-      <Modal visible={establishmentSwitcherVisible} transparent animationType="fade" onRequestClose={() => setEstablishmentSwitcherVisible(false)}>
-        <View style={styles.smallNoticeBackdrop}>
-          <View style={styles.establishmentPickerModal}>
-            <Text style={styles.smallNoticeTitle}>Cambiar establecimiento</Text>
-            <Text style={styles.smallNoticeText}>Los proximos documentos usaran el punto seleccionado.</Text>
-            {switchableEstablishments.map((item) => {
-              const active = item.id === currentEstablishment.id;
-              return (
-                <Pressable key={item.id} style={[styles.establishmentPickerOption, active && styles.establishmentPickerOptionActive]} onPress={() => { void switchActiveEstablishment(item.id); }}>
-                  <Text style={styles.companyChoiceTitle}>{item.name}</Text>
-                  <Text style={styles.companyChoiceMeta}>{item.establishment}-{item.emissionPoint} | Sec. factura {item.sequential}</Text>
-                </Pressable>
-              );
-            })}
-            <Pressable style={styles.actionSheetCancel} onPress={() => setEstablishmentSwitcherVisible(false)}>
-              <Text style={styles.actionSheetCancelText}>Cerrar</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      <EstablishmentPickerModal
+        visible={establishmentSwitcherVisible}
+        title="Cambiar establecimiento"
+        subtitle="Los proximos documentos usaran el punto seleccionado."
+        establishments={switchableEstablishments}
+        activeId={currentEstablishment.id}
+        cancelLabel="Cerrar"
+        cancelVariant="cancel"
+        onSelect={(id) => { void switchActiveEstablishment(id); }}
+        onCancel={() => setEstablishmentSwitcherVisible(false)}
+      />
 
       <OnboardingModal
         visible={onboardingVisible}
@@ -1293,23 +1277,15 @@ function AppContent() {
         onClose={() => setOnboardingVisible(false)}
       />
 
-      <Modal visible={establishmentOptionsVisible} transparent animationType="fade" onRequestClose={() => undefined}>
-        <View style={styles.smallNoticeBackdrop}>
-          <View style={styles.establishmentPickerModal}>
-            <Text style={styles.smallNoticeTitle}>Elija establecimiento</Text>
-            <Text style={styles.smallNoticeText}>Seleccione con que sucursal o punto de emision va a trabajar.</Text>
-            {(pendingLogin ? normalizedEstablishments(pendingLogin.data.issuer).filter((item) => item.active !== false) : []).map((item) => (
-              <Pressable key={item.id} style={styles.establishmentPickerOption} onPress={() => { void chooseLoginEstablishment(item.id); }}>
-                <Text style={styles.companyChoiceTitle}>{item.name}</Text>
-                <Text style={styles.companyChoiceMeta}>{item.establishment}-{item.emissionPoint} | Sec. factura {item.sequential}</Text>
-              </Pressable>
-            ))}
-            <Pressable style={styles.secondaryActionButton} onPress={() => { setPendingLogin(null); setEstablishmentOptionsVisible(false); }}>
-              <Text style={styles.secondaryActionText}>Cancelar</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      <EstablishmentPickerModal
+        visible={establishmentOptionsVisible}
+        title="Elija establecimiento"
+        subtitle="Seleccione con que sucursal o punto de emision va a trabajar."
+        establishments={pendingLogin ? normalizedEstablishments(pendingLogin.data.issuer).filter((item) => item.active !== false) : []}
+        cancelLabel="Cancelar"
+        onSelect={(id) => { void chooseLoginEstablishment(id); }}
+        onCancel={() => { setPendingLogin(null); setEstablishmentOptionsVisible(false); }}
+      />
 
       <PasswordChangeModal
         visible={passwordChangeVisible}
@@ -4873,28 +4849,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "700",
     textAlign: "center"
-  },
-  establishmentPickerModal: {
-    width: "100%",
-    maxWidth: 380,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    backgroundColor: "#ffffff",
-    padding: 18,
-    gap: 10
-  },
-  establishmentPickerOption: {
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#99f6e4",
-    backgroundColor: "#f0fdfa",
-    paddingHorizontal: 12,
-    paddingVertical: 11
-  },
-  establishmentPickerOptionActive: {
-    borderColor: "#0f766e",
-    backgroundColor: "#ccfbf1"
   },
   smallNoticeTitle: {
     color: "#111827",
