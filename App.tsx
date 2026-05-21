@@ -54,14 +54,14 @@ import { SaleEditNotice } from "./src/components/SaleEditNotice";
 import { SaleItemsList } from "./src/components/SaleItemsList";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { SaleProductControls } from "./src/components/SaleProductControls";
+import { SaleProductPicker } from "./src/components/SaleProductPicker";
 import { SaleTotalsBox } from "./src/components/SaleTotalsBox";
-import { SelectedProductCard } from "./src/components/SelectedProductCard";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
 import { SyncCenterModal } from "./src/components/SyncCenterModal";
 import { TechnicalLogsList } from "./src/components/TechnicalLogsList";
 import { XmlPreviewModal } from "./src/components/XmlPreviewModal";
-import { CameraIcon, MenuIcon } from "./src/components/icons";
+import { MenuIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { IntegrationStatusInfo } from "./src/components/IntegrationStatusInfo";
 import { InvoiceStatsGrid } from "./src/components/InvoiceStatsGrid";
@@ -2746,25 +2746,19 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         </View>
 
         <View style={styles.saleGroup}>
-          <View style={styles.scanBox}>
-            <Input
-              label="Buscar o escanear producto"
-              value={productSearch}
-              onChangeText={setProductSearch}
-              placeholder="Codigo, barras o descripción"
-              autoCapitalize="characters"
-              onSubmitEditing={addProductSearchSubmit}
-              rightElement={(
-                <Pressable accessibilityRole="button" accessibilityLabel="Escanear producto con camara" style={styles.inputCameraButton} onPress={() => setSaleScannerVisible(true)}>
-                  <CameraIcon />
-                </Pressable>
-              )}
-            />
-          </View>
-          <Select label={`Seleccionar producto (${visibleProductsForSale.length}/${filteredProductsForSale.length})`} value={productId} onChange={setProductId} options={visibleProductsForSale.map((item) => ({ label: `${item.code} - ${item.name}`, value: item.id }))} />
-          {filteredProductsForSale.length === 0 ? <Empty text="No hay productos con esa busqueda." /> : null}
-          {visibleProductsForSale.length < filteredProductsForSale.length ? <LoadMoreButton label="Cargar mas productos" onPress={() => setVisibleProductCount((count) => count + LIST_BATCH_SIZE)} /> : null}
-          <SelectedProductCard product={selectedProduct} />
+          <SaleProductPicker
+            search={productSearch}
+            selectedProductId={productId}
+            visibleProducts={visibleProductsForSale}
+            filteredProductCount={filteredProductsForSale.length}
+            selectedProduct={selectedProduct}
+            canLoadMore={visibleProductsForSale.length < filteredProductsForSale.length}
+            onSearchChange={setProductSearch}
+            onProductChange={setProductId}
+            onSearchSubmit={addProductSearchSubmit}
+            onOpenScanner={() => setSaleScannerVisible(true)}
+            onLoadMore={() => setVisibleProductCount((count) => count + LIST_BATCH_SIZE)}
+          />
           <SaleProductControls
             product={selectedProduct}
             quantity={quantity}
@@ -4111,14 +4105,6 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: "#ffffff"
   },
-  scanBox: {
-    borderWidth: 1,
-    borderColor: "#dbe4ee",
-    borderRadius: 8,
-    padding: 12,
-    gap: 8,
-    backgroundColor: "#ffffff"
-  },
   groupTitle: {
     color: "#0f766e",
     fontWeight: "900",
@@ -4195,14 +4181,6 @@ const styles = StyleSheet.create({
     top: 6,
     bottom: 6,
     justifyContent: "center"
-  },
-  inputCameraButton: {
-    width: 42,
-    minHeight: 32,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#0f766e"
   },
   row: {
     flexDirection: "row",
