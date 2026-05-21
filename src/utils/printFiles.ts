@@ -3,10 +3,16 @@ import * as IntentLauncher from "expo-intent-launcher";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { Alert, Platform } from "react-native";
+import { Sale } from "../types";
 import { escapeHtml, sanitizeFileName } from "./format";
 
 export function mmToPrintPx(mm: number) {
   return Math.round((mm / 25.4) * 72);
+}
+
+export function estimateTicketPageHeightMm(sale: Sale) {
+  const itemLines = sale.items.reduce((sum, item) => sum + Math.max(1, Math.ceil(String(item.name || "").length / 24)), 0);
+  return Math.min(300, Math.max(120, 102 + itemLines * 8));
 }
 
 export async function createPdfBase64(html: string) {

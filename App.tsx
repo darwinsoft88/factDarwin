@@ -47,7 +47,7 @@ import { pickWebFile, readWebFileBase64 } from "./src/utils/files";
 import { buildCalendarDays, dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, sanitizeFileName, shortText, toInputDate } from "./src/utils/format";
 import { buildStockCredits, buildStockMovements, createInventoryMovement, getAvailableStockForSale, movementReason, movementTypeLabel, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
-import { createPdfBase64, mmToPrintPx, openHtmlViewer, openPdfFile, prepareGeneratedFile, shareGeneratedFile } from "./src/utils/printFiles";
+import { createPdfBase64, estimateTicketPageHeightMm, mmToPrintPx, openHtmlViewer, openPdfFile, prepareGeneratedFile, shareGeneratedFile } from "./src/utils/printFiles";
 import { buildMobileReportHtml, buildReportCsv, buildReportExcelHtml, buildReportHtml, formatIva104Report, formatSalesReport, paymentLabel } from "./src/utils/reportFormats";
 import { buildSalesReport } from "./src/utils/reports";
 import { buildCreditNoteItem, buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
@@ -3324,11 +3324,6 @@ async function handleTicketDocument(html: string, dialogTitle: string, pageHeigh
 }
 
 const TICKET_PRINT_WIDTH_MM = 80;
-
-function estimateTicketPageHeightMm(sale: Sale) {
-  const itemLines = sale.items.reduce((sum, item) => sum + Math.max(1, Math.ceil(String(item.name || "").length / 24)), 0);
-  return Math.min(300, Math.max(120, 102 + itemLines * 8));
-}
 
 function buildInternalTicketHtml(sale: Sale, client: Client, issuer: Issuer, pageHeightMm = estimateTicketPageHeightMm(sale)) {
   const rows = sale.items
