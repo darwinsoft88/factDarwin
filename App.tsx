@@ -39,6 +39,7 @@ import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsMo
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
+import { SyncCenterModal } from "./src/components/SyncCenterModal";
 import { TechnicalDetailModal } from "./src/components/TechnicalDetailModal";
 import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
@@ -1189,47 +1190,15 @@ function AppContent() {
         onLogout={logout}
       />
 
-      <Modal visible={syncCenterVisible} transparent animationType="slide" onRequestClose={() => setSyncCenterVisible(false)}>
-        <View style={styles.creditModalBackdrop}>
-          <View style={styles.diagnosticModal}>
-            <View style={styles.creditModalHeader}>
-              <View style={styles.flex}>
-                <Text style={styles.creditModalTitle}>Sincronizacion</Text>
-                <Text style={styles.creditModalMeta}>{formatSyncStatus(syncState, data)}</Text>
-              </View>
-              <Pressable style={styles.smallButton} onPress={() => setSyncCenterVisible(false)}>
-                <Text style={styles.smallButtonText}>Cerrar</Text>
-              </Pressable>
-            </View>
-            <ScrollView contentContainerStyle={styles.creditModalContent}>
-              <View style={styles.operationGrid}>
-                <OperationTile title="Pendientes" value={String((data.pendingSync || []).length)} detail="Cambios locales sin subir" tone={(data.pendingSync || []).length ? "warning" : "success"} />
-                <OperationTile title="Estado" value={syncState === "syncing" ? "Subiendo" : syncState === "error" ? "Error" : "OK"} detail={data.autoBackupEnabled === false ? "Modo manual" : "Respaldo automatico"} tone={syncState === "error" ? "danger" : syncState === "syncing" || (data.pendingSync || []).length ? "warning" : "success"} />
-              </View>
-              <Text selectable style={styles.inlineInfo}>Servidor: {data.backendUrl || "sin URL configurada"}</Text>
-              {data.autoBackupLastAt ? <Text style={styles.inlineInfo}>Ultima subida: {formatAuditDate(data.autoBackupLastAt)}</Text> : null}
-              {data.autoBackupLastError ? <Text style={[styles.inlineInfo, styles.errorText]}>Ultimo error: {data.autoBackupLastError}</Text> : null}
-              <View style={styles.buttonRow}>
-                <Pressable style={[styles.primaryButton, syncActionLoading && styles.disabledButton]} onPress={() => { void retryPendingSync(); }} disabled={syncActionLoading}>
-                  <Text style={styles.primaryButtonText}>{syncActionLoading ? "Procesando..." : "Reintentar pendientes"}</Text>
-                </Pressable>
-                <Pressable style={styles.secondaryActionButton} onPress={() => { void testSyncServer(); }} disabled={syncActionLoading}>
-                  <Text style={styles.secondaryActionText}>Probar servidor</Text>
-                </Pressable>
-              </View>
-              <Text style={styles.sectionMiniTitle}>Cola pendiente</Text>
-              {(data.pendingSync || []).length === 0 ? <Empty text="No hay cambios pendientes. Este dispositivo esta limpio." /> : null}
-              {(data.pendingSync || []).map((item) => (
-                <View key={item.id} style={styles.pendingSyncCard}>
-                  <Text style={styles.pendingSyncTitle}>{item.title}</Text>
-                  <Text style={styles.pendingSyncMeta}>{formatAuditDate(item.createdAt)} | Intentos: {item.attempts}</Text>
-                  {item.lastError ? <Text style={styles.pendingSyncError}>{item.lastError}</Text> : null}
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      <SyncCenterModal
+        visible={syncCenterVisible}
+        data={data}
+        syncState={syncState}
+        syncActionLoading={syncActionLoading}
+        onClose={() => setSyncCenterVisible(false)}
+        onRetryPending={() => { void retryPendingSync(); }}
+        onTestServer={() => { void testSyncServer(); }}
+      />
 
       <Modal visible={supportVisible} transparent animationType="slide" onRequestClose={() => setSupportVisible(false)}>
         <View style={styles.creditModalBackdrop}>
@@ -4890,29 +4859,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900",
     marginTop: 4
-  },
-  pendingSyncCard: {
-    borderWidth: 1,
-    borderColor: "#fde68a",
-    borderRadius: 8,
-    padding: 10,
-    backgroundColor: "#fffbeb",
-    gap: 4
-  },
-  pendingSyncTitle: {
-    color: "#111827",
-    fontWeight: "900"
-  },
-  pendingSyncMeta: {
-    color: "#64748b",
-    fontSize: 11,
-    fontWeight: "700"
-  },
-  pendingSyncError: {
-    color: "#92400e",
-    fontSize: 12,
-    fontWeight: "800",
-    lineHeight: 17
   },
   diagnosticText: {
     fontFamily: "monospace",
