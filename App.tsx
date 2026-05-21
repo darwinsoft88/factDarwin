@@ -42,6 +42,7 @@ import { buildDashboard } from "./src/utils/dashboard";
 import { formatReceivedRetentionDetail, formatSaleDetail } from "./src/utils/documentDetails";
 import { buildCreditNoteRideHtml, buildGuideRideHtml, buildInternalTicketHtml, buildProformaHtml, formatGuideDetail } from "./src/utils/documentHtml";
 import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, getRetryInfo, guideInActiveScope, guideNumber, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus, saleInActiveScope, scopedReportData } from "./src/utils/documents";
+import { confirmAction, getLocalVoidReason, showMessage } from "./src/utils/dialogs";
 import { activeEstablishment, activeIssuer, applyIdentityToIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
 import { isBackendConnectionError, loginErrorMessage } from "./src/utils/errors";
 import { pickWebFile, readWebFileBase64 } from "./src/utils/files";
@@ -3256,36 +3257,6 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       <ProcessingOverlay visible={Boolean(processingMessage)} message={processingMessage} />
     </View>
   );
-}
-
-function getLocalVoidReason(defaultReason: string) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    const reason = window.prompt("Motivo de anulacion local", defaultReason);
-    return reason === null ? "" : (reason.trim() || defaultReason);
-  }
-
-  return defaultReason;
-}
-
-function showMessage(title: string, message: string) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    window.alert(`${title}\n\n${message}`);
-    return;
-  }
-
-  Alert.alert(title, message);
-}
-
-function confirmAction(title: string, message: string, onConfirm: () => void) {
-  if (Platform.OS === "web" && typeof window !== "undefined") {
-    if (window.confirm(`${title}\n\n${message}`)) onConfirm();
-    return;
-  }
-
-  Alert.alert(title, message, [
-    { text: "Cancelar", style: "cancel" },
-    { text: "Eliminar", style: "destructive", onPress: onConfirm }
-  ]);
 }
 
 function DashboardView({ data, user, onNavigate }: { data: AppData; user: User; onNavigate: (tab: Tab) => void }) {
