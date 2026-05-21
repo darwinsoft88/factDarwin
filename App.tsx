@@ -31,6 +31,7 @@ import { CrudSection } from "./src/components/CrudSection";
 import { CreditNoteModal } from "./src/components/CreditNoteModal";
 import { DateRangeFilter } from "./src/components/DateRangeFilter";
 import { DeleteEstablishmentModal } from "./src/components/DeleteEstablishmentModal";
+import { DocumentTypeSelector } from "./src/components/DocumentTypeSelector";
 import { EstablishmentPickerModal } from "./src/components/EstablishmentPickerModal";
 import { ListItem } from "./src/components/ListItem";
 import { LoginErrorModal } from "./src/components/LoginErrorModal";
@@ -53,7 +54,7 @@ import { InlineInputButton, PasswordVisibilityButton } from "./src/components/in
 import { InvoiceStatsGrid } from "./src/components/InvoiceStatsGrid";
 import { OperationTile } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
-import { documentTypeOptions, paymentOptions } from "./src/constants/options";
+import { paymentOptions } from "./src/constants/options";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
 import { ReportsScreen } from "./src/screens/ReportsScreen";
 import { CashClosingScreen } from "./src/screens/CashClosingScreen";
@@ -2708,19 +2709,13 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       <Section title={sourceTicket ? `Facturando ticket ${sourceTicket.sequence}` : sourceProforma ? `Convirtiendo proforma ${sourceProforma.sequence}` : editingSale ? `Corrigiendo ${documentTypeLabel(editingSale)} ${editingSale.sequence}` : "Nueva venta"}>
         <SaleEditNotice sourceTicket={sourceTicket} sourceProforma={sourceProforma} editingSale={editingSale} onCancel={cancelEdit} />
         <View style={styles.saleGroupCompact}>
-          <Select
-            label="Seleccionar tipo de documento"
-            value={sourceTicket ? "factura" : sourceProforma ? documentType : editingSale ? editingSale.documentType || "factura" : documentType}
-            onChange={(value) => !editingSale && !sourceTicket && !sourceProforma && setDocumentType(value as DocumentType)}
-            options={documentTypeOptions}
+          <DocumentTypeSelector
+            value={documentType}
+            editingSale={editingSale}
+            sourceTicket={sourceTicket}
+            sourceProforma={sourceProforma}
+            onChange={setDocumentType}
           />
-          <Text style={styles.inlineInfo}>
-            {documentType === "proforma" || editingSale?.documentType === "proforma"
-              ? "Cotizacion: no descuenta inventario y no se envia al SRI."
-              : documentType === "nota_venta" || editingSale?.documentType === "nota_venta"
-              ? "Movimiento interno: descuenta inventario y no se envia al SRI."
-              : "Documento tributario: se firma y autoriza en el SRI."}
-          </Text>
         </View>
         <View style={styles.saleGroup}>
           <Input label="Buscar cliente" value={clientSearch} onChangeText={setClientSearch} placeholder="Nombre, cedula o RUC" autoCapitalize="none" />
