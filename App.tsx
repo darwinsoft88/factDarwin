@@ -38,6 +38,7 @@ import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canDeleteCatalog, 
 import { buildDashboard } from "./src/utils/dashboard";
 import { activeScopeId, closingInActiveScope, compareSalesNewestFirst, documentNumber, documentScopeId, guideInActiveScope, guideNumber, saleInActiveScope, scopedReportData } from "./src/utils/documents";
 import { activeEstablishment, activeIssuer, editableEstablishments, issuerForGuide, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
+import { isBackendConnectionError, loginErrorMessage } from "./src/utils/errors";
 import { buildCalendarDays, dateKey, escapeHtml, formatShortDate, formatSriDate, parseInputDate, sanitizeFileName, shortText, toInputDate } from "./src/utils/format";
 import { buildStockCredits, buildStockMovements, getAvailableStockForSale, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense, normalizeLicensePlanValue } from "./src/utils/license";
@@ -4408,22 +4409,6 @@ function validateItems(products: Product[], items: SaleItem[], errors: string[],
     const availableStock = product ? product.stock + (stockCredits.get(product.id) || 0) : 0;
     if (checkStock && product && quantity > availableStock) errors.push(`${product.name}: stock insuficiente. Disponible ${availableStock}, solicitado ${quantity}.`);
   });
-}
-
-function loginErrorMessage(error: unknown) {
-  const message = error instanceof Error ? error.message : "";
-  if (!message) return "No se pudo validar el acceso. Revise sus datos e intente nuevamente.";
-  if (message.includes("No hay conexion")) return message;
-  if (message.includes("varias empresas")) return message;
-  if (message.includes("clave") || message.includes("contrasena")) return message;
-  if (message.includes("No encontramos una cuenta")) return message;
-  if (message.includes("Credenciales invalidas")) return "No encontramos una cuenta activa con esos datos. Revise el correo/RUC o registre la empresa.";
-  return message;
-}
-
-function isBackendConnectionError(error: unknown) {
-  const message = error instanceof Error ? error.message : "";
-  return message.includes("No hay conexion");
 }
 
 function showMessage(title: string, message: string) {
