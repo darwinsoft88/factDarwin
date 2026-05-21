@@ -24,12 +24,12 @@ import {
   View
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
+import { AppMenuModal } from "./src/components/AppMenuModal";
 import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CrudSection } from "./src/components/CrudSection";
 import { ListItem } from "./src/components/ListItem";
-import { MenuAction } from "./src/components/MenuAction";
 import { OnboardingStep } from "./src/components/OnboardingStep";
 import { PasswordChangeModal } from "./src/components/PasswordChangeModal";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
@@ -1190,24 +1190,20 @@ function AppContent() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      <Modal visible={appMenuVisible} transparent animationType="fade" onRequestClose={() => setAppMenuVisible(false)}>
-        <Pressable style={styles.menuBackdrop} onPress={() => setAppMenuVisible(false)}>
-          <Pressable style={styles.appMenu}>
-            <View style={styles.appMenuHeader}>
-              <Text style={styles.appMenuTitle}>{session.name || roleLabel(session.role)}</Text>
-              <Text style={styles.appMenuMeta}>{compactLicenseStatusLabel(data.license)}</Text>
-            </View>
-            <MenuAction icon="S" label="Sincronizar" onPress={() => { void runManualSync(); }} />
-            <MenuAction icon="P" label="Pendientes sync" onPress={openSyncCenter} />
-            {switchableEstablishments.length > 1 ? <MenuAction icon="E" label="Cambiar establecimiento" onPress={() => setEstablishmentSwitcherVisible(true)} /> : null}
-            <MenuAction icon="C" label="Configuracion" onPress={() => openAdminSettings("configuracion")} />
-            <MenuAction icon="L" label="Licencia" onPress={() => openAdminSettings("licencia")} />
-            <MenuAction icon="?" label="Soporte" onPress={openSupport} />
-            <View style={styles.appMenuDivider} />
-            <MenuAction icon=">" label="Salir" tone="danger" onPress={logout} />
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <AppMenuModal
+        visible={appMenuVisible}
+        userLabel={session.name || roleLabel(session.role)}
+        licenseLabel={compactLicenseStatusLabel(data.license)}
+        canSwitchEstablishment={switchableEstablishments.length > 1}
+        onClose={() => setAppMenuVisible(false)}
+        onSync={() => { void runManualSync(); }}
+        onOpenSyncCenter={openSyncCenter}
+        onSwitchEstablishment={() => setEstablishmentSwitcherVisible(true)}
+        onOpenSettings={() => openAdminSettings("configuracion")}
+        onOpenLicense={() => openAdminSettings("licencia")}
+        onOpenSupport={openSupport}
+        onLogout={logout}
+      />
 
       <Modal visible={syncCenterVisible} transparent animationType="slide" onRequestClose={() => setSyncCenterVisible(false)}>
         <View style={styles.creditModalBackdrop}>
@@ -4380,46 +4376,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#f8fafc"
-  },
-  menuBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.16)",
-    alignItems: "flex-end",
-    paddingTop: Platform.OS === "android" ? (NativeStatusBar.currentHeight || 0) + 50 : 58,
-    paddingHorizontal: 12
-  },
-  appMenu: {
-    width: 238,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#ffffff",
-    padding: 8,
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.14,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6
-  },
-  appMenuHeader: {
-    paddingHorizontal: 10,
-    paddingVertical: 8
-  },
-  appMenuTitle: {
-    color: "#111827",
-    fontSize: 13,
-    fontWeight: "900"
-  },
-  appMenuMeta: {
-    marginTop: 2,
-    color: "#64748b",
-    fontSize: 11,
-    fontWeight: "700"
-  },
-  appMenuDivider: {
-    height: 1,
-    backgroundColor: "#e2e8f0",
-    marginVertical: 6
   },
   onboardingBackdrop: {
     flex: 1,
