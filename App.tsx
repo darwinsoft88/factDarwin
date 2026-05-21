@@ -29,6 +29,7 @@ import { BackupStatusInfo } from "./src/components/BackupStatusInfo";
 import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
+import { CompanyAssetsSection } from "./src/components/CompanyAssetsSection";
 import { CrudSection } from "./src/components/CrudSection";
 import { CreditNoteModal } from "./src/components/CreditNoteModal";
 import { DateRangeFilter } from "./src/components/DateRangeFilter";
@@ -3686,18 +3687,16 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         {connectionResult ? <Text selectable style={styles.xml}>{connectionResult}</Text> : null}
       </Section>
       <Section title="Logo y firma electronica">
-        <Text style={styles.paragraph}>Estos archivos se guardan por empresa en el servidor. El certificado .p12 no se guarda en la app y queda cifrado.</Text>
-        {assetStatus ? <Text style={[styles.inlineInfo, assetStatusTone === "success" && styles.successText, assetStatusTone === "error" && styles.errorText]}>{assetStatus}</Text> : null}
-        <View style={styles.row}>
-          <View style={styles.flex}>
-            <PrimaryButton label={uploadingAsset ? "Procesando..." : "Subir logo"} onPress={uploadingAsset ? () => undefined : uploadLogoFromWeb} />
-          </View>
-          <View style={styles.flex}>
-            <PrimaryButton label="Ver estado" onPress={() => { void refreshAssetsStatus(true); }} />
-          </View>
-        </View>
-        <Input label="Contrasena certificado .p12" value={certificatePassword} onChangeText={setCertificatePassword} secureTextEntry autoComplete="new-password" />
-        <PrimaryButton label={uploadingAsset ? "Procesando..." : "Subir certificado .p12"} onPress={uploadingAsset ? () => undefined : uploadCertificateFromWeb} />
+        <CompanyAssetsSection
+          assetStatus={assetStatus}
+          assetStatusTone={assetStatusTone}
+          uploading={uploadingAsset}
+          certificatePassword={certificatePassword}
+          onCertificatePasswordChange={setCertificatePassword}
+          onUploadLogo={uploadLogoFromWeb}
+          onRefreshStatus={() => { void refreshAssetsStatus(true); }}
+          onUploadCertificate={uploadCertificateFromWeb}
+        />
       </Section>
       <Section title="Estado de configuracion">
         <Text style={styles.paragraph}>Modo actual: {issuer.environment === "1" ? "PRUEBAS" : "PRODUCCION"}. Los avisos de produccion son informativos mientras siga trabajando en pruebas.</Text>
