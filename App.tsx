@@ -33,6 +33,7 @@ import { MenuAction } from "./src/components/MenuAction";
 import { OnboardingStep } from "./src/components/OnboardingStep";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
 import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
+import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { OperationTile, StatBox } from "./src/components/metrics";
@@ -4531,72 +4532,6 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         </View>
       </Modal>
     </View>
-  );
-}
-
-function QuickClientEditor({
-  visible,
-  form,
-  onChange,
-  onSave,
-  onClose
-}: {
-  visible: boolean;
-  form: {
-    name: string;
-    identification: string;
-    email: string;
-    phone: string;
-    address: string;
-    identificationType: Client["identificationType"];
-  };
-  onChange: (form: {
-    name: string;
-    identification: string;
-    email: string;
-    phone: string;
-    address: string;
-    identificationType: Client["identificationType"];
-  }) => void;
-  onSave: () => void;
-  onClose: () => void;
-}) {
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.creditModalBackdrop}>
-        <View style={styles.quickClientModal}>
-          <View style={styles.creditModalHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.creditModalTitle}>Editar cliente</Text>
-              <Text style={styles.creditModalMeta}>Corrija los datos sin salir de la venta.</Text>
-            </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled">
-            <Input label="Nombre / razon social" value={form.name} onChangeText={(name) => onChange({ ...form, name })} />
-            <Input label="Identificacion" value={form.identification} onChangeText={(identification) => onChange({ ...form, identification })} keyboardType="number-pad" />
-            <Select
-              label="Tipo"
-              value={form.identificationType}
-              onChange={(identificationType) => onChange({ ...form, identificationType: identificationType as Client["identificationType"] })}
-              options={[
-                { label: "RUC", value: "04" },
-                { label: "Cedula", value: "05" },
-                { label: "Pasaporte", value: "06" },
-                { label: "Consumidor final", value: "07" },
-                { label: "Exterior", value: "08" }
-              ]}
-            />
-            <Input label="Email" value={form.email} onChangeText={(email) => onChange({ ...form, email })} autoCapitalize="none" />
-            <Input label="Telefono WhatsApp" value={form.phone} onChangeText={(phone) => onChange({ ...form, phone })} keyboardType="phone-pad" />
-            <Input label="Direccion" value={form.address} onChangeText={(address) => onChange({ ...form, address })} />
-            <PrimaryButton label="Guardar y continuar venta" onPress={onSave} />
-          </ScrollView>
-        </View>
-      </View>
-    </Modal>
   );
 }
 
