@@ -30,6 +30,7 @@ import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CrudSection } from "./src/components/CrudSection";
 import { ListItem } from "./src/components/ListItem";
+import { LoginErrorModal } from "./src/components/LoginErrorModal";
 import { OnboardingStep } from "./src/components/OnboardingStep";
 import { PasswordChangeModal } from "./src/components/PasswordChangeModal";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
@@ -1105,17 +1106,7 @@ function AppContent() {
           )}
           </ScrollView>
         </KeyboardAvoidingView>
-        <Modal visible={Boolean(loginErrorModalMessage)} transparent animationType="fade" onRequestClose={() => setLoginErrorModalMessage("")}>
-          <View style={styles.smallNoticeBackdrop}>
-            <View style={styles.smallNoticeModal}>
-              <Text style={styles.smallNoticeTitle}>No se pudo iniciar sesion</Text>
-              <Text style={styles.smallNoticeText}>{loginErrorModalMessage}</Text>
-              <Pressable style={styles.primaryButton} onPress={() => setLoginErrorModalMessage("")}>
-                <Text style={styles.primaryButtonText}>Entendido</Text>
-              </Pressable>
-            </View>
-          </View>
-        </Modal>
+        <LoginErrorModal message={loginErrorModalMessage} onClose={() => setLoginErrorModalMessage("")} />
         <Modal visible={establishmentOptionsVisible} transparent animationType="fade" onRequestClose={() => undefined}>
           <View style={styles.smallNoticeBackdrop}>
             <View style={styles.establishmentPickerModal}>
