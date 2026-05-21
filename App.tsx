@@ -25,6 +25,7 @@ import {
   View
 } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
+import { CameraIcon, MenuIcon, PencilIcon } from "./src/components/icons";
 import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { AlertRow, OperationTile, QuickAction, ReportRow, StatBox } from "./src/components/metrics";
 import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
@@ -5905,31 +5906,6 @@ function ProcessingOverlay({ visible, message }: { visible: boolean; message: st
   );
 }
 
-function CameraIcon() {
-  return (
-    <View style={styles.cameraIconBody}>
-      <View style={styles.cameraIconTop} />
-      <View style={styles.cameraIconLens} />
-    </View>
-  );
-}
-
-function MenuIcon() {
-  return (
-    <View style={styles.menuIcon}>
-      <View style={styles.menuIconLine} />
-      <View style={styles.menuIconLine} />
-      <View style={styles.menuIconLine} />
-    </View>
-  );
-}
-
-function PencilIcon() {
-  return (
-    <Text style={styles.editEmojiIcon}>✎</Text>
-  );
-}
-
 function MenuAction({ icon, label, tone = "default", onPress }: { icon: string; label: string; tone?: "default" | "danger"; onPress: () => void }) {
   const danger = tone === "danger";
   return (
@@ -6591,15 +6567,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#f8fafc"
   },
-  menuIcon: {
-    width: 16,
-    gap: 3
-  },
-  menuIconLine: {
-    height: 2,
-    borderRadius: 2,
-    backgroundColor: "#64748b"
-  },
   menuBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.16)",
@@ -7046,13 +7013,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#0f766e"
   },
-  editEmojiIcon: {
-    color: "#ffffff",
-    fontSize: 18,
-    lineHeight: 20,
-    fontWeight: "900",
-    textAlign: "center"
-  },
   secondaryActionButton: {
     minHeight: 44,
     borderRadius: 8,
@@ -7190,30 +7150,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#0f766e"
-  },
-  cameraIconBody: {
-    width: 18,
-    height: 14,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: "#ffffff",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  cameraIconTop: {
-    position: "absolute",
-    top: -5,
-    width: 8,
-    height: 4,
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
-    backgroundColor: "#ffffff"
-  },
-  cameraIconLens: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#ffffff"
   },
   dateField: {
     minHeight: 44,
