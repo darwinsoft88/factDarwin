@@ -56,6 +56,7 @@ import { SaleItemsList } from "./src/components/SaleItemsList";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { SaleProductControls } from "./src/components/SaleProductControls";
 import { SaleProductPicker } from "./src/components/SaleProductPicker";
+import { SaleSubmitButton } from "./src/components/SaleSubmitButton";
 import { SaleTotalsBox } from "./src/components/SaleTotalsBox";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
@@ -2781,10 +2782,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         </View>
         <SaleTotalsBox subtotal={totals.subtotal} discount={calculateTotalDiscount(items)} tax={totals.tax} total={totals.total} />
         <DismissibleNotice message={issueNotice} onDismiss={() => setIssueNotice("")} />
-        <PrimaryButton
-          label={issuing ? "Procesando..." : sourceTicket ? "Facturar ticket" : sourceProforma ? (documentType === "factura" ? "Facturar proforma" : "Crear ticket desde proforma") : editingSale ? (editingSale.documentType === "nota_venta" || editingSale.documentType === "proforma" ? "Guardar correccion" : "Guardar y reintentar") : documentType === "proforma" ? "Guardar proforma" : documentType === "nota_venta" ? "Guardar nota de venta" : "Emitir factura"}
-          onPress={issuing ? () => undefined : issue}
-        />
+        <SaleSubmitButton issuing={issuing} documentType={documentType} editingSale={editingSale} sourceTicket={sourceTicket} sourceProforma={sourceProforma} onSubmit={issue} />
       </Section>
 
       <Section title="Facturas">
