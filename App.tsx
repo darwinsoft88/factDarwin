@@ -44,6 +44,7 @@ import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsMo
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal";
 import { SaleEditNotice } from "./src/components/SaleEditNotice";
+import { SaleItemsList } from "./src/components/SaleItemsList";
 import { SaleLineEditor } from "./src/components/SaleLineEditor";
 import { SaleProductControls } from "./src/components/SaleProductControls";
 import { SaleTotalsBox } from "./src/components/SaleTotalsBox";
@@ -70,7 +71,7 @@ import { UsersScreen } from "./src/screens/UsersScreen";
 import { AuthorizationResponse, BackendCompanyOption, TechnicalLog, authorizeInvoice, backupAppData, changeBackendPassword, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, loginBackend, lookupIdentityData, mergeBackendData, registerBackend, requestPasswordReset, reserveDocumentSequence, restoreAppData, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
 import { buildRideHtml } from "./src/services/ride";
 import { hashPassword } from "./src/services/security";
-import { buildCreditNoteXml, buildInvoiceXml, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal, calculateTotalDiscount, calculateTotals, createAccessKey, createCreditNoteAccessKey, grossToNetUnitPrice, money, nextSequence } from "./src/services/sri";
+import { buildCreditNoteXml, buildInvoiceXml, calculateLineTax, calculateLineTotal, calculateTotalDiscount, calculateTotals, createAccessKey, createCreditNoteAccessKey, grossToNetUnitPrice, money, nextSequence } from "./src/services/sri";
 import { clearSession, initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
 import { AppData, AppLicense, Client, DocumentType, InventoryMovement, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
 import { accountingMoney, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
@@ -2765,16 +2766,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
           />
         </View>
 
-        {items.map((item, index) => (
-          <ListItem
-            key={`${item.productId}-${index}`}
-            title={`${item.quantity} x ${item.name}`}
-            meta={`Base $${money(calculateLineSubtotal(item))} | Desc. $${money(calculateLineDiscount(item))} | IVA $${money(calculateLineTax(item))} | Total $${money(calculateLineTotal(item))}`}
-            editLabel="Editar"
-            onEdit={() => openLineEditor(index)}
-            onDelete={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}
-          />
-        ))}
+        <SaleItemsList items={items} onEdit={openLineEditor} onDelete={(index) => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
         <View style={styles.saleGroupCompact}>
           <Select label="Forma de pago" value={paymentMethod} onChange={(value) => setPaymentMethod(value as PaymentMethod)} options={paymentOptions} />
         </View>
