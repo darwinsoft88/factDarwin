@@ -21,6 +21,7 @@ SRI_ALLOW_SEND=false
 SRI_ALLOW_INSECURE_TLS=false
 AUTH_REQUIRED=true
 JWT_SECRET=usa_un_secreto_largo_y_privado
+ASSET_ENCRYPTION_SECRET=usa_otro_secreto_estable_para_firmas_y_activos
 JWT_EXPIRES_HOURS=12
 MASTER_ADMIN_KEY=clave_larga_para_panel_darwinsoft
 # Produccion recomendada:
@@ -29,6 +30,8 @@ MASTER_ADMIN_KEY=clave_larga_para_panel_darwinsoft
 ```
 
 No subas `backend/.env` ni `backend/certs/firma.p12` a Git.
+
+`ASSET_ENCRYPTION_SECRET` cifra la firma `.p12` que cada empresa sube al servidor. Debe mantenerse estable entre despliegues; cambiarlo sin conservar el valor anterior obliga a volver a subir el `.p12`.
 
 ## Ejecutar
 
@@ -252,6 +255,14 @@ El backend soporta dos motores:
 
 - Sin `DATABASE_URL`: usa SQLite local en `backend/data/factura-sri-main.db`.
 - Con `DATABASE_URL`: usa PostgreSQL, recomendado para produccion.
+
+En modo SaaS, las tablas normalizadas usan `company_id` para separar tenants. Toda consulta de historial, reporte o soporte debe filtrar por empresa:
+
+```sql
+WHERE company_id = $1
+```
+
+Esto aplica a ventas, items, guias, clientes, productos, usuarios, inventario, auditoria, cajas y secuencias.
 
 Ejemplo PostgreSQL local:
 

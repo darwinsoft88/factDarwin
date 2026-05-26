@@ -6,6 +6,7 @@ const config = require("./config");
 
 const MAX_LOGO_BYTES = 1024 * 1024;
 const MAX_CERT_BYTES = 3 * 1024 * 1024;
+const ENCRYPTION_PREFIX = "FDENC1";
 const ALLOWED_LOGO_TYPES = new Map([
   ["image/png", ".png"],
   ["image/jpeg", ".jpg"],
@@ -87,12 +88,37 @@ function getTenantCertificate(companyId) {
 function getTenantAssetStatus(companyId) {
   assertCompanyId(companyId);
   const logo = getTenantLogo(companyId);
-  const cert = getTenantCertificate(companyId);
+  const cert = getTenantCertificateStatus(companyId);
   return {
     ok: true,
     logo: logo ? { configured: true, url: `/api/company/logo?companyId=${encodeURIComponent(companyId)}` } : { configured: false },
-    certificate: cert ? { configured: true, uploadedAt: cert.uploadedAt, fileName: cert.fileName, size: cert.size } : { configured: false }
+    certificate: cert
   };
+}
+
+function getTenantCertificateStatus(companyId) {
+  const dir = tenantDir(companyId);
+  const certPath = path.join(dir, "firma.p12.enc");
+  const metaPath = path.join(dir, "firma.meta.json");
+  if (!fs.existsSync(certPath) || !fs.existsSync(metaPath)) return { configured: false };
+
+  try {
+    const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+    decryptBuffer(fs.readFileSync(certPath));
+    decryptText(Buffer.from(String(meta.password || ""), "base64"));
+    return {
+      configured: true,
+      uploadedAt: meta.uploadedAt || "",
+      fileName: meta.fileName || "firma.p12",
+      size: Number(meta.size || 0)
+    };
+  } catch {
+    return {
+      configured: false,
+      needsUpload: true,
+      error: "El certificado guardado no se puede leer con la llave actual. Configure ASSET_ENCRYPTION_SECRET anterior o vuelva a subir el .p12."
+    };
+  }
 }
 
 function validateP12(buffer, password) {
@@ -134,21 +160,35 @@ function removeExistingLogo(dir) {
 }
 
 function encryptBuffer(buffer) {
-  const key = encryptionKey();
+  const key = encryptionKey(config.assetEncryptionSecret);
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   const encrypted = Buffer.concat([cipher.update(buffer), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return Buffer.concat([Buffer.from("FDENC1"), iv, tag, encrypted]);
+  return Buffer.concat([Buffer.from(ENCRYPTION_PREFIX), iv, tag, encrypted]);
 }
 
 function decryptBuffer(buffer) {
   const prefix = buffer.subarray(0, 6).toString();
-  if (prefix !== "FDENC1") throw new Error("Archivo cifrado invalido.");
+  if (prefix !== ENCRYPTION_PREFIX) throw new Error("Archivo cifrado invalido.");
+  const errors = [];
+  for (const secret of encryptionSecrets()) {
+    try {
+      return decryptBufferWithSecret(buffer, secret);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  const error = new Error("No se pudo descifrar el archivo. Revise ASSET_ENCRYPTION_SECRET o vuelva a subir el .p12.");
+  error.cause = errors[0];
+  throw error;
+}
+
+function decryptBufferWithSecret(buffer, secret) {
   const iv = buffer.subarray(6, 18);
   const tag = buffer.subarray(18, 34);
   const encrypted = buffer.subarray(34);
-  const decipher = crypto.createDecipheriv("aes-256-gcm", encryptionKey(), iv);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", encryptionKey(secret), iv);
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(encrypted), decipher.final()]);
 }
@@ -161,8 +201,12 @@ function decryptText(buffer) {
   return decryptBuffer(buffer).toString("utf8");
 }
 
-function encryptionKey() {
-  return crypto.createHash("sha256").update(`tenant-assets:${config.jwtSecret}`).digest();
+function encryptionSecrets() {
+  return Array.from(new Set([config.assetEncryptionSecret, config.jwtSecret].filter(Boolean)));
+}
+
+function encryptionKey(secret) {
+  return crypto.createHash("sha256").update(`tenant-assets:${secret}`).digest();
 }
 
 function assertCompanyId(companyId) {

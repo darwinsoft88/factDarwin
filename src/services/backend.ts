@@ -145,9 +145,11 @@ export type CompanyAssetsStatus = {
   };
   certificate?: {
     configured?: boolean;
+    needsUpload?: boolean;
     uploadedAt?: string;
     fileName?: string;
     size?: number;
+    error?: string;
   };
   error?: string;
 };

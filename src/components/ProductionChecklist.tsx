@@ -1,23 +1,23 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-type ChecklistItem = {
+export type ProductionChecklistItem = {
   label: string;
   ok: boolean;
   pendingLabel?: string;
 };
 
-type ProductionChecklistValue = {
-  baseChecks: ChecklistItem[];
-  connectionChecks: ChecklistItem[];
-  productionChecks: ChecklistItem[];
+export type ProductionChecklistValue = {
+  baseChecks: ProductionChecklistItem[];
+  connectionChecks: ProductionChecklistItem[];
+  productionChecks: ProductionChecklistItem[];
 };
 
 type ProductionChecklistProps = {
   checklist: ProductionChecklistValue;
 };
 
-function CheckRow({ item, pendingLabel, infoOnly = false }: { item: ChecklistItem; pendingLabel: string; infoOnly?: boolean }) {
+function CheckRow({ item, pendingLabel, infoOnly = false }: { item: ProductionChecklistItem; pendingLabel: string; infoOnly?: boolean }) {
   const pendingStyle = infoOnly ? styles.checkInfo : styles.checkPending;
   const pendingTextStyle = infoOnly ? styles.checkInfoText : styles.checkPendingText;
 

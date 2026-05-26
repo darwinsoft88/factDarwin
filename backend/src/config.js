@@ -10,6 +10,7 @@ const nodeEnv = process.env.NODE_ENV === "production" ? "production" : "developm
 const isProduction = nodeEnv === "production" || env === "production";
 const defaultJwtSecret = "CAMBIA_ESTE_SECRETO_JWT_EN_PRODUCCION";
 const jwtSecret = process.env.JWT_SECRET || defaultJwtSecret;
+const assetEncryptionSecret = process.env.ASSET_ENCRYPTION_SECRET || jwtSecret;
 const allowedOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
@@ -22,8 +23,23 @@ function assertProductionConfig() {
   if (!process.env.JWT_SECRET || jwtSecret === defaultJwtSecret || jwtSecret.length < 32 || /CAMBIA|CHANGE/i.test(jwtSecret)) {
     errors.push("JWT_SECRET debe ser un secreto real de al menos 32 caracteres.");
   }
+  if (!process.env.ASSET_ENCRYPTION_SECRET || assetEncryptionSecret.length < 32 || /CAMBIA|CHANGE/i.test(assetEncryptionSecret)) {
+    errors.push("ASSET_ENCRYPTION_SECRET debe ser un secreto estable de al menos 32 caracteres para cifrar firmas y logos.");
+  }
   if (process.env.AUTH_REQUIRED === "false") {
     errors.push("AUTH_REQUIRED no puede estar desactivado en produccion.");
+  }
+  if (!process.env.DATABASE_URL) {
+    errors.push("DATABASE_URL es obligatorio en produccion; use PostgreSQL, no SQLite local.");
+  }
+  if (process.env.SRI_ALLOW_INSECURE_TLS === "true") {
+    errors.push("SRI_ALLOW_INSECURE_TLS no puede estar activo en produccion.");
+  }
+  if (process.env.SRI_ENV === "production" && process.env.SRI_ALLOW_SEND !== "true") {
+    errors.push("SRI_ALLOW_SEND debe estar en true cuando SRI_ENV=production.");
+  }
+  if (!process.env.PUBLIC_BACKEND_URL || !/^https:\/\//i.test(process.env.PUBLIC_BACKEND_URL)) {
+    errors.push("PUBLIC_BACKEND_URL debe ser una URL HTTPS publica en produccion.");
   }
 
   if (errors.length > 0) {
@@ -46,6 +62,7 @@ module.exports = {
   sriAllowInsecureTls: process.env.SRI_ALLOW_INSECURE_TLS === "true",
   authRequired: process.env.AUTH_REQUIRED !== "false",
   jwtSecret,
+  assetEncryptionSecret,
   jwtExpiresInHours: Number(process.env.JWT_EXPIRES_HOURS || 12),
   masterAdminKey: process.env.MASTER_ADMIN_KEY || "",
   assertProductionConfig,

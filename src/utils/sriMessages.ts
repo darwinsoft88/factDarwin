@@ -1,6 +1,14 @@
 import { AuthorizationResponse } from "../services/backend";
 import { shortText } from "./format";
 
+function sanitizeSriRaw(raw: string) {
+  return raw
+    .replace(/RucCertificado:\s*\d+/gi, "RucCertificado")
+    .replace(/RucCertificado:\d+/gi, "RucCertificado")
+    .replace(/RucComprobante:\s*\d+/gi, "RucComprobante")
+    .replace(/RucComprobante:\d+/gi, "RucComprobante");
+}
+
 export function userFriendlyActionError(error: unknown, action: "reserve-sequence" | "authorize-invoice" | "sync" | "email" | "generic" = "generic") {
   const raw = error instanceof Error ? error.message : String(error || "");
   const lower = raw.toLowerCase();
@@ -63,8 +71,16 @@ export function formatSriResult(result: AuthorizationResponse) {
 }
 
 export function explainSriResult(result: AuthorizationResponse) {
-  const raw = `${result.error || ""} ${result.message || ""} ${result.status || ""} ${result.authorizationStatus || ""} ${result.sriMessage || ""} ${JSON.stringify(result.reception || {})} ${JSON.stringify(result.authorization || {})}`.toUpperCase();
+  const raw = sanitizeSriRaw(`${result.error || ""} ${result.message || ""} ${result.status || ""} ${result.authorizationStatus || ""} ${result.sriMessage || ""} ${JSON.stringify(result.reception || {})} ${JSON.stringify(result.authorization || {})}`).toUpperCase();
   const text = shortText([result.error, result.message, result.sriMessage].filter(Boolean).join(" | "), 260);
+
+  if (raw.includes("RUCERTIFICADO") || raw.includes("FIRMA INVALIDA")) {
+    return {
+      title: "Problema de firma electronica",
+      detail: "No se encontro la firma .p12 de la empresa activa. Revise que la empresa haya cargado su certificado .p12 y la contrasena correcta.",
+      action: "Suba el .p12 correcto y su clave en configuracion de la empresa activa."
+    };
+  }
 
   if (result.authorizationStatus === "AUTORIZADO" || raw.includes("<ESTADO>AUTORIZADO</ESTADO>")) {
     return {

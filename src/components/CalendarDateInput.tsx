@@ -5,6 +5,7 @@ import { buildCalendarDays, parseInputDate, toInputDate } from "../utils/format"
 
 export function CalendarDateInput({ label, value, onChange, allowClear = false }: { label: string; value: string; onChange: (value: string) => void; allowClear?: boolean }) {
   const parsedValue = parseInputDate(value, "start");
+  const parsedValueTime = parsedValue?.getTime();
   const [visible, setVisible] = useState(false);
   const [cursorDate, setCursorDate] = useState(parsedValue || new Date());
   const year = cursorDate.getFullYear();
@@ -14,8 +15,8 @@ export function CalendarDateInput({ label, value, onChange, allowClear = false }
 
   useEffect(() => {
     if (!visible) return;
-    setCursorDate(parsedValue || new Date());
-  }, [parsedValue?.getTime(), visible]);
+    setCursorDate(parsedValueTime ? new Date(parsedValueTime) : new Date());
+  }, [parsedValueTime, visible]);
 
   const moveMonth = (amount: number) => {
     setCursorDate((current) => new Date(current.getFullYear(), current.getMonth() + amount, 1));

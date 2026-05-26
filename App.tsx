@@ -3,14 +3,12 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as Network from "expo-network";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   AppState,
-  ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
-  Image,
   Linking,
   Platform,
   Pressable,
@@ -21,26 +19,26 @@ import {
   Text,
   View
 } from "react-native";
-import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "./src/components/common";
+import { Empty, LoadMoreButton, Section } from "./src/components/common";
 import { ActivePlanInfo } from "./src/components/ActivePlanInfo";
 import { AppMenuModal } from "./src/components/AppMenuModal";
-import { AuditLogList } from "./src/components/AuditLogList";
-import { AutoBackupToggle } from "./src/components/AutoBackupToggle";
-import { BackupStatusInfo } from "./src/components/BackupStatusInfo";
+import { AuditSection } from "./src/components/AuditSection";
 import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
 import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CompanyAssetsSection } from "./src/components/CompanyAssetsSection";
-import { ConnectionResultText } from "./src/components/ConnectionResultText";
 import { CrudSection } from "./src/components/CrudSection";
 import { CreditNoteModal } from "./src/components/CreditNoteModal";
+import { DatabaseSyncSection } from "./src/components/DatabaseSyncSection";
 import { DeleteEstablishmentModal } from "./src/components/DeleteEstablishmentModal";
 import { DismissibleNotice } from "./src/components/DismissibleNotice";
 import { DocumentTypeSelector } from "./src/components/DocumentTypeSelector";
 import { EstablishmentActions } from "./src/components/EstablishmentActions";
 import { EstablishmentPickerModal } from "./src/components/EstablishmentPickerModal";
 import { ListItem } from "./src/components/ListItem";
-import { LoginErrorModal } from "./src/components/LoginErrorModal";
+import { AuthScreen } from "./src/components/AuthScreen";
+import { useAuthActions } from "./src/hooks/useAuthActions";
+import { useAuthState } from "./src/hooks/useAuthState";
 import { NewEstablishmentModal } from "./src/components/NewEstablishmentModal";
 import { OnboardingModal } from "./src/components/OnboardingModal";
 import { PasswordChangeModal } from "./src/components/PasswordChangeModal";
@@ -48,7 +46,7 @@ import { PaymentMethodPicker } from "./src/components/PaymentMethodPicker";
 import { PlanLimitCard } from "./src/components/PlanLimitCard";
 import { PlanUpgradeModal } from "./src/components/PlanUpgradeModal";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
-import { ProductionChecklist } from "./src/components/ProductionChecklist";
+import { ProductionStatusSection } from "./src/components/ProductionStatusSection";
 import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal";
@@ -65,16 +63,16 @@ import { SalesFilters } from "./src/components/SalesFilters";
 import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { SupportModal } from "./src/components/SupportModal";
 import { SyncCenterModal } from "./src/components/SyncCenterModal";
-import { TechnicalLogsList } from "./src/components/TechnicalLogsList";
+import { TechnicalLogsSection } from "./src/components/TechnicalLogsSection";
 import { XmlPreviewModal } from "./src/components/XmlPreviewModal";
 import { MenuIcon } from "./src/components/icons";
-import { InlineInputButton, PasswordVisibilityButton } from "./src/components/inputActions";
 import { IntegrationStatusInfo } from "./src/components/IntegrationStatusInfo";
 import { InvoiceStatsGrid } from "./src/components/InvoiceStatsGrid";
-import { IssuerActionButtons } from "./src/components/IssuerActionButtons";
+import { IssuerEstablishmentFields } from "./src/components/IssuerEstablishmentFields";
+import { IssuerIdentityFields } from "./src/components/IssuerIdentityFields";
+import { IssuerServerSettings } from "./src/components/IssuerServerSettings";
 import { IssuerTaxSettings } from "./src/components/IssuerTaxSettings";
-import { OperationTile } from "./src/components/metrics";
-import { APP_BRAND, APP_TAGLINE, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
+import { APP_BRAND, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
 import { ReportsScreen } from "./src/screens/ReportsScreen";
 import { CashClosingScreen } from "./src/screens/CashClosingScreen";
@@ -83,34 +81,33 @@ import { InventoryScreen } from "./src/screens/InventoryScreen";
 import { GuidesScreen } from "./src/screens/GuidesScreen";
 import { ProductsScreen } from "./src/screens/ProductsScreen";
 import { UsersScreen } from "./src/screens/UsersScreen";
-import { AuthorizationResponse, BackendCompanyOption, TechnicalLog, authorizeInvoice, backupAppData, changeBackendPassword, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, loginBackend, lookupIdentityData, mergeBackendData, registerBackend, requestPasswordReset, reserveDocumentSequence, restoreAppData, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
+import { TechnicalLog, authorizeInvoice, backupAppData, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, loginBackend, lookupIdentityData, mergeBackendData, reserveDocumentSequence, restoreAppData, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
 import { buildRideHtml } from "./src/services/ride";
 import { hashPassword } from "./src/services/security";
-import { buildCreditNoteXml, buildInvoiceXml, calculateLineTax, calculateLineTotal, calculateTotalDiscount, calculateTotals, createAccessKey, createCreditNoteAccessKey, grossToNetUnitPrice, money, nextSequence } from "./src/services/sri";
-import { clearSession, initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
-import { AppData, AppLicense, Client, DocumentType, InventoryMovement, Issuer, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RetentionTaxType, Sale, SaleItem, User, UserRole } from "./src/types";
-import { accountingMoney, productCost, productMinStock, saleCostValue, saleProfitValue } from "./src/utils/accounting";
-import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, licenseStatusLabel, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
+import { buildCreditNoteXml, buildInvoiceXml, calculateLineTotal, calculateTotalDiscount, calculateTotals, createAccessKey, createCreditNoteAccessKey, grossToNetUnitPrice, money, nextSequence } from "./src/services/sri";
+import { initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
+import { AppData, AppLicense, Client, DocumentType, InventoryMovement, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RetentionTaxType, Sale, SaleItem, User } from "./src/types";
+import { productCost, productMinStock } from "./src/utils/accounting";
+import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
 import { appendAudit } from "./src/utils/audit";
 import { addedEstablishmentIds, mergeAppDataSnapshots } from "./src/utils/dataMerge";
 import { formatSaleDetail } from "./src/utils/documentDetails";
 import { buildCreditNoteRideHtml, buildInternalTicketHtml, buildProformaHtml } from "./src/utils/documentHtml";
-import { compareSalesNewestFirst, documentNumber, documentScopeId, getRetryInfo, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus, saleInActiveScope } from "./src/utils/documents";
-import { confirmAction, getLocalVoidReason, showMessage } from "./src/utils/dialogs";
+import { compareSalesNewestFirst, getRetryInfo, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus, saleInActiveScope } from "./src/utils/documents";
+import { getLocalVoidReason, showMessage } from "./src/utils/dialogs";
 import { activeEstablishment, activeIssuer, applyIdentityToIssuer, editableEstablishments, issuerForSale, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits, updateIssuerEstablishmentSequence } from "./src/utils/establishments";
-import { isBackendConnectionError, loginErrorMessage } from "./src/utils/errors";
 import { pickWebFile, readWebFileBase64 } from "./src/utils/files";
-import { dateKey, formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
+import { formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
 import { generateId } from "./src/utils/id";
 import { buildStockCredits, buildStockMovements, getAvailableStockForSale, restoreSaleStock } from "./src/utils/inventory";
 import { canUseEmissionScope, maxEmissionPointsForLicense } from "./src/utils/license";
-import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleTicketDocument, openHtmlViewer, shareGeneratedFile } from "./src/utils/printFiles";
+import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleTicketDocument, openHtmlViewer } from "./src/utils/printFiles";
 import { parseDecimal, roundMoney } from "./src/utils/numbers";
-import { buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isEffectiveReportSale, isFinalConsumerClient, isInvoiceSale, isTaxableSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
-import { explainSriResult, formatSriResult, sriUserMessage, userFriendlyActionError } from "./src/utils/sriMessages";
+import { buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isFinalConsumerClient, isInvoiceSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
+import { explainSriResult, sriUserMessage, userFriendlyActionError } from "./src/utils/sriMessages";
 import { buildSupportDiagnostic, formatAuditDate, formatBackendHealth, formatBackupSummary, formatSyncStatus, summarizeAppData, SyncState } from "./src/utils/support";
 import { syncPatchToBackend, syncSalePatchToBackend } from "./src/utils/sync";
-import { buildProductionChecklist, findDuplicateClient, isValidCedula, isValidEmail, isValidRuc, isValidUrl, normalizeClientForInvoice, normalizeClientIdentification, normalizeProductCode, sanitizeAppData, validateBeforeInternalSale, validateBeforeIssue, validateBeforeProforma, validateEmissionPointLicense, validateIssuer } from "./src/validation";
+import { buildProductionChecklist, findDuplicateClient, normalizeClientForInvoice, normalizeClientIdentification, normalizeProductCode, sanitizeAppData, validateBeforeInternalSale, validateBeforeIssue, validateBeforeProforma, validateEmissionPointLicense, validateIssuer } from "./src/validation";
 
 type Tab = AppTab;
 
@@ -124,45 +121,99 @@ function AppContent() {
   const [session, setSession] = useState<User | null>(null);
   const [backendToken, setBackendToken] = useState("");
   const [syncState, setSyncState] = useState<SyncState>("synced");
-  const [authMode, setAuthMode] = useState<"login" | "register" | "forgot">("login");
-  const [registering, setRegistering] = useState(false);
-  const [registerStatus, setRegisterStatus] = useState<{ tone: "info" | "error" | "success"; message: string } | null>(null);
-  const [recoveringPassword, setRecoveringPassword] = useState(false);
-  const [recoverStatus, setRecoverStatus] = useState<{ tone: "info" | "error" | "success"; message: string } | null>(null);
-  const [loginStatus, setLoginStatus] = useState<{ tone: "info" | "error" | "success"; message: string } | null>(null);
-  const [loginErrorModalMessage, setLoginErrorModalMessage] = useState("");
-  const [passwordChangeVisible, setPasswordChangeVisible] = useState(false);
-  const [newPasswordForm, setNewPasswordForm] = useState({ password: "", confirm: "" });
-  const [newPasswordVisible, setNewPasswordVisible] = useState(false);
-  const [changingPassword, setChangingPassword] = useState(false);
-  const [passwordChangeStatus, setPasswordChangeStatus] = useState<{ tone: "info" | "error" | "success"; message: string } | null>(null);
-  const [companyOptions, setCompanyOptions] = useState<BackendCompanyOption[]>([]);
-  const [establishmentOptionsVisible, setEstablishmentOptionsVisible] = useState(false);
-  const [establishmentSwitcherVisible, setEstablishmentSwitcherVisible] = useState(false);
-  const [pendingLogin, setPendingLogin] = useState<{ data: AppData; user: User; token: string; passwordHash?: string } | null>(null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showLoginPassword, setShowLoginPassword] = useState(false);
-  const [recoveryIdentifier, setRecoveryIdentifier] = useState("");
-  const [authBackendUrl, setAuthBackendUrl] = useState(initialData.backendUrl);
-  const [registerForm, setRegisterForm] = useState({
-    ruc: "",
-    businessName: "",
-    tradeName: "",
-    adminName: "",
-    email: "",
-    password: "",
-    confirmPassword: ""
-  });
-
-  const emptyRegisterForm = {
-    ruc: "",
-    businessName: "",
-    tradeName: "",
-    adminName: "",
-    email: "",
-    password: "",
-    confirmPassword: ""
+  const {
+    authMode,
+    setAuthMode,
+    registering,
+    setRegistering,
+    registerStatus,
+    setRegisterStatus,
+    recoveringPassword,
+    setRecoveringPassword,
+    recoverStatus,
+    setRecoverStatus,
+    loginStatus,
+    setLoginStatus,
+    loginErrorModalMessage,
+    setLoginErrorModalMessage,
+    passwordChangeVisible,
+    setPasswordChangeVisible,
+    newPasswordForm,
+    setNewPasswordForm,
+    newPasswordVisible,
+    setNewPasswordVisible,
+    changingPassword,
+    setChangingPassword,
+    passwordChangeStatus,
+    setPasswordChangeStatus,
+    companyOptions,
+    setCompanyOptions,
+    establishmentOptionsVisible,
+    setEstablishmentOptionsVisible,
+    establishmentSwitcherVisible,
+    setEstablishmentSwitcherVisible,
+    pendingLogin,
+    setPendingLogin,
+    email,
+    setEmail,
+    password,
+    setPassword,
+    showLoginPassword,
+    setShowLoginPassword,
+    recoveryIdentifier,
+    setRecoveryIdentifier,
+    authBackendUrl,
+    setAuthBackendUrl,
+    registerForm,
+    setRegisterForm,
+    emptyRegisterForm
+  } = useAuthState(initialData.backendUrl);
+  const authState = {
+    authMode,
+    setAuthMode,
+    registering,
+    setRegistering,
+    registerStatus,
+    setRegisterStatus,
+    recoveringPassword,
+    setRecoveringPassword,
+    recoverStatus,
+    setRecoverStatus,
+    loginStatus,
+    setLoginStatus,
+    loginErrorModalMessage,
+    setLoginErrorModalMessage,
+    passwordChangeVisible,
+    setPasswordChangeVisible,
+    newPasswordForm,
+    setNewPasswordForm,
+    newPasswordVisible,
+    setNewPasswordVisible,
+    changingPassword,
+    setChangingPassword,
+    passwordChangeStatus,
+    setPasswordChangeStatus,
+    companyOptions,
+    setCompanyOptions,
+    establishmentOptionsVisible,
+    setEstablishmentOptionsVisible,
+    establishmentSwitcherVisible,
+    setEstablishmentSwitcherVisible,
+    pendingLogin,
+    setPendingLogin,
+    email,
+    setEmail,
+    password,
+    setPassword,
+    showLoginPassword,
+    setShowLoginPassword,
+    recoveryIdentifier,
+    setRecoveryIdentifier,
+    authBackendUrl,
+    setAuthBackendUrl,
+    registerForm,
+    setRegisterForm,
+    emptyRegisterForm
   };
   const [tab, setTab] = useState<Tab>("dashboard");
   const [xmlPreview, setXmlPreview] = useState("");
@@ -185,6 +236,25 @@ function AppContent() {
   const lastRemoteRefreshRef = useRef(0);
   const connectivitySyncRunningRef = useRef(false);
   const lastConnectivitySyncRef = useRef(0);
+  const scheduleAutoBackupRef = useRef<(snapshot: AppData) => void>(() => undefined);
+  const flushAutoBackupRef = useRef<() => Promise<void>>(async () => undefined);
+  const refreshFromBackendRef = useRef<(reason?: "login" | "active" | "manual") => Promise<void>>(async () => undefined);
+  const syncAfterConnectivityRestoredRef = useRef<(reason: "network" | "active" | "pending") => Promise<void>>(async () => undefined);
+
+  const { login, registerTenant, recoverPassword, chooseLoginEstablishment, submitNewPassword, logout } = useAuthActions({
+    authState,
+    dataRef,
+    sessionRef,
+    backendTokenRef,
+    setData,
+    setSession,
+    setBackendToken,
+    setSyncState,
+    setAppMenuVisible,
+    setEstablishmentSwitcherVisible,
+    setTab,
+    setOnboardingVisible
+  });
 
   useEffect(() => {
     Promise.all([loadData(), loadSession()])
@@ -208,7 +278,7 @@ function AppContent() {
       })
       .catch(() => setData(initialData))
       .finally(() => setReady(true));
-  }, []);
+  }, [setEmail, setPasswordChangeStatus, setPasswordChangeVisible]);
 
   useEffect(() => {
     const show = Keyboard.addListener("keyboardDidShow", (event) => setKeyboardInset(event.endCoordinates.height));
@@ -223,7 +293,7 @@ function AppContent() {
     if (ready && !session && data.users.length === 0) {
       setAuthMode("register");
     }
-  }, [data.users.length, ready, session]);
+  }, [data.users.length, ready, session, setAuthMode]);
 
   useEffect(() => {
     backendTokenRef.current = backendToken;
@@ -232,7 +302,7 @@ function AppContent() {
   useEffect(() => {
     dataRef.current = data;
     setAuthBackendUrl(data.backendUrl);
-  }, [data]);
+  }, [data, setAuthBackendUrl]);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -263,9 +333,9 @@ function AppContent() {
     if (Platform.OS === "web") return undefined;
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
-        void syncAfterConnectivityRestored("active");
+        void syncAfterConnectivityRestoredRef.current("active");
       } else {
-        void flushAutoBackup();
+        void flushAutoBackupRef.current();
       }
     });
 
@@ -276,7 +346,7 @@ function AppContent() {
     if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return undefined;
 
     const refreshIfVisible = () => {
-      if (document.visibilityState === "visible") void refreshFromBackend("active");
+      if (document.visibilityState === "visible") void refreshFromBackendRef.current("active");
     };
     const timer = window.setInterval(refreshIfVisible, WEB_REMOTE_REFRESH_INTERVAL_MS);
     window.addEventListener("focus", refreshIfVisible);
@@ -296,7 +366,7 @@ function AppContent() {
     setData(sanitized);
     setSyncState(sanitized.autoBackupEnabled === false ? "synced" : "pending");
     await saveData(sanitized);
-    scheduleAutoBackup(sanitized);
+    scheduleAutoBackupRef.current(sanitized);
   };
 
   const scheduleAutoBackup = (snapshot: AppData) => {
@@ -305,7 +375,7 @@ function AppContent() {
     if (autoBackupTimerRef.current) clearTimeout(autoBackupTimerRef.current);
 
     autoBackupTimerRef.current = setTimeout(() => {
-      void flushAutoBackup();
+      void flushAutoBackupRef.current();
     }, AUTO_BACKUP_DEBOUNCE_MS);
   };
 
@@ -424,94 +494,6 @@ function AppContent() {
     }
   };
 
-  const enterSession = async (nextData: AppData, nextUser: User, token: string, passwordHash = "") => {
-    let sessionToken = token;
-    if (!sessionToken) {
-    const storedSession = await loadSession();
-      const sameUser = storedSession?.user && (
-        storedSession.user.id === nextUser.id ||
-        storedSession.user.email.trim().toLowerCase() === nextUser.email.trim().toLowerCase() ||
-        (storedSession.companyRuc && storedSession.companyRuc === nextData.issuer.ruc)
-      );
-      if (sameUser && storedSession?.token) sessionToken = storedSession.token;
-    }
-    await saveData(nextData);
-    await saveSession(nextUser, sessionToken, passwordHash, nextData.issuer.ruc);
-    setData(nextData);
-    dataRef.current = nextData;
-    setBackendToken(sessionToken);
-    backendTokenRef.current = sessionToken;
-    setSession(nextUser);
-    sessionRef.current = nextUser;
-    setSyncState("synced");
-    setLoginStatus(null);
-    setCompanyOptions([]);
-    setPendingLogin(null);
-    setEstablishmentOptionsVisible(false);
-    setTab("dashboard");
-    if (nextUser.mustChangePassword) {
-      setNewPasswordForm({ password: "", confirm: "" });
-      setPasswordChangeStatus({ tone: "info", message: "Por seguridad, cree una nueva contrasena para reemplazar la clave temporal." });
-      setPasswordChangeVisible(true);
-    }
-  };
-
-  const submitNewPassword = async () => {
-    const nextPassword = newPasswordForm.password.trim();
-    if (nextPassword.length < 8) {
-      setPasswordChangeStatus({ tone: "error", message: "La nueva contrasena debe tener al menos 8 caracteres." });
-      return;
-    }
-    if (nextPassword !== newPasswordForm.confirm.trim()) {
-      setPasswordChangeStatus({ tone: "error", message: "Las contrasenas no coinciden." });
-      return;
-    }
-    if (!sessionRef.current) return;
-    setChangingPassword(true);
-    setPasswordChangeStatus({ tone: "info", message: "Guardando nueva contrasena..." });
-    try {
-      const result = await changeBackendPassword(dataRef.current.backendUrl, nextPassword, backendTokenRef.current);
-      const changedUser = result.user!;
-      const passwordHash = await hashPassword(nextPassword);
-      const updatedUser: User = {
-        ...sessionRef.current,
-        ...changedUser,
-        role: (changedUser.role || sessionRef.current.role) as UserRole,
-        passwordHash,
-        mustChangePassword: false
-      };
-      const nextUsers = dataRef.current.users.map((user) =>
-        user.id === updatedUser.id || user.email.trim().toLowerCase() === updatedUser.email.trim().toLowerCase()
-          ? { ...user, password: undefined, passwordHash, mustChangePassword: false, updatedAt: new Date().toISOString() }
-          : user
-      );
-      const nextData = { ...dataRef.current, users: nextUsers };
-      await saveData(nextData);
-      await saveSession(updatedUser, result.token || backendTokenRef.current, passwordHash, nextData.issuer.ruc);
-      setData(nextData);
-      dataRef.current = nextData;
-      setSession(updatedUser);
-      sessionRef.current = updatedUser;
-      setBackendToken(result.token || backendTokenRef.current);
-      backendTokenRef.current = result.token || backendTokenRef.current;
-      setPasswordChangeVisible(false);
-      setPasswordChangeStatus(null);
-      Alert.alert("Contrasena actualizada", "Su nueva contrasena quedo guardada correctamente.");
-    } catch (error) {
-      setPasswordChangeStatus({ tone: "error", message: error instanceof Error ? error.message : "No se pudo cambiar la contrasena." });
-    } finally {
-      setChangingPassword(false);
-    }
-  };
-
-  const chooseLoginEstablishment = async (establishmentId: string) => {
-    if (!pendingLogin) return;
-    const establishment = normalizedEstablishments(pendingLogin.data.issuer).find((item) => item.id === establishmentId);
-    if (!establishment) return;
-    const nextIssuer = issuerWithEstablishment({ ...pendingLogin.data.issuer, activeEstablishmentId: establishment.id }, establishment);
-    await enterSession({ ...pendingLogin.data, issuer: nextIssuer }, pendingLogin.user, pendingLogin.token, pendingLogin.passwordHash || "");
-  };
-
   const refreshFromBackend = async (reason: "login" | "active" | "manual" = "manual") => {
     const current = dataRef.current;
     if (!sessionRef.current || current.autoBackupEnabled === false || !current.backendUrl) return;
@@ -553,264 +535,6 @@ function AppContent() {
     }
   };
 
-  const login = async (companyId = "") => {
-    const identifier = email.trim();
-    const backendUrl = authBackendUrl.trim();
-    const normalizedIdentifier = identifier.toLowerCase();
-    setLoginStatus(null);
-    setLoginErrorModalMessage("");
-    if (!companyId) setCompanyOptions([]);
-    if (!identifier || !password) {
-      const message = "Ingrese correo o RUC y clave para iniciar sesion.";
-      setLoginStatus({ tone: "error", message });
-      setLoginErrorModalMessage(message);
-      return;
-    }
-    if (/^\d+$/.test(identifier) && identifier.length !== 13) {
-      const message = "El RUC debe tener 13 digitos. Revise el numero e intente nuevamente.";
-      setLoginStatus({ tone: "error", message });
-      setLoginErrorModalMessage(message);
-      return;
-    }
-    if (!isValidUrl(backendUrl)) {
-      const message = "Ingrese una URL valida del servidor.";
-      setLoginStatus({ tone: "error", message });
-      setLoginErrorModalMessage(message);
-      return;
-    }
-
-    try {
-      setLoginStatus({ tone: "info", message: "Validando acceso..." });
-      const result = await loginBackend(backendUrl, identifier, password, companyId);
-      const snapshot = await restoreAppData<AppData>(backendUrl, result.token || "");
-      if (!result.user || !snapshot?.data) {
-        const message = "El servidor valido el acceso, pero no devolvio los datos de la empresa. Intente nuevamente.";
-        setLoginStatus({ tone: "error", message });
-        Alert.alert("No se pudo cargar la empresa", message);
-        return;
-      }
-      const restored = sanitizeAppData({
-        ...snapshot.data,
-        backendUrl,
-        autoBackupEnabled: true,
-        autoBackupLastAt: snapshot.updatedAt,
-        autoBackupLastError: ""
-      });
-      const loginRuc = /^\d{13}$/.test(identifier) ? identifier : "";
-      const restoredRuc = restored.issuer.ruc.replace(/\D/g, "");
-      if (loginRuc && restoredRuc && restoredRuc !== loginRuc) {
-        const message = `El servidor devolvio datos del RUC ${restoredRuc}, pero usted ingreso ${loginRuc}. Se cancelo el ingreso para evitar mezcla de empresas.`;
-        setLoginStatus({ tone: "error", message });
-        setLoginErrorModalMessage(message);
-        return;
-      }
-      await saveData(restored);
-      setData(restored);
-      dataRef.current = restored;
-      const remoteUser = {
-        id: result.user.id,
-        companyId: result.user.companyId,
-        name: result.user.name,
-        email: result.user.email,
-        role: (result.user.role || "vendedor") as UserRole,
-        mustChangePassword: Boolean(result.user.mustChangePassword)
-      };
-      const token = result.token || "";
-      const passwordHash = await hashPassword(password);
-      const establishments = normalizedEstablishments(restored.issuer).filter((item) => item.active !== false);
-      if (establishments.length > 1) {
-        setPendingLogin({ data: restored, user: remoteUser, token, passwordHash });
-        setEstablishmentOptionsVisible(true);
-        setLoginStatus(null);
-        setCompanyOptions([]);
-        return;
-      }
-      await enterSession(restored, remoteUser, token, passwordHash);
-      return;
-    } catch (error) {
-      const options = error instanceof Error ? (error as Error & { companyOptions?: BackendCompanyOption[] }).companyOptions : undefined;
-      if (options?.length) {
-        setCompanyOptions(options);
-        setLoginStatus({ tone: "info", message: "Elija la empresa con la que desea trabajar." });
-        return;
-      }
-      const message = loginErrorMessage(error);
-      if (!isBackendConnectionError(error)) {
-        const friendly = /^\d{13}$/.test(identifier) && message.includes("No encontramos")
-          ? "No encontramos una empresa activa con ese RUC o la clave no coincide."
-          : message;
-        setLoginStatus({ tone: "error", message: friendly });
-        setLoginErrorModalMessage(friendly);
-        return;
-      }
-      setLoginStatus({ tone: "info", message: "Sin conexion con el servidor. Validando sesion guardada en este dispositivo..." });
-    }
-
-    const passwordHash = await hashPassword(password);
-      const storedSession = await loadSession();
-    if (storedSession?.user) {
-      const storedEmailMatches = storedSession.user.email.trim().toLowerCase() === normalizedIdentifier;
-      const rucMatches = /^\d{13}$/.test(identifier) && (storedSession.companyRuc === identifier || data.issuer.ruc === identifier);
-      const passwordMatches = storedSession.passwordHash ? storedSession.passwordHash === passwordHash : Boolean(storedSession.token);
-      if ((storedEmailMatches || rucMatches) && passwordMatches) {
-        const localData = sanitizeAppData({ ...data, backendUrl, autoBackupEnabled: true, autoBackupLastError: "" });
-        await enterSession(localData, storedSession.user, storedSession.token || "", storedSession.passwordHash || passwordHash);
-        return;
-      }
-    }
-    const found = data.users.find((user) => {
-      const emailMatches = user.email.trim().toLowerCase() === normalizedIdentifier;
-      return emailMatches && (user.passwordHash === passwordHash || user.password === password);
-    });
-    const rucUser = /^\d{13}$/.test(identifier) && data.issuer.ruc === identifier
-      ? data.users.find((user) => user.passwordHash === passwordHash || user.password === password)
-      : undefined;
-    const localUser = found || rucUser;
-    if (!localUser) {
-      const message = "No hay conexion con el servidor y no existe una sesion local valida para esos datos.";
-      setLoginStatus({ tone: "error", message });
-      setLoginErrorModalMessage(message);
-      return;
-    }
-    const localEstablishments = normalizedEstablishments(data.issuer).filter((item) => item.active !== false);
-    const localData = sanitizeAppData({ ...data, backendUrl, autoBackupEnabled: true, autoBackupLastError: "" });
-    if (localEstablishments.length > 1) {
-      setPendingLogin({ data: localData, user: localUser, token: "", passwordHash });
-      setEstablishmentOptionsVisible(true);
-      setLoginStatus(null);
-      return;
-    }
-    await enterSession(localData, localUser, "", passwordHash);
-  };
-
-  const registerTenant = async () => {
-    if (registering) return;
-    setRegisterStatus(null);
-    const backendUrl = authBackendUrl.trim();
-    const form = {
-      ...registerForm,
-      ruc: registerForm.ruc.trim(),
-      businessName: registerForm.businessName.trim(),
-      tradeName: registerForm.tradeName.trim(),
-      adminName: registerForm.adminName.trim(),
-      email: registerForm.email.trim().toLowerCase()
-    };
-    if (!form.ruc || !form.businessName || !form.adminName || !form.email || !form.password) {
-      setRegisterStatus({ tone: "error", message: "Complete RUC, negocio, administrador, correo y contrasena." });
-      Alert.alert("Datos incompletos", "Ingrese RUC, nombre del negocio, nombre del administrador, correo y contrasena.");
-      return;
-    }
-    if (!isValidUrl(backendUrl)) {
-      setRegisterStatus({ tone: "error", message: "Ingrese una URL valida del servidor." });
-      Alert.alert("URL del servidor", "Ingrese una URL valida del servidor para crear la cuenta.");
-      return;
-    }
-    if (form.password.length < 8) {
-      setRegisterStatus({ tone: "error", message: "La contrasena debe tener al menos 8 caracteres." });
-      Alert.alert("Contrasena corta", "Use al menos 8 caracteres para proteger la cuenta.");
-      return;
-    }
-    if (form.password !== form.confirmPassword) {
-      setRegisterStatus({ tone: "error", message: "Las contrasenas no coinciden." });
-      Alert.alert("Contrasenas distintas", "Confirme la misma contrasena.");
-      return;
-    } // Validacion basica de formato de correo. En el backend se validara la unicidad del correo y el formato del RUC.
-    setRegistering(true);
-    setRegisterStatus({ tone: "info", message: "Creando cuenta y preparando la empresa..." });
-    try {
-      const result = await registerBackend<AppData>(backendUrl, {
-        company: {
-          ruc: form.ruc,
-          businessName: form.businessName,
-          tradeName: form.tradeName || form.businessName,
-          address: "Ecuador"
-        },
-        admin: {
-          name: form.adminName,
-          email: form.email,
-          password: form.password
-        },
-        device: {
-          deviceId: `${Platform.OS}-${uid()}`,
-          deviceLabel: Platform.OS,
-          platform: Platform.OS
-        }
-      });
-      const snapshot = result.snapshot!;
-      const registeredData = sanitizeAppData({
-        ...initialData,
-        ...snapshot.data,
-        backendUrl,
-        autoBackupEnabled: true,
-        autoBackupLastAt: snapshot.updatedAt,
-        autoBackupLastError: "",
-        pendingSync: []
-      });
-      await saveData(registeredData);
-      const user = {
-        id: result.user!.id,
-        name: result.user!.name,
-        email: result.user!.email,
-        role: (result.user!.role || "admin") as UserRole
-      };
-      const passwordHash = await hashPassword(form.password);
-      const enterApp = () => {
-        setData(registeredData);
-        dataRef.current = registeredData;
-        setBackendToken(result.token || "");
-        backendTokenRef.current = result.token || "";
-        setSession(user);
-        sessionRef.current = user;
-        void saveSession(user, result.token || "", passwordHash, registeredData.issuer.ruc);
-        setEmail(form.email);
-        setPassword("");
-        setAuthMode("login");
-        setRegisterForm(emptyRegisterForm);
-        setRegisterStatus(null);
-        setRegistering(false);
-        setSyncState("synced");
-        setOnboardingVisible(true);
-      };
-      setRegisterStatus({ tone: "success", message: "Cuenta creada. Demo activa por 30 dias." });
-      enterApp();
-      showMessage("Cuenta creada", "Demo activa por 30 dias. Ya puede configurar su empresa y empezar a vender.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Revise los datos e intente nuevamente.";
-      setRegistering(false);
-      setRegisterStatus({ tone: "error", message });
-      Alert.alert("No se pudo crear la cuenta", message);
-    }
-  };
-
-  const recoverPassword = async () => {
-    if (recoveringPassword) return;
-    const backendUrl = authBackendUrl.trim();
-    const identifier = recoveryIdentifier.trim() || email.trim();
-    setRecoverStatus(null);
-
-    if (!isValidUrl(backendUrl)) {
-      setRecoverStatus({ tone: "error", message: "Ingrese una URL valida del servidor." });
-      return;
-    }
-    if (!identifier) {
-      setRecoverStatus({ tone: "error", message: "Ingrese el correo o RUC de la cuenta." });
-      return;
-    }
-
-    setRecoveringPassword(true);
-    setRecoverStatus({ tone: "info", message: "Enviando clave temporal..." });
-    try {
-      const result = await requestPasswordReset(backendUrl, identifier);
-      setRecoverStatus({ tone: "success", message: result.message || `Clave temporal enviada a ${result.email || "su correo"}.` });
-      setEmail(identifier);
-      setPassword("");
-    } catch (error) {
-      setRecoverStatus({ tone: "error", message: error instanceof Error ? error.message : "No se pudo recuperar la contrasena." });
-    } finally {
-      setRecoveringPassword(false);
-    }
-  };
-
   const ensureBackendToken = async (backendUrl: string) => {
     if (backendTokenRef.current) return backendTokenRef.current;
     const storedSession = await loadSession();
@@ -831,27 +555,6 @@ function AppContent() {
       await saveSession(sessionRef.current, token, passwordHash, dataRef.current.issuer.ruc);
     }
     return token;
-  };
-
-  const logout = () => {
-    setAppMenuVisible(false);
-    setOnboardingVisible(false);
-    setEstablishmentOptionsVisible(false);
-    setEstablishmentSwitcherVisible(false);
-    setPendingLogin(null);
-    setPasswordChangeVisible(false);
-    setNewPasswordForm({ password: "", confirm: "" });
-    setPasswordChangeStatus(null);
-    setBackendToken("");
-    backendTokenRef.current = "";
-    setSession(null);
-    sessionRef.current = null;
-    void clearSession();
-    setTab("dashboard");
-    setAuthMode("login");
-    setRegistering(false);
-    setRegisterStatus(null);
-    setRegisterForm(emptyRegisterForm);
   };
 
   const switchActiveEstablishment = async (establishmentId: string) => {
@@ -949,6 +652,11 @@ function AppContent() {
     }
   };
 
+  scheduleAutoBackupRef.current = scheduleAutoBackup;
+  flushAutoBackupRef.current = flushAutoBackup;
+  refreshFromBackendRef.current = refreshFromBackend;
+  syncAfterConnectivityRestoredRef.current = syncAfterConnectivityRestored;
+
   const openSyncCenter = () => {
     setAppMenuVisible(false);
     setSyncCenterVisible(true);
@@ -1019,20 +727,20 @@ function AppContent() {
     dataRef.current = enabled;
     setSyncState("pending");
     void saveData(enabled);
-    scheduleAutoBackup(enabled);
+    scheduleAutoBackupRef.current(enabled);
   }, [data, ready, session]);
 
   useEffect(() => {
     if (!ready || !session) return undefined;
     const subscription = Network.addNetworkStateListener((networkState) => {
       if (hasReachableInternet(networkState)) {
-        void syncAfterConnectivityRestored("network");
+        void syncAfterConnectivityRestoredRef.current("network");
       }
     });
 
-    void syncAfterConnectivityRestored("pending");
+    void syncAfterConnectivityRestoredRef.current("pending");
     return () => subscription.remove();
-  }, [ready, session?.id]);
+  }, [ready, session, session?.id]);
 
   if (!ready) {
     return (
@@ -1044,114 +752,62 @@ function AppContent() {
 
   if (!session) {
     return (
-      <SafeAreaView style={styles.screen}>
-        <ExpoStatusBar style="dark" />
-        <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-          <ScrollView contentContainerStyle={styles.loginPanel} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
-          <View style={styles.loginBrandRow}>
-            <View style={styles.loginBrandMark}>
-              <Text style={styles.loginBrandMarkText}>FD</Text>
-            </View>
-            <Text style={styles.loginBrand}>{APP_BRAND}</Text>
-          </View>
-          {authMode === "login" ? (
-            <>
-              <View style={styles.authCard}>
-                <Text style={styles.authTitle}>INICIAR SESION</Text>
-                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" />
-                <Input label="Correo o RUC" value={email} onChangeText={setEmail} autoCapitalize="none" />
-                <Input
-                  label="Clave"
-                  value={password}
-                  onChangeText={setPassword}
-                  secureTextEntry={!showLoginPassword}
-                  autoCapitalize="none"
-                  autoComplete="current-password"
-                  rightElement={<PasswordVisibilityButton visible={showLoginPassword} onPress={() => setShowLoginPassword((visible) => !visible)} />}
-                />
-                <PrimaryButton label="Ingresar" onPress={() => login()} />
-                {loginStatus ? <Text style={[styles.authFeedback, loginStatus.tone === "error" && styles.authFeedbackError, loginStatus.tone === "success" && styles.authFeedbackSuccess]}>{loginStatus.message}</Text> : null}
-                {companyOptions.length > 0 ? (
-                  <View style={styles.companyChoiceList}>
-                    {companyOptions.map((company) => (
-                      <Pressable key={company.id} style={styles.companyChoice} onPress={() => login(company.id)}>
-                        <Text style={styles.companyChoiceTitle}>{company.tradeName || company.businessName || "Empresa"}</Text>
-                        <Text style={styles.companyChoiceMeta}>RUC {company.ruc} | {company.role || "usuario"}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                ) : null}
-              </View>
-              <Pressable style={styles.authLinkButton} onPress={() => setAuthMode("register")}>
-                <Text style={styles.authLinkText}>No tienes cuenta? Registrate</Text>
-              </Pressable>
-              <Pressable
-                style={styles.authLinkButton}
-                onPress={() => {
-                  setRecoveryIdentifier(email);
-                  setRecoverStatus(null);
-                  setAuthMode("forgot");
-                }}
-              >
-                <Text style={styles.authMutedLink}>Olvide contrasena</Text>
-              </Pressable>
-            </>
-          ) : authMode === "register" ? (
-            <>
-              <View style={styles.authCard}>
-                <Text style={styles.authTitle}>CREAR CUENTA</Text>
-                <Text style={styles.authSubtitle}>Registre su propia empresa con RUC activo en el SRI</Text>
-                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" />
-                <Input label="RUC" value={registerForm.ruc} onChangeText={(ruc) => setRegisterForm({ ...registerForm, ruc })} keyboardType="number-pad" />
-                <Input label="Razon social o nombre del negocio" value={registerForm.businessName} onChangeText={(businessName) => setRegisterForm({ ...registerForm, businessName })} placeholder="Ej. Comercial Andina" />
-                <Input label="Nombre comercial (opcional)" value={registerForm.tradeName} onChangeText={(tradeName) => setRegisterForm({ ...registerForm, tradeName })} placeholder="Ej. Market Andina" />
-                <Input label="Nombre de quien administrara la cuenta" value={registerForm.adminName} onChangeText={(adminName) => setRegisterForm({ ...registerForm, adminName })} placeholder="Ej. Maria Torres" />
-                <Input label="Correo del administrador" value={registerForm.email} onChangeText={(value) => setRegisterForm({ ...registerForm, email: value })} autoCapitalize="none" placeholder="correo@empresa.com" />
-                <Input label="Contrasena" value={registerForm.password} onChangeText={(value) => setRegisterForm({ ...registerForm, password: value })} secureTextEntry />
-                <Input label="Confirmar contrasena" value={registerForm.confirmPassword} onChangeText={(value) => setRegisterForm({ ...registerForm, confirmPassword: value })} secureTextEntry />
-                <View style={styles.authActionRow}>
-                  <Pressable style={[styles.authActionPrimary, registering && styles.disabledButton]} onPress={registerTenant} disabled={registering}>
-                    <Text style={styles.primaryButtonText}>{registering ? "Creando..." : "Crear cuenta"}</Text>
-                  </Pressable>
-                  <Pressable style={styles.authActionSecondary} onPress={() => { setAuthMode("login"); setRegisterStatus(null); setRegistering(false); }}>
-                    <Text style={styles.authActionSecondaryText}>Regresar</Text>
-                  </Pressable>
-                </View>
-                {registerStatus ? <Text style={[styles.authFeedback, registerStatus.tone === "error" && styles.authFeedbackError, registerStatus.tone === "success" && styles.authFeedbackSuccess]}>{registerStatus.message}</Text> : null}
-              </View>
-            </>
-          ) : (
-            <>
-              <View style={styles.authCard}>
-                <Text style={styles.authTitle}>RECUPERAR CONTRASENA</Text>
-                <Text style={styles.authSubtitle}>Recibira una clave temporal en el correo registrado</Text>
-                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" />
-                <Input label="Correo o RUC" value={recoveryIdentifier} onChangeText={setRecoveryIdentifier} autoCapitalize="none" />
-                <PrimaryButton label={recoveringPassword ? "Enviando..." : "Enviar clave temporal"} onPress={recoverPassword} />
-                {recoverStatus ? <Text style={[styles.authFeedback, recoverStatus.tone === "error" && styles.authFeedbackError, recoverStatus.tone === "success" && styles.authFeedbackSuccess]}>{recoverStatus.message}</Text> : null}
-              </View>
-              <Pressable style={styles.authLinkButton} onPress={() => { setAuthMode("login"); setRecoverStatus(null); setRecoveringPassword(false); }}>
-                <Text style={styles.authLinkText}>Volver a iniciar sesion</Text>
-              </Pressable>
-            </>
-          )}
-          </ScrollView>
-        </KeyboardAvoidingView>
-        <LoginErrorModal message={loginErrorModalMessage} onClose={() => setLoginErrorModalMessage("")} />
-        <EstablishmentPickerModal
-          visible={establishmentOptionsVisible}
-          title="Elija establecimiento"
-          subtitle="Seleccione con que sucursal o punto de emision va a trabajar."
+      <AuthScreen
+          authMode={authMode}
+          authBackendUrl={authBackendUrl}
+          setAuthBackendUrl={setAuthBackendUrl}
+          email={email}
+          setEmail={setEmail}
+          password={password}
+          setPassword={setPassword}
+          showLoginPassword={showLoginPassword}
+          setShowLoginPassword={setShowLoginPassword}
+          login={login}
+          loginStatus={loginStatus}
+          loginErrorModalMessage={loginErrorModalMessage}
+          setLoginErrorModalMessage={setLoginErrorModalMessage}
+          companyOptions={companyOptions}
+          registerForm={registerForm}
+          setRegisterForm={setRegisterForm}
+          registering={registering}
+          registerStatus={registerStatus}
+          registerTenant={registerTenant}
+          recoveryIdentifier={recoveryIdentifier}
+          setRecoveryIdentifier={setRecoveryIdentifier}
+          recoverPassword={recoverPassword}
+          recoverStatus={recoverStatus}
+          recoveringPassword={recoveringPassword}
+          onOpenRegister={() => setAuthMode("register")}
+          onOpenForgot={() => {
+            setRecoveryIdentifier(email);
+            setRecoverStatus(null);
+            setAuthMode("forgot");
+          }}
+          onCancelRegister={() => {
+            setAuthMode("login");
+            setRegisterStatus(null);
+            setRegistering(false);
+          }}
+          onCancelForgot={() => {
+            setAuthMode("login");
+            setRecoverStatus(null);
+            setRecoveringPassword(false);
+          }}
           establishments={pendingLogin ? normalizedEstablishments(pendingLogin.data.issuer).filter((item) => item.active !== false) : []}
-          cancelLabel="Cancelar"
-          onSelect={(id) => { void chooseLoginEstablishment(id); }}
-          onCancel={() => { setPendingLogin(null); setEstablishmentOptionsVisible(false); }}
+          establishmentOptionsVisible={establishmentOptionsVisible}
+          chooseLoginEstablishment={chooseLoginEstablishment}
+          onCancelEstablishmentSelection={() => {
+            setPendingLogin(null);
+            setEstablishmentOptionsVisible(false);
+            setCompanyOptions([]);
+            setLoginStatus(null);
+            setLoginErrorModalMessage("");
+          }}
         />
-      </SafeAreaView>
-    );
-  }
+      );
+    }
 
-  const licenseState = appLicenseStatus(data.license);
+    const licenseState = appLicenseStatus(data.license);
   const syncNotice = syncState === "synced" && (data.pendingSync || []).length === 0 && data.autoBackupEnabled !== false ? "" : formatSyncStatus(syncState, data);
   const currentEstablishment = activeEstablishment(data.issuer);
   const switchableEstablishments = normalizedEstablishments(data.issuer).filter((item) => item.active !== false).slice(0, maxEmissionPointsForLicense(data.license));
@@ -1246,7 +902,7 @@ function AppContent() {
         activeId={currentEstablishment.id}
         cancelLabel="Cerrar"
         cancelVariant="cancel"
-        onSelect={(id) => { void switchActiveEstablishment(id); }}
+        onSelect={(id: string) => { void switchActiveEstablishment(id); }}
         onCancel={() => setEstablishmentSwitcherVisible(false)}
       />
 
@@ -1262,7 +918,7 @@ function AppContent() {
         subtitle="Seleccione con que sucursal o punto de emision va a trabajar."
         establishments={pendingLogin ? normalizedEstablishments(pendingLogin.data.issuer).filter((item) => item.active !== false) : []}
         cancelLabel="Cancelar"
-        onSelect={(id) => { void chooseLoginEstablishment(id); }}
+        onSelect={(id: string) => { void chooseLoginEstablishment(id); }}
         onCancel={() => { setPendingLogin(null); setEstablishmentOptionsVisible(false); }}
       />
 
@@ -1391,15 +1047,12 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   }, [filteredProductsForSale, productId]);
 
   const currentGrossPrice = parseDecimal(unitGrossPrice);
-  const currentNetPrice = selectedProduct && currentGrossPrice > 0 ? grossToNetUnitPrice(currentGrossPrice, selectedProduct.ivaRate) : 0;
   const currentQty = Math.max(0, parseDecimal(quantity) || 0);
   const currentGrossLineTotal = currentGrossPrice > 0 ? currentGrossPrice * currentQty : 0;
   const currentGrossDiscount =
     discountMode === "percent"
       ? currentGrossLineTotal * Math.max(0, parseDecimal(grossDiscount) || 0) / 100
       : Math.max(0, parseDecimal(grossDiscount) || 0);
-  const currentDiscount = selectedProduct ? grossToNetUnitPrice(currentGrossDiscount, selectedProduct.ivaRate) : 0;
-  const currentTaxPerUnit = selectedProduct ? calculateLineTax({ productId: selectedProduct.id, code: selectedProduct.code, name: selectedProduct.name, quantity: 1, unitPrice: currentNetPrice, discount: 0, ivaRate: selectedProduct.ivaRate }) : 0;
   const scopedSales = useMemo(() => data.sales.filter((sale) => saleInActiveScope(sale, data)), [data]);
   const filteredSales = useMemo(() => {
     const search = invoiceSearch.trim().toLowerCase();
@@ -3008,16 +2661,36 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
     setProEstablishmentModalVisible(true);
   };
 
+  const refreshAssetsStatus = useCallback(async (showAlert = true) => {
+    try {
+      const status = await getCompanyAssetsStatus(backendUrl, backendToken);
+      const logoText = status.logo?.configured ? "Logo configurado" : "Logo pendiente";
+      const certText = status.certificate?.configured
+        ? `Certificado cargado${status.certificate.uploadedAt ? ` el ${formatShortDate(status.certificate.uploadedAt)}` : ""}`
+        : status.certificate?.needsUpload
+          ? status.certificate.error || "Certificado requiere volver a subirse"
+          : "Certificado pendiente";
+      setAssetStatus(`${logoText} | ${certText}`);
+      setAssetStatusTone(status.certificate?.needsUpload ? "error" : "info");
+      if (showAlert) Alert.alert("Activos de empresa", `${logoText}\n${certText}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo consultar logo/certificado.";
+      setAssetStatus(message);
+      setAssetStatusTone("error");
+      if (showAlert) Alert.alert("Activos no disponibles", message);
+    }
+  }, [backendToken, backendUrl]);
+
   useEffect(() => {
     if (!backendToken) return;
     void refreshAssetsStatus(false);
-  }, [backendToken, backendUrl]);
+  }, [backendToken, backendUrl, refreshAssetsStatus]);
 
   useEffect(() => {
     setEstablishmentNameText(selectedEstablishment.name);
     setEstablishmentCodeText(selectedEstablishment.establishment);
     setEmissionPointText(selectedEstablishment.emissionPoint);
-  }, [selectedEstablishment.id]);
+  }, [selectedEstablishment.emissionPoint, selectedEstablishment.establishment, selectedEstablishment.id, selectedEstablishment.name]);
 
   const issuerFromForm = () => {
     const sequential = Number(sequentialText);
@@ -3495,22 +3168,6 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
     }
   };
 
-  const refreshAssetsStatus = async (showAlert = true) => {
-    try {
-      const status = await getCompanyAssetsStatus(backendUrl, backendToken);
-      const logoText = status.logo?.configured ? "Logo configurado" : "Logo pendiente";
-      const certText = status.certificate?.configured ? `Certificado cargado${status.certificate.uploadedAt ? ` el ${formatShortDate(status.certificate.uploadedAt)}` : ""}` : "Certificado pendiente";
-      setAssetStatus(`${logoText} | ${certText}`);
-      setAssetStatusTone("info");
-      if (showAlert) Alert.alert("Activos de empresa", `${logoText}\n${certText}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo consultar logo/certificado.";
-      setAssetStatus(message);
-      setAssetStatusTone("error");
-      if (showAlert) Alert.alert("Activos no disponibles", message);
-    }
-  };
-
   const uploadLogoFromWeb = async () => {
     if (Platform.OS !== "web") {
       Alert.alert("Selector pendiente", "En movil agregaremos selector nativo de archivos. Por ahora use la version web para subir logo.");
@@ -3576,38 +3233,26 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
   return (
     <View style={styles.stack}>
       <Section title="Emisor SRI">
-        <Input
-          label="RUC"
-          value={issuer.ruc}
-          onChangeText={(ruc) => setIssuer({ ...issuer, ruc })}
-          keyboardType="number-pad"
-          rightElement={<InlineInputButton label={lookingUpIssuer ? "..." : "Consultar"} onPress={() => { void lookupIssuerRuc(); }} />}
+        <IssuerIdentityFields issuer={issuer} lookingUpIssuer={lookingUpIssuer} onChange={setIssuer} onLookupRuc={() => { void lookupIssuerRuc(); }} />
+        <IssuerEstablishmentFields
+          issuer={issuer}
+          establishments={establishments}
+          selectedEstablishment={selectedEstablishment}
+          establishmentNameText={establishmentNameText}
+          establishmentCodeText={establishmentCodeText}
+          emissionPointText={emissionPointText}
+          sequentialText={sequentialText}
+          remissionSequentialText={remissionSequentialText}
+          creditNoteSequentialText={creditNoteSequentialText}
+          onSelectEstablishment={selectEstablishment}
+          onEstablishmentNameChange={setEstablishmentNameText}
+          onEstablishmentCodeChange={setEstablishmentCodeText}
+          onEmissionPointChange={setEmissionPointText}
+          onEstablishmentPatch={updateSelectedEstablishment}
+          onSequentialChange={setSequentialText}
+          onRemissionSequentialChange={setRemissionSequentialText}
+          onCreditNoteSequentialChange={setCreditNoteSequentialText}
         />
-        <Input label="Razon social" value={issuer.businessName} onChangeText={(businessName) => setIssuer({ ...issuer, businessName })} />
-        <Input label="Nombre comercial" value={issuer.tradeName} onChangeText={(tradeName) => setIssuer({ ...issuer, tradeName })} />
-        <Input label="Correo de contacto" value={issuer.email || ""} onChangeText={(email) => setIssuer({ ...issuer, email })} autoCapitalize="none" />
-        <Input label="URL logo RIDE" value={issuer.logoUrl} onChangeText={(logoUrl) => setIssuer({ ...issuer, logoUrl })} autoCapitalize="none" />
-        <Input label="Direccion matriz" value={issuer.address} onChangeText={(address) => setIssuer({ ...issuer, address })} />
-        <Text style={styles.groupTitle}>Establecimiento activo</Text>
-        <Select
-          label="Sucursal / punto de emision"
-          value={selectedEstablishment.id}
-          onChange={(id) => selectEstablishment(id)}
-          options={establishments.map((item) => ({ label: `${item.name} ${item.establishment}-${item.emissionPoint}`, value: item.id }))}
-        />
-        <Input label="Nombre establecimiento" value={establishmentNameText} onChangeText={setEstablishmentNameText} />
-        <View style={styles.row}>
-          <View style={styles.flex}>
-            <Input label="Estab." value={establishmentCodeText} onChangeText={(value) => setEstablishmentCodeText(value.replace(/\D/g, "").slice(0, 3))} keyboardType="number-pad" />
-          </View>
-          <View style={styles.flex}>
-            <Input label="Pto. emi." value={emissionPointText} onChangeText={(value) => setEmissionPointText(value.replace(/\D/g, "").slice(0, 3))} keyboardType="number-pad" />
-          </View>
-        </View>
-        <Input label="Direccion establecimiento" value={selectedEstablishment.address || issuer.address} onChangeText={(address) => updateSelectedEstablishment({ address })} />
-        <Input label="Siguiente secuencial" value={sequentialText} onChangeText={setSequentialText} keyboardType="number-pad" />
-        <Input label="Siguiente secuencial guia" value={remissionSequentialText} onChangeText={setRemissionSequentialText} keyboardType="number-pad" />
-        <Input label="Siguiente secuencial nota credito" value={creditNoteSequentialText} onChangeText={setCreditNoteSequentialText} keyboardType="number-pad" />
         {!canManageEstablishments ? <PlanLimitCard licenseLabel={compactLicenseStatusLabel(license)} /> : null}
         <EstablishmentActions
           canManage={canManageEstablishments}
@@ -3617,16 +3262,18 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
           onDelete={requestDeleteSelectedEstablishment}
         />
         <IssuerTaxSettings issuer={issuer} onChange={setIssuer} />
-        <Input label="URL del servidor" value={backendUrl} onChangeText={setBackendUrl} autoCapitalize="none" />
-        <AutoBackupToggle enabled={autoBackupEnabled} onChange={setAutoBackupEnabled} />
-        <IssuerActionButtons
+        <IssuerServerSettings
+          backendUrl={backendUrl}
+          autoBackupEnabled={autoBackupEnabled}
           checkingConnection={checkingConnection}
           testingEmail={testingEmail}
+          connectionResult={connectionResult}
+          onBackendUrlChange={setBackendUrl}
+          onAutoBackupChange={setAutoBackupEnabled}
           onSave={save}
           onTestConnection={testConnection}
           onTestEmail={testCompanyEmail}
         />
-        <ConnectionResultText value={connectionResult} />
       </Section>
       <Section title="Logo y firma electronica">
         <CompanyAssetsSection
@@ -3641,34 +3288,22 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
         />
       </Section>
       <Section title="Estado de configuracion">
-        <Text style={styles.paragraph}>Modo actual: {issuer.environment === "1" ? "PRUEBAS" : "PRODUCCION"}. Los avisos de produccion son informativos mientras siga trabajando en pruebas.</Text>
-        <ProductionChecklist checklist={productionChecklist} />
+        <ProductionStatusSection issuer={issuer} checklist={productionChecklist} />
       </Section>
       <Section title="Plan activo">
         <ActivePlanInfo license={license} />
       </Section>
       <Section title="Base de datos">
-        <BackupStatusInfo data={data} />
-        <View style={styles.row}>
-          <View style={styles.flex}>
-            <PrimaryButton label={syncing ? "Procesando..." : "Subir cambios"} onPress={syncing ? () => undefined : backupData} />
-          </View>
-          <View style={styles.flex}>
-            <PrimaryButton label="Cargar copia" onPress={syncing ? () => undefined : restoreData} />
-          </View>
-        </View>
-        <PrimaryButton label="Actualizar datos" onPress={onRefreshBackend} />
+        <DatabaseSyncSection data={data} syncing={syncing} onBackup={backupData} onRestore={restoreData} onRefresh={onRefreshBackend} />
       </Section>
       <Section title="Estado de integracion">
         <IntegrationStatusInfo issuer={issuer} />
       </Section>
       <Section title="Logs tecnicos">
-        <Text style={styles.paragraph}>Para soporte: muestra errores, reintentos, login, correo, SRI y respuestas lentas del servidor. No guarda claves ni documentos completos.</Text>
-        <PrimaryButton label={loadingTechnicalLogs ? "Cargando..." : "Cargar logs tecnicos"} onPress={loadingTechnicalLogs ? () => undefined : loadTechnicalLogs} />
-        <TechnicalLogsList logs={technicalLogs} />
+        <TechnicalLogsSection logs={technicalLogs} loading={loadingTechnicalLogs} onLoad={loadTechnicalLogs} />
       </Section>
       <Section title="Auditoria">
-        <AuditLogList logs={auditLogs} visibleLogs={visibleAuditLogs} onLoadMore={() => setVisibleAuditCount((count) => count + LIST_BATCH_SIZE)} />
+        <AuditSection logs={auditLogs} visibleLogs={visibleAuditLogs} onLoadMore={() => setVisibleAuditCount((count) => count + LIST_BATCH_SIZE)} />
       </Section>
       <NewEstablishmentModal
         visible={establishmentModalVisible}

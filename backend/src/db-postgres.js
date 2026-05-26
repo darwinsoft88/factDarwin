@@ -12,6 +12,7 @@ const {
   summarizeSnapshot,
   validateSnapshot
 } = require("./db-utils");
+const { verifyPassword } = require("./auth");
 const { buildInitialTenantData, uid } = require("./saas");
 
 const pool = new Pool({
@@ -45,17 +46,21 @@ async function ensureSchema() {
 
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT '',
         name TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE,
+        email TEXT NOT NULL,
         role TEXT NOT NULL,
         payload JSONB NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
       );
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT '';
+      ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;
 
       CREATE TABLE IF NOT EXISTS clients (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT '',
         name TEXT NOT NULL,
-        identification TEXT NOT NULL UNIQUE,
+        identification TEXT NOT NULL,
         identification_type TEXT,
         email TEXT,
         phone TEXT,
@@ -63,10 +68,13 @@ async function ensureSchema() {
         payload JSONB NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
       );
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT '';
+      ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_identification_key;
 
       CREATE TABLE IF NOT EXISTS products (
         id TEXT PRIMARY KEY,
-        code TEXT NOT NULL UNIQUE,
+        company_id TEXT NOT NULL DEFAULT '',
+        code TEXT NOT NULL,
         name TEXT NOT NULL,
         price NUMERIC(14, 6) NOT NULL DEFAULT 0,
         cost NUMERIC(14, 6) NOT NULL DEFAULT 0,
@@ -76,6 +84,8 @@ async function ensureSchema() {
         payload JSONB NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
       );
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT '';
+      ALTER TABLE products DROP CONSTRAINT IF EXISTS products_code_key;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS cost NUMERIC(14, 6) NOT NULL DEFAULT 0;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS min_stock NUMERIC(14, 6) NOT NULL DEFAULT 5;
 
@@ -117,6 +127,7 @@ async function ensureSchema() {
 
       CREATE TABLE IF NOT EXISTS sale_items (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT '',
         sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
         line_index INTEGER NOT NULL,
         product_id TEXT,
@@ -130,6 +141,7 @@ async function ensureSchema() {
         payload JSONB NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
       );
+      ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT '';
 
       CREATE TABLE IF NOT EXISTS remission_guides (
         id TEXT PRIMARY KEY,
@@ -170,6 +182,7 @@ async function ensureSchema() {
 
       CREATE TABLE IF NOT EXISTS inventory_movements (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT '',
         product_id TEXT,
         product_name TEXT,
         type TEXT NOT NULL,
@@ -183,9 +196,11 @@ async function ensureSchema() {
         payload JSONB NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
       );
+      ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT '';
 
       CREATE TABLE IF NOT EXISTS app_audit_logs (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT '',
         event TEXT NOT NULL,
         entity TEXT,
         entity_id TEXT,
@@ -196,6 +211,7 @@ async function ensureSchema() {
         payload JSONB NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
       );
+      ALTER TABLE app_audit_logs ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT '';
 
       CREATE TABLE IF NOT EXISTS cash_closings (
         id TEXT PRIMARY KEY,
@@ -222,6 +238,7 @@ async function ensureSchema() {
 
       CREATE TABLE IF NOT EXISTS document_sequences (
         id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL DEFAULT '',
         document_type TEXT NOT NULL,
         establishment TEXT NOT NULL,
         emission_point TEXT NOT NULL,
@@ -229,6 +246,7 @@ async function ensureSchema() {
         current_value INTEGER NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
       );
+      ALTER TABLE document_sequences ADD COLUMN IF NOT EXISTS company_id TEXT NOT NULL DEFAULT '';
 
       CREATE TABLE IF NOT EXISTS saas_companies (
         id TEXT PRIMARY KEY,
@@ -258,6 +276,20 @@ async function ensureSchema() {
       ALTER TABLE saas_users DROP CONSTRAINT IF EXISTS saas_users_email_key;
       CREATE UNIQUE INDEX IF NOT EXISTS idx_saas_users_company_email_unique
         ON saas_users(company_id, email);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_company_email_unique
+        ON users(company_id, email);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_company_identification_unique
+        ON clients(company_id, identification);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_products_company_code_unique
+        ON products(company_id, code);
+      CREATE INDEX IF NOT EXISTS idx_sale_items_company_sale
+        ON sale_items(company_id, sale_id);
+      CREATE INDEX IF NOT EXISTS idx_inventory_company_created_at
+        ON inventory_movements(company_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_app_audit_logs_company_created_at
+        ON app_audit_logs(company_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_document_sequences_company
+        ON document_sequences(company_id, document_type, environment, establishment, emission_point);
       CREATE INDEX IF NOT EXISTS idx_sales_company_created_at
         ON sales(company_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_sales_company_client_created_at
@@ -348,7 +380,7 @@ async function saveSnapshot(data, companyId = "") {
         [companyId, JSON.stringify(storedData), updatedAt]
       );
       await client.query("INSERT INTO saas_snapshot_history (company_id, data, created_at) VALUES ($1, $2::jsonb, $3)", [companyId, JSON.stringify(storedData), updatedAt]);
-      await syncTenantDocumentTables(client, mergedData, updatedAt, companyId);
+      await syncNormalizedTables(client, mergedData, updatedAt, companyId);
     } else {
       const storedData = compactSnapshotForStorage(data);
       await client.query(
@@ -407,7 +439,7 @@ async function mergeSnapshotPatch(patch, companyId = "") {
         [companyId, JSON.stringify(storedData), updatedAt]
       );
       await client.query("INSERT INTO saas_snapshot_history (company_id, data, created_at) VALUES ($1, $2::jsonb, $3)", [companyId, JSON.stringify(storedData), updatedAt]);
-      await syncTenantDocumentTables(client, data, updatedAt, companyId);
+      await syncNormalizedTables(client, data, updatedAt, companyId);
     } else {
       await client.query(
         `INSERT INTO app_snapshots (id, data, updated_at)
@@ -509,10 +541,10 @@ async function reserveDocumentSequence({ documentType = "factura", issuer, creat
     await client.query("BEGIN");
     const initialValue = await initialSequenceValue(client, documentType, issuer, companyId);
     await client.query(
-      `INSERT INTO document_sequences (id, document_type, establishment, emission_point, environment, current_value, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO document_sequences (id, company_id, document_type, establishment, emission_point, environment, current_value, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT(id) DO NOTHING`,
-      [key, documentType, issuer.establishment, issuer.emissionPoint, issuer.environment, initialValue, now]
+      [key, companyId || "", documentType, issuer.establishment, issuer.emissionPoint, issuer.environment, initialValue, now]
     );
     await client.query(
       `UPDATE document_sequences
@@ -546,18 +578,20 @@ async function reserveDocumentSequence({ documentType = "factura", issuer, creat
   }
 }
 
-async function syncNormalizedTables(client, data, updatedAt) {
+async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
   await replaceTable(client, "users", data.users || [], (user) => ({
     id: user.id,
+    company_id: companyId,
     name: user.name || "",
     email: normalizeUserEmail(user.email || ""),
     role: user.role || "vendedor",
     payload: user,
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   await replaceTable(client, "clients", data.clients || [], (item) => ({
     id: item.id,
+    company_id: companyId,
     name: item.name || "",
     identification: normalizeClientIdentification(item.identification || ""),
     identification_type: item.identificationType || "",
@@ -566,10 +600,11 @@ async function syncNormalizedTables(client, data, updatedAt) {
     address: item.address || "",
     payload: item,
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   await replaceTable(client, "products", data.products || [], (item) => ({
     id: item.id,
+    company_id: companyId,
     code: normalizeProductCode(item.code || ""),
     name: item.name || "",
     price: Number(item.price || 0),
@@ -579,11 +614,11 @@ async function syncNormalizedTables(client, data, updatedAt) {
     min_stock: Number(item.minStock || 5),
     payload: item,
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   await replaceTable(client, "sales", data.sales || [], (sale) => ({
     id: sale.id,
-    company_id: "",
+    company_id: companyId,
     ...documentScopeFromDocument(sale, data.issuer),
     document_type: sale.documentType || "factura",
     client_id: sale.clientId || "",
@@ -599,10 +634,11 @@ async function syncNormalizedTables(client, data, updatedAt) {
     created_at: sale.createdAt || updatedAt,
     payload: sale,
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   await replaceTable(client, "sale_items", (data.sales || []).flatMap((sale) => (sale.items || []).map((item, index) => ({ sale, item, index }))), ({ sale, item, index }) => ({
     id: `${sale.id}:${index}`,
+    company_id: companyId,
     sale_id: sale.id,
     line_index: index,
     product_id: item.productId || "",
@@ -615,11 +651,11 @@ async function syncNormalizedTables(client, data, updatedAt) {
     source_line_key: item.sourceLineKey || "",
     payload: item,
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   await replaceTable(client, "remission_guides", data.guides || [], (guide) => ({
     id: guide.id,
-    company_id: "",
+    company_id: companyId,
     ...documentScopeFromDocument(guide, data.issuer),
     source_sale_id: guide.sourceSaleId || "",
     client_id: guide.clientId || "",
@@ -636,10 +672,11 @@ async function syncNormalizedTables(client, data, updatedAt) {
     created_at: guide.createdAt || updatedAt,
     payload: guide,
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   await replaceTable(client, "inventory_movements", data.inventoryMovements || [], (movement) => ({
     id: movement.id,
+    company_id: companyId,
     product_id: movement.productId || "",
     product_name: movement.productName || "",
     type: movement.type || "ajuste",
@@ -652,10 +689,11 @@ async function syncNormalizedTables(client, data, updatedAt) {
     created_at: movement.createdAt || updatedAt,
     payload: movement,
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   await replaceTable(client, "app_audit_logs", data.auditLogs || [], (entry) => ({
     id: entry.id,
+    company_id: companyId,
     event: entry.event || "",
     entity: entry.entity || "",
     entity_id: entry.entityId || "",
@@ -665,70 +703,10 @@ async function syncNormalizedTables(client, data, updatedAt) {
     created_at: entry.createdAt || updatedAt,
     payload: entry,
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   await replaceTable(client, "cash_closings", data.cashClosings || [], (closing) => ({
     id: closing.id,
-    company_id: "",
-    ...documentScopeFromDocument(closing, data.issuer),
-    closing_date: closing.date || "",
-    user_id: closing.userId || "",
-    user_name: closing.userName || "",
-    document_count: Number(closing.documentCount || 0),
-    total: Number(closing.total || 0),
-    cash_expected: Number(closing.cashExpected || 0),
-    cash_counted: Number(closing.cashCounted || 0),
-    difference: Number(closing.difference || 0),
-    created_at: closing.createdAt || updatedAt,
-    payload: closing,
-    updated_at: updatedAt
-  }));
-}
-
-async function syncTenantDocumentTables(client, data, updatedAt, companyId) {
-  await upsertRows(client, "sales", (data.sales || []).map((sale) => ({
-    id: sale.id,
-    company_id: companyId,
-    ...documentScopeFromDocument(sale, data.issuer),
-    document_type: sale.documentType || "factura",
-    client_id: sale.clientId || "",
-    user_id: sale.userId || "",
-    sequence: sale.sequence || "",
-    access_key: sale.accessKey || "",
-    authorization_number: sale.authorizationNumber || "",
-    status: sale.status || "BORRADOR",
-    subtotal: Number(sale.subtotal || 0),
-    tax: Number(sale.tax || 0),
-    total: Number(sale.total || 0),
-    source_sale_id: sale.sourceSaleId || "",
-    created_at: sale.createdAt || updatedAt,
-    payload: sale,
-    updated_at: updatedAt
-  })));
-
-  await upsertRows(client, "remission_guides", (data.guides || []).map((guide) => ({
-    id: guide.id,
-    company_id: companyId,
-    ...documentScopeFromDocument(guide, data.issuer),
-    source_sale_id: guide.sourceSaleId || "",
-    client_id: guide.clientId || "",
-    user_id: guide.userId || "",
-    sequence: guide.sequence || "",
-    access_key: guide.accessKey || "",
-    authorization_number: guide.authorizationNumber || "",
-    status: guide.status || "BORRADOR",
-    transporter_name: guide.transporterName || "",
-    transporter_identification: guide.transporterIdentification || "",
-    plate: guide.plate || "",
-    start_date: guide.startDate || "",
-    end_date: guide.endDate || "",
-    created_at: guide.createdAt || updatedAt,
-    payload: guide,
-    updated_at: updatedAt
-  })));
-
-  await upsertRows(client, "cash_closings", (data.cashClosings || []).map((closing) => ({
-    id: closing.id,
     company_id: companyId,
     ...documentScopeFromDocument(closing, data.issuer),
     closing_date: closing.date || "",
@@ -742,12 +720,14 @@ async function syncTenantDocumentTables(client, data, updatedAt, companyId) {
     created_at: closing.createdAt || updatedAt,
     payload: closing,
     updated_at: updatedAt
-  })));
+  }), companyId);
 }
 
-async function replaceTable(client, table, items, mapRow) {
-  if (["sales", "remission_guides", "cash_closings"].includes(table)) {
-    await client.query(`DELETE FROM ${table} WHERE company_id = ''`);
+const companyScopedTables = new Set(["users", "clients", "products", "sales", "sale_items", "remission_guides", "inventory_movements", "app_audit_logs", "cash_closings"]);
+
+async function replaceTable(client, table, items, mapRow, companyId = "") {
+  if (companyScopedTables.has(table)) {
+    await client.query(`DELETE FROM ${table} WHERE company_id = $1`, [companyId]);
   } else {
     await client.query(`DELETE FROM ${table}`);
   }
@@ -761,19 +741,6 @@ async function insertRows(client, table, rows) {
   const columns = Object.keys(rows[0]);
   const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
   const sql = `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`;
-  for (const row of rows) {
-    const values = columns.map((column) => column === "payload" ? JSON.stringify(row[column]) : row[column]);
-    await client.query(sql, values);
-  }
-}
-
-async function upsertRows(client, table, rows) {
-  if (!rows.length) return;
-
-  const columns = Object.keys(rows[0]);
-  const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
-  const updates = columns.filter((column) => column !== "id").map((column) => `${column} = EXCLUDED.${column}`).join(", ");
-  const sql = `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${placeholders}) ON CONFLICT(id) DO UPDATE SET ${updates}`;
   for (const row of rows) {
     const values = columns.map((column) => column === "payload" ? JSON.stringify(row[column]) : row[column]);
     await client.query(sql, values);
@@ -876,22 +843,6 @@ function normalizeThreeDigits(value) {
   return (digits || "1").padStart(3, "0").slice(-3);
 }
 
-function documentScopeFromAccessKey(accessKey, issuer = {}) {
-  const value = String(accessKey || "");
-  if (/^\d{49}$/.test(value)) {
-    return {
-      environment: value.slice(23, 24),
-      establishment: value.slice(24, 27),
-      emission_point: value.slice(27, 30)
-    };
-  }
-  return {
-    environment: String(issuer.environment || ""),
-    establishment: String(issuer.establishment || ""),
-    emission_point: String(issuer.emissionPoint || "")
-  };
-}
-
 function documentScopeFromDocument(document, issuer = {}) {
   const scope = scopeFromDocument(document, issuer);
   return {
@@ -984,7 +935,7 @@ async function createCompanyAccount({ company, admin, passwordHash, device }) {
   }
 }
 
-async function authenticateCompanyUser(email, passwordHash, device = {}, companyId = "") {
+async function authenticateCompanyUser(email, password, device = {}, companyId = "") {
   await ensureSchema();
   const normalizedEmail = normalizeUserEmail(email);
   const normalizedRuc = normalizeTenantKey(email);
@@ -1001,7 +952,7 @@ async function authenticateCompanyUser(email, passwordHash, device = {}, company
      LIMIT 20`,
     [normalizedEmail, normalizedRuc, String(companyId || "")]
   );
-  const matchingRows = result.rows.filter((row) => row.passwordHash === passwordHash);
+  const matchingRows = result.rows.filter((row) => verifyPassword(password, row.passwordHash));
   if (matchingRows.length > 1 && !companyId) {
     const error = new Error("Este correo tiene varias empresas. Elija con cual desea trabajar.");
     error.statusCode = 409;

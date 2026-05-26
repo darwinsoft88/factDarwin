@@ -7,6 +7,7 @@ if (config.databaseUrl) {
 const fs = require("node:fs");
 const path = require("node:path");
 const Database = require("better-sqlite3");
+const { verifyPassword } = require("./auth");
 const { buildInitialTenantData, uid } = require("./saas");
 
 fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
@@ -40,8 +41,9 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
+    company_id TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
+    email TEXT NOT NULL,
     role TEXT NOT NULL,
     payload TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -49,8 +51,9 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS clients (
     id TEXT PRIMARY KEY,
+    company_id TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL,
-    identification TEXT NOT NULL UNIQUE,
+    identification TEXT NOT NULL,
     identification_type TEXT,
     email TEXT,
     phone TEXT,
@@ -61,7 +64,8 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS products (
     id TEXT PRIMARY KEY,
-    code TEXT NOT NULL UNIQUE,
+    company_id TEXT NOT NULL DEFAULT '',
+    code TEXT NOT NULL,
     name TEXT NOT NULL,
     price REAL NOT NULL DEFAULT 0,
     cost REAL NOT NULL DEFAULT 0,
@@ -97,6 +101,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS sale_items (
     id TEXT PRIMARY KEY,
+    company_id TEXT NOT NULL DEFAULT '',
     sale_id TEXT NOT NULL,
     line_index INTEGER NOT NULL,
     product_id TEXT,
@@ -138,6 +143,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS inventory_movements (
     id TEXT PRIMARY KEY,
+    company_id TEXT NOT NULL DEFAULT '',
     product_id TEXT,
     product_name TEXT,
     type TEXT NOT NULL,
@@ -154,6 +160,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS app_audit_logs (
     id TEXT PRIMARY KEY,
+    company_id TEXT NOT NULL DEFAULT '',
     event TEXT NOT NULL,
     entity TEXT,
     entity_id TEXT,
@@ -186,6 +193,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS document_sequences (
     id TEXT PRIMARY KEY,
+    company_id TEXT NOT NULL DEFAULT '',
     document_type TEXT NOT NULL,
     establishment TEXT NOT NULL,
     emission_point TEXT NOT NULL,
@@ -247,6 +255,13 @@ db.exec(`
 `);
 
 ensureColumn("sales", "company_id", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("users", "company_id", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("clients", "company_id", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("products", "company_id", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("sale_items", "company_id", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("inventory_movements", "company_id", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("app_audit_logs", "company_id", "TEXT NOT NULL DEFAULT ''");
+ensureColumn("document_sequences", "company_id", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("sales", "environment", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("sales", "establishment", "TEXT NOT NULL DEFAULT ''");
 ensureColumn("sales", "emission_point", "TEXT NOT NULL DEFAULT ''");
@@ -278,6 +293,20 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_guides_company_sequence_unique
     ON remission_guides(company_id, environment, establishment, emission_point, sequence)
     WHERE company_id <> '' AND sequence <> '';
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_company_email_unique
+    ON users(company_id, email);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_company_identification_unique
+    ON clients(company_id, identification);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_products_company_code_unique
+    ON products(company_id, code);
+  CREATE INDEX IF NOT EXISTS idx_sale_items_company_sale
+    ON sale_items(company_id, sale_id);
+  CREATE INDEX IF NOT EXISTS idx_inventory_company_created_at
+    ON inventory_movements(company_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_app_audit_logs_company_created_at
+    ON app_audit_logs(company_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_document_sequences_company
+    ON document_sequences(company_id, document_type, environment, establishment, emission_point);
 `);
 migrateSaasUsersEmailScope();
 
@@ -377,7 +406,7 @@ const saveTenantSnapshotTx = db.transaction((companyId, data, updatedAt) => {
 
   db.prepare("INSERT INTO saas_snapshot_history (company_id, data, created_at) VALUES (@companyId, @data, @createdAt)")
     .run({ companyId, data: JSON.stringify(storedData), createdAt: updatedAt });
-  syncTenantDocumentTables(companyId, mergedData, updatedAt);
+  syncNormalizedTables(mergedData, updatedAt, companyId);
 
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const before = countSnapshotHistory(companyId);
@@ -402,7 +431,7 @@ const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "") =
     `).run({ companyId, data: JSON.stringify(storedData), updatedAt });
     db.prepare("INSERT INTO saas_snapshot_history (company_id, data, created_at) VALUES (@companyId, @data, @createdAt)")
       .run({ companyId, data: JSON.stringify(storedData), createdAt: updatedAt });
-    syncTenantDocumentTables(companyId, data, updatedAt);
+    syncNormalizedTables(data, updatedAt, companyId);
     const summary = summarizeSnapshot(data);
     insertBackendAudit("TENANT_INCREMENTAL_MERGE", { companyId, ...summary });
     return summary;
@@ -515,11 +544,12 @@ const reserveDocumentSequenceTx = db.transaction(({ documentType = "factura", is
   const initialValue = initialSequenceValue(documentType, issuer, companyId);
 
   db.prepare(`
-    INSERT INTO document_sequences (id, document_type, establishment, emission_point, environment, current_value, updated_at)
-    VALUES (@id, @documentType, @establishment, @emissionPoint, @environment, @currentValue, @updatedAt)
+    INSERT INTO document_sequences (id, company_id, document_type, establishment, emission_point, environment, current_value, updated_at)
+    VALUES (@id, @companyId, @documentType, @establishment, @emissionPoint, @environment, @currentValue, @updatedAt)
     ON CONFLICT(id) DO NOTHING
   `).run({
     id,
+    companyId: companyId || "",
     documentType,
     establishment: issuer.establishment,
     emissionPoint: issuer.emissionPoint,
@@ -545,21 +575,23 @@ async function reserveDocumentSequence(payload) {
   return reserveDocumentSequenceTx(payload);
 }
 
-function syncNormalizedTables(data, updatedAt) {
+function syncNormalizedTables(data, updatedAt, companyId = "") {
   replaceTable("users", data.users || [], updatedAt, (user) => ({
     id: user.id,
+    company_id: companyId,
     name: user.name || "",
     email: normalizeUserEmail(user.email || ""),
     role: user.role || "vendedor",
     payload: JSON.stringify(user),
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   ensureColumn("products", "cost", "REAL NOT NULL DEFAULT 0");
   ensureColumn("products", "min_stock", "REAL NOT NULL DEFAULT 5");
 
   replaceTable("clients", data.clients || [], updatedAt, (client) => ({
     id: client.id,
+    company_id: companyId,
     name: client.name || "",
     identification: normalizeClientIdentification(client.identification || ""),
     identification_type: client.identificationType || "",
@@ -568,10 +600,11 @@ function syncNormalizedTables(data, updatedAt) {
     address: client.address || "",
     payload: JSON.stringify(client),
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   replaceTable("products", data.products || [], updatedAt, (product) => ({
     id: product.id,
+    company_id: companyId,
     code: normalizeProductCode(product.code || ""),
     name: product.name || "",
     price: Number(product.price || 0),
@@ -581,11 +614,11 @@ function syncNormalizedTables(data, updatedAt) {
     min_stock: Number(product.minStock || 5),
     payload: JSON.stringify(product),
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   replaceTable("sales", data.sales || [], updatedAt, (sale) => ({
     id: sale.id,
-    company_id: "",
+    company_id: companyId,
     ...documentScopeFromDocument(sale, data.issuer),
     document_type: sale.documentType || "factura",
     client_id: sale.clientId || "",
@@ -601,10 +634,11 @@ function syncNormalizedTables(data, updatedAt) {
     created_at: sale.createdAt || updatedAt,
     payload: JSON.stringify(sale),
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   replaceTable("sale_items", (data.sales || []).flatMap((sale) => (sale.items || []).map((item, index) => ({ sale, item, index }))), updatedAt, ({ sale, item, index }) => ({
     id: `${sale.id}:${index}`,
+    company_id: companyId,
     sale_id: sale.id,
     line_index: index,
     product_id: item.productId || "",
@@ -617,11 +651,11 @@ function syncNormalizedTables(data, updatedAt) {
     source_line_key: item.sourceLineKey || "",
     payload: JSON.stringify(item),
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   replaceTable("remission_guides", data.guides || [], updatedAt, (guide) => ({
     id: guide.id,
-    company_id: "",
+    company_id: companyId,
     ...documentScopeFromDocument(guide, data.issuer),
     source_sale_id: guide.sourceSaleId || "",
     client_id: guide.clientId || "",
@@ -638,10 +672,11 @@ function syncNormalizedTables(data, updatedAt) {
     created_at: guide.createdAt || updatedAt,
     payload: JSON.stringify(guide),
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   replaceTable("inventory_movements", data.inventoryMovements || [], updatedAt, (movement) => ({
     id: movement.id,
+    company_id: companyId,
     product_id: movement.productId || "",
     product_name: movement.productName || "",
     type: movement.type || "ajuste",
@@ -654,10 +689,11 @@ function syncNormalizedTables(data, updatedAt) {
     created_at: movement.createdAt || updatedAt,
     payload: JSON.stringify(movement),
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   replaceTable("app_audit_logs", data.auditLogs || [], updatedAt, (entry) => ({
     id: entry.id,
+    company_id: companyId,
     event: entry.event || "",
     entity: entry.entity || "",
     entity_id: entry.entityId || "",
@@ -667,70 +703,10 @@ function syncNormalizedTables(data, updatedAt) {
     created_at: entry.createdAt || updatedAt,
     payload: JSON.stringify(entry),
     updated_at: updatedAt
-  }));
+  }), companyId);
 
   replaceTable("cash_closings", data.cashClosings || [], updatedAt, (closing) => ({
     id: closing.id,
-    company_id: "",
-    ...documentScopeFromDocument(closing, data.issuer),
-    closing_date: closing.date || "",
-    user_id: closing.userId || "",
-    user_name: closing.userName || "",
-    document_count: Number(closing.documentCount || 0),
-    total: Number(closing.total || 0),
-    cash_expected: Number(closing.cashExpected || 0),
-    cash_counted: Number(closing.cashCounted || 0),
-    difference: Number(closing.difference || 0),
-    created_at: closing.createdAt || updatedAt,
-    payload: JSON.stringify(closing),
-    updated_at: updatedAt
-  }));
-}
-
-function syncTenantDocumentTables(companyId, data, updatedAt) {
-  upsertRows("sales", (data.sales || []).map((sale) => ({
-    id: sale.id,
-    company_id: companyId,
-    ...documentScopeFromDocument(sale, data.issuer),
-    document_type: sale.documentType || "factura",
-    client_id: sale.clientId || "",
-    user_id: sale.userId || "",
-    sequence: sale.sequence || "",
-    access_key: sale.accessKey || "",
-    authorization_number: sale.authorizationNumber || "",
-    status: sale.status || "BORRADOR",
-    subtotal: Number(sale.subtotal || 0),
-    tax: Number(sale.tax || 0),
-    total: Number(sale.total || 0),
-    source_sale_id: sale.sourceSaleId || "",
-    created_at: sale.createdAt || updatedAt,
-    payload: JSON.stringify(sale),
-    updated_at: updatedAt
-  })));
-
-  upsertRows("remission_guides", (data.guides || []).map((guide) => ({
-    id: guide.id,
-    company_id: companyId,
-    ...documentScopeFromDocument(guide, data.issuer),
-    source_sale_id: guide.sourceSaleId || "",
-    client_id: guide.clientId || "",
-    user_id: guide.userId || "",
-    sequence: guide.sequence || "",
-    access_key: guide.accessKey || "",
-    authorization_number: guide.authorizationNumber || "",
-    status: guide.status || "BORRADOR",
-    transporter_name: guide.transporterName || "",
-    transporter_identification: guide.transporterIdentification || "",
-    plate: guide.plate || "",
-    start_date: guide.startDate || "",
-    end_date: guide.endDate || "",
-    created_at: guide.createdAt || updatedAt,
-    payload: JSON.stringify(guide),
-    updated_at: updatedAt
-  })));
-
-  upsertRows("cash_closings", (data.cashClosings || []).map((closing) => ({
-    id: closing.id,
     company_id: companyId,
     ...documentScopeFromDocument(closing, data.issuer),
     closing_date: closing.date || "",
@@ -744,12 +720,14 @@ function syncTenantDocumentTables(companyId, data, updatedAt) {
     created_at: closing.createdAt || updatedAt,
     payload: JSON.stringify(closing),
     updated_at: updatedAt
-  })));
+  }), companyId);
 }
 
-function replaceTable(table, items, updatedAt, mapRow) {
-  if (["sales", "remission_guides", "cash_closings"].includes(table)) {
-    db.prepare(`DELETE FROM ${table} WHERE company_id = ''`).run();
+const companyScopedTables = new Set(["users", "clients", "products", "sales", "sale_items", "remission_guides", "inventory_movements", "app_audit_logs", "cash_closings"]);
+
+function replaceTable(table, items, updatedAt, mapRow, companyId = "") {
+  if (companyScopedTables.has(table)) {
+    db.prepare(`DELETE FROM ${table} WHERE company_id = @companyId`).run({ companyId });
   } else {
     db.prepare(`DELETE FROM ${table}`).run();
   }
@@ -765,17 +743,6 @@ function insertRows(table, rows) {
   const columns = Object.keys(rows[0]);
   const insert = db.prepare(`
     INSERT INTO ${table} (${columns.join(", ")})
-    VALUES (${columns.map((column) => `@${column}`).join(", ")})
-  `);
-  rows.forEach((row) => insert.run(row));
-}
-
-function upsertRows(table, rows) {
-  if (!rows.length) return;
-
-  const columns = Object.keys(rows[0]);
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO ${table} (${columns.join(", ")})
     VALUES (${columns.map((column) => `@${column}`).join(", ")})
   `);
   rows.forEach((row) => insert.run(row));
@@ -943,22 +910,6 @@ function normalizeThreeDigits(value) {
   return (digits || "1").padStart(3, "0").slice(-3);
 }
 
-function documentScopeFromAccessKey(accessKey, issuer = {}) {
-  const value = String(accessKey || "");
-  if (/^\d{49}$/.test(value)) {
-    return {
-      environment: value.slice(23, 24),
-      establishment: value.slice(24, 27),
-      emission_point: value.slice(27, 30)
-    };
-  }
-  return {
-    environment: String(issuer.environment || ""),
-    establishment: String(issuer.establishment || ""),
-    emission_point: String(issuer.emissionPoint || "")
-  };
-}
-
 function documentScopeFromDocument(document, issuer = {}) {
   const scope = scopeFromDocument(document, issuer);
   return {
@@ -1063,7 +1014,7 @@ async function createCompanyAccount(payload) {
   }
 }
 
-async function authenticateCompanyUser(email, passwordHash, device = {}, companyId = "") {
+async function authenticateCompanyUser(email, password, device = {}, companyId = "") {
   const normalizedEmail = normalizeUserEmail(email);
   const normalizedRuc = normalizeTenantKey(email);
   const rows = db.prepare(`
@@ -1077,7 +1028,7 @@ async function authenticateCompanyUser(email, passwordHash, device = {}, company
       AND (@companyId = '' OR u.company_id = @companyId)
     ORDER BY CASE WHEN u.email = @email THEN 0 ELSE 1 END
   `).all({ email: normalizedEmail, ruc: normalizedRuc, companyId: String(companyId || "") });
-  const matchingRows = rows.filter((row) => row.passwordHash === passwordHash);
+  const matchingRows = rows.filter((row) => verifyPassword(password, row.passwordHash));
   if (matchingRows.length > 1 && !companyId) {
     const error = new Error("Este correo tiene varias empresas. Elija con cual desea trabajar.");
     error.statusCode = 409;

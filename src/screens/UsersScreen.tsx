@@ -40,7 +40,7 @@ export function UsersScreen({
   ListItemComponent: React.ComponentType<UsersListItemProps>;
   CrudSectionComponent: React.ComponentType<CrudSectionProps>;
 }) {
-  const emptyForm = { name: "", email: "", password: "", role: "vendedor" as UserRole };
+  const emptyForm = useMemo(() => ({ name: "", email: "", password: "", role: "vendedor" as UserRole }), []);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState("");
   const [userSearch, setUserSearch] = useState("");
@@ -58,7 +58,7 @@ export function UsersScreen({
 
   useEffect(() => {
     if (!editingId) setForm(emptyForm);
-  }, [editingId, data.users.length]);
+  }, [editingId, data.users.length, emptyForm]);
 
   const save = async () => {
     if (!form.name || !form.email || (!editingId && !form.password)) {

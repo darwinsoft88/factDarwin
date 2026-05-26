@@ -243,8 +243,7 @@ app.post("/api/auth/login", async (req, res, next) => {
       return;
     }
 
-    const passwordHash = hashPassword(String(password || ""));
-    const saasUser = authenticateCompanyUser ? await authenticateCompanyUser(email, passwordHash, device, companyId) : null;
+    const saasUser = authenticateCompanyUser ? await authenticateCompanyUser(email, String(password || ""), device, companyId) : null;
     if (saasUser) {
       const snapshot = await getSnapshot(saasUser.companyId);
       logTechnical("info", "tenant_auth_success", { companyId: saasUser.companyId, user: { id: saasUser.id, email: saasUser.email, role: saasUser.role } });
@@ -630,14 +629,33 @@ app.get("/api/support/logs", requireAuth(["admin"]), async (req, res, next) => {
 app.use((error, req, res, _next) => {
   errorLogger(error, req);
   console.error(error);
+  const statusCode = error.statusCode || 500;
   const payload = {
-    error: error.message || "Error interno del backend"
+    error: publicErrorMessage(error, statusCode)
   };
   if (Array.isArray(error.companyOptions)) {
     payload.companyOptions = error.companyOptions;
   }
-  res.status(error.statusCode || 500).json(payload);
+  res.status(statusCode).json(payload);
 });
+
+function publicErrorMessage(error, statusCode) {
+  const message = String(error?.message || "");
+  if (statusCode < 500) return message || "Solicitud invalida.";
+
+  const normalized = message.toLowerCase();
+  const databaseAuthError =
+    normalized.includes("postgres") ||
+    normalized.includes("password authentication") ||
+    (normalized.includes("password") && normalized.includes("fall")) ||
+    (normalized.includes("autent") && normalized.includes("fall"));
+
+  if (databaseAuthError) {
+    return "El servidor no pudo conectar con la base de datos configurada. Revise DATABASE_URL y reinicie el backend.";
+  }
+
+  return "Error interno del backend. Revise los logs tecnicos para soporte.";
+}
 
 function validateIssuerForSequence(issuer) {
   const errors = [];
