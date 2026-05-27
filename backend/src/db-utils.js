@@ -121,7 +121,7 @@ function newestItems(items, limit) {
 }
 
 function isOperationalDocument(item = {}) {
-  return ["BORRADOR", "PENDIENTE", "RECIBIDA", "DEVUELTA", "RECHAZADA"].includes(String(item.status || "").toUpperCase());
+  return ["BORRADOR", "PENDIENTE", "PENDIENTE_SRI", "ENVIADA_SRI", "RECIBIDA", "DEVUELTA", "ERROR_SRI", "RECHAZADA"].includes(String(item.status || "").toUpperCase());
 }
 
 function assertEmissionPointLimit(data) {

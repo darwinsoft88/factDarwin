@@ -1,5 +1,6 @@
 import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { sanitizeIntegerInput } from "../utils/numbers";
 import { Input, PrimaryButton } from "./common";
 
 export type NewEstablishmentForm = {
@@ -38,16 +39,16 @@ export function NewEstablishmentModal({ visible, form, onChange, onClose, onSave
             <Input label="Nombre establecimiento" value={form.name} onChangeText={(name) => onChange({ ...form, name })} />
             <View style={styles.row}>
               <View style={styles.flex}>
-                <Input label="Estab." value={form.establishment} onChangeText={(establishment) => onChange({ ...form, establishment })} keyboardType="number-pad" />
+                <Input label="Estab." value={form.establishment} onChangeText={(establishment) => onChange({ ...form, establishment: sanitizeIntegerInput(establishment).slice(0, 3) })} keyboardType="number-pad" />
               </View>
               <View style={styles.flex}>
-                <Input label="Pto. emi." value={form.emissionPoint} onChangeText={(emissionPoint) => onChange({ ...form, emissionPoint })} keyboardType="number-pad" />
+                <Input label="Pto. emi." value={form.emissionPoint} onChangeText={(emissionPoint) => onChange({ ...form, emissionPoint: sanitizeIntegerInput(emissionPoint).slice(0, 3) })} keyboardType="number-pad" />
               </View>
             </View>
             <Input label="Direccion establecimiento" value={form.address} onChangeText={(address) => onChange({ ...form, address })} />
-            <Input label="Siguiente secuencial" value={form.sequential} onChangeText={(sequential) => onChange({ ...form, sequential })} keyboardType="number-pad" />
-            <Input label="Siguiente secuencial guia" value={form.remissionSequential} onChangeText={(remissionSequential) => onChange({ ...form, remissionSequential })} keyboardType="number-pad" />
-            <Input label="Siguiente secuencial nota credito" value={form.creditNoteSequential} onChangeText={(creditNoteSequential) => onChange({ ...form, creditNoteSequential })} keyboardType="number-pad" />
+            <Input label="Siguiente secuencial" value={form.sequential} onChangeText={(sequential) => onChange({ ...form, sequential: sanitizeIntegerInput(sequential) })} keyboardType="number-pad" />
+            <Input label="Siguiente secuencial guia" value={form.remissionSequential} onChangeText={(remissionSequential) => onChange({ ...form, remissionSequential: sanitizeIntegerInput(remissionSequential) })} keyboardType="number-pad" />
+            <Input label="Siguiente secuencial nota credito" value={form.creditNoteSequential} onChangeText={(creditNoteSequential) => onChange({ ...form, creditNoteSequential: sanitizeIntegerInput(creditNoteSequential) })} keyboardType="number-pad" />
             <PrimaryButton label="Guardar establecimiento" onPress={onSave} />
           </ScrollView>
         </View>

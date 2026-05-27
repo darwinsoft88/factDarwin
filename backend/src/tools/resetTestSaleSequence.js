@@ -13,7 +13,7 @@ const target = {
 const nextSequential = Number(args.nextSequential || 1);
 const apply = Boolean(args.apply);
 const removeInventory = Boolean(args.removeInventory);
-const allowedStatuses = String(args.allowStatus || "RECHAZADA,ANULADA")
+const allowedStatuses = String(args.allowStatus || "DEVUELTA,ERROR_SRI,ANULADA")
   .split(",")
   .map((status) => status.trim().toUpperCase())
   .filter(Boolean);

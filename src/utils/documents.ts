@@ -33,11 +33,11 @@ export function guideNumber(guide: RemissionGuide, issuer: Issuer) {
 export function resolveInvoiceStatus(result: AuthorizationResponse): Sale["status"] {
   const raw = `${result.authorizationStatus || ""} ${result.sriMessage || ""} ${JSON.stringify(result)}`.toUpperCase();
 
-  if (result.ok === false) return "RECHAZADA";
   if (result.authorizationStatus === "AUTORIZADO" || raw.includes("<ESTADO>AUTORIZADO</ESTADO>")) return "AUTORIZADA";
-  if (raw.includes("DEVUELTA") || raw.includes("RECHAZADA") || raw.includes("ERROR")) return "RECHAZADA";
-  if (result.sent) return "RECIBIDA";
-  return "FIRMADA";
+  if (raw.includes("DEVUELTA")) return "DEVUELTA";
+  if (result.ok === false || raw.includes("RECHAZADA") || raw.includes("ERROR") || raw.includes("NO AUTORIZADO")) return "ERROR_SRI";
+  if (result.sent) return "ENVIADA";
+  return result.signedXml ? "FIRMADA" : "BORRADOR";
 }
 
 export function isAccessKeyUsed(data: AppData, accessKey: string, currentId = "") {

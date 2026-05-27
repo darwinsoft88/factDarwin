@@ -1,9 +1,10 @@
 export type Environment = "1" | "2";
-export type InvoiceStatus = "BORRADOR" | "FIRMADA" | "RECIBIDA" | "AUTORIZADA" | "RECHAZADA" | "ANULADA" | "INTERNA" | "PROFORMA";
+export type InvoiceStatus = "BORRADOR" | "TICKET_OFFLINE" | "FIRMADA" | "ENVIADA" | "PENDIENTE_SRI" | "ENVIADA_SRI" | "AUTORIZADA" | "DEVUELTA" | "ERROR_SRI" | "ANULADA" | "PROFORMA";
 export type DocumentType = "factura" | "nota_venta" | "proforma" | "nota_credito";
 export type UserRole = "admin" | "vendedor" | "cajero" | "contador";
 export type LicenseStatus = "trial" | "active" | "expired" | "suspended";
 export type LicensePlan = "trial" | "basico_mensual" | "basico_anual" | "pro_mensual" | "pro_anual";
+export type TaxRegime = "general" | "rimpe_emprendedor" | "rimpe_negocio_popular";
 
 export type User = {
   id: string;
@@ -98,10 +99,13 @@ export type Issuer = {
   emissionPoint: string;
   sequential: number;
   environment: Environment;
+  taxRegime?: TaxRegime;
   taxpayerType: "natural" | "juridica";
   accountingRequired: "SI" | "NO";
   specialTaxpayer: "SI" | "NO";
   specialTaxpayerResolution: string;
+  retentionAgent?: "SI" | "NO";
+  retentionAgentResolution?: string;
   remissionSequential?: number;
   creditNoteSequential?: number;
   activeEstablishmentId?: string;

@@ -4,6 +4,7 @@ const path = require("node:path");
 const config = require("./config");
 
 let lastBackup = null;
+let lastRestoreTest = null;
 let nextBackupAt = null;
 let schedulerTimer = null;
 let backupRunning = false;
@@ -15,6 +16,7 @@ function getBackupStatus() {
     time: config.backups.time,
     retentionDays: config.backups.retentionDays,
     lastBackup,
+    lastRestoreTest,
     nextBackupAt: nextBackupAt ? nextBackupAt.toISOString() : ""
   };
 }
@@ -50,6 +52,7 @@ async function runPostgresBackup(reason = "manual") {
   try {
     await fs.mkdir(config.backups.dir, { recursive: true });
     await executePgDump(filePath);
+    const restoreTest = await verifyPostgresRestore(filePath);
     const stats = await fs.stat(filePath);
     await pruneOldBackups();
     lastBackup = {
@@ -58,6 +61,7 @@ async function runPostgresBackup(reason = "manual") {
       file: filePath,
       sizeBytes: stats.size,
       createdAt: startedAt.toISOString(),
+      restoreTest,
       message: "Respaldo PostgreSQL creado correctamente."
     };
     return lastBackup;
@@ -112,10 +116,142 @@ async function executePgDump(filePath) {
   });
 }
 
+async function verifyPostgresRestore(filePath) {
+  const startedAt = new Date();
+  const sourceUrl = new URL(config.databaseUrl);
+  const maintenanceUrl = maintenanceDatabaseUrl(sourceUrl);
+  const databaseName = `factudarwin_restore_${formatStamp(startedAt)}_${Math.random().toString(16).slice(2, 8)}`;
+  const restoredUrl = databaseUrlForName(sourceUrl, databaseName);
+
+  try {
+    await executePsql(maintenanceUrl, `CREATE DATABASE ${pgIdentifier(databaseName)} TEMPLATE template0`);
+    await executePgRestore(filePath, restoredUrl);
+    const stdout = await executePsql(
+      restoredUrl,
+      "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('saas_companies', 'saas_snapshots', 'sales', 'products', 'inventory_movements')",
+      { captureStdout: true }
+    );
+    const tableCount = Number(String(stdout).trim());
+    if (!Number.isFinite(tableCount) || tableCount < 5) {
+      throw new Error(`Restauracion incompleta: solo se encontraron ${tableCount} tabla(s) critica(s).`);
+    }
+
+    lastRestoreTest = {
+      ok: true,
+      database: databaseName,
+      checkedTables: tableCount,
+      createdAt: startedAt.toISOString(),
+      message: "Prueba de restauracion PostgreSQL completada correctamente."
+    };
+    return lastRestoreTest;
+  } catch (error) {
+    lastRestoreTest = {
+      ok: false,
+      database: databaseName,
+      createdAt: startedAt.toISOString(),
+      message: error instanceof Error ? error.message : "No se pudo probar la restauracion PostgreSQL."
+    };
+    throw error;
+  } finally {
+    await dropRestoreTestDatabase(maintenanceUrl, databaseName);
+  }
+}
+
+async function executePgRestore(filePath, databaseUrl) {
+  const args = [
+    "--no-owner",
+    "--no-privileges",
+    "--exit-on-error",
+    "--dbname",
+    sanitizeDatabaseUrlForPgDump(databaseUrl),
+    filePath
+  ];
+
+  await executeCommand(config.backups.pgRestorePath, args, databaseUrl, "pg_restore");
+}
+
+async function executePsql(databaseUrl, sql, options = {}) {
+  const args = [
+    "--dbname",
+    sanitizeDatabaseUrlForPgDump(databaseUrl),
+    "--no-password",
+    "--tuples-only",
+    "--no-align",
+    "--set",
+    "ON_ERROR_STOP=1",
+    "--command",
+    sql
+  ];
+
+  return executeCommand(config.backups.psqlPath, args, databaseUrl, "psql", options);
+}
+
+async function executeCommand(command, args, databaseUrl, label, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      env: {
+        ...process.env,
+        PGPASSWORD: decodeURIComponent(databaseUrl.password || "")
+      },
+      windowsHide: true
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      reject(new Error(`No se pudo ejecutar ${label}. Configure ${toolPathEnvName(label)} si no esta en PATH. Detalle: ${error.message}`));
+    });
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(options.captureStdout ? stdout : undefined);
+        return;
+      }
+      reject(new Error(`${label} termino con codigo ${code}. ${stderr.trim()}`.trim()));
+    });
+  });
+}
+
+async function dropRestoreTestDatabase(maintenanceUrl, databaseName) {
+  try {
+    await executePsql(maintenanceUrl, `DROP DATABASE IF EXISTS ${pgIdentifier(databaseName)} WITH (FORCE)`);
+  } catch {
+    try {
+      await executePsql(maintenanceUrl, `DROP DATABASE IF EXISTS ${pgIdentifier(databaseName)}`);
+    } catch {
+      // La prueba ya fallo o termino; no ocultamos el resultado principal por una limpieza tardia.
+    }
+  }
+}
+
 function sanitizeDatabaseUrlForPgDump(databaseUrl) {
   const clean = new URL(databaseUrl.toString());
   clean.password = "";
   return clean.toString();
+}
+
+function maintenanceDatabaseUrl(databaseUrl) {
+  return databaseUrlForName(databaseUrl, "postgres");
+}
+
+function databaseUrlForName(databaseUrl, databaseName) {
+  const next = new URL(databaseUrl.toString());
+  next.pathname = `/${encodeURIComponent(databaseName)}`;
+  return next;
+}
+
+function pgIdentifier(value) {
+  return `"${String(value).replace(/"/g, "\"\"")}"`;
+}
+
+function toolPathEnvName(label) {
+  if (label === "pg_restore") return "PG_RESTORE_PATH";
+  if (label === "psql") return "PSQL_PATH";
+  return "PG_DUMP_PATH";
 }
 
 async function pruneOldBackups() {

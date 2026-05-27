@@ -11,7 +11,7 @@ import { showMessage } from "../utils/dialogs";
 import { activeEstablishment } from "../utils/establishments";
 import { formatShortDate, toInputDate } from "../utils/format";
 import { generateId } from "../utils/id";
-import { parseDecimal, roundMoney } from "../utils/numbers";
+import { parseDecimal, roundMoney, sanitizeDecimalInput } from "../utils/numbers";
 import { paymentLabel } from "../utils/reportFormats";
 import { syncPatchToBackend } from "../utils/sync";
 import { money } from "../services/sri";
@@ -106,7 +106,7 @@ export function CashClosingScreen({
           <StatBox label="Diferencia" value={`$${money(difference)}`} />
           <StatBox label="Pagos" value={String(Object.keys(summary.byPayment).length)} />
         </View>
-        <Input label="Efectivo contado" value={cashCountedText} onChangeText={setCashCountedText} keyboardType="decimal-pad" />
+        <Input label="Efectivo contado" value={cashCountedText} onChangeText={(value) => setCashCountedText(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
         <Input label="Notas del cierre" value={notes} onChangeText={setNotes} multiline />
         <PrimaryButton label="Guardar cierre de caja" onPress={saveClosing} />
       </Section>

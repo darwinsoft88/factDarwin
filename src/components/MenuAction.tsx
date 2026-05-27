@@ -1,11 +1,11 @@
 import React from "react";
-import { Pressable, StyleSheet, Text } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
-export function MenuAction({ icon, label, tone = "default", onPress }: { icon: string; label: string; tone?: "default" | "danger"; onPress: () => void }) {
+export function MenuAction({ icon, label, tone = "default", onPress }: { icon: React.ReactNode; label: string; tone?: "default" | "danger"; onPress: () => void }) {
   const danger = tone === "danger";
   return (
     <Pressable style={styles.menuAction} onPress={onPress}>
-      <Text style={[styles.menuActionIcon, danger && styles.menuActionIconDanger]}>{icon}</Text>
+      <View style={[styles.menuActionIcon, danger && styles.menuActionIconDanger]}>{icon}</View>
       <Text style={[styles.menuActionText, danger && styles.menuActionTextDanger]}>{label}</Text>
     </Pressable>
   );
@@ -21,19 +21,14 @@ const styles = StyleSheet.create({
     gap: 10
   },
   menuActionIcon: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    overflow: "hidden",
-    color: "#0f766e",
+    width: 24,
+    height: 24,
+    borderRadius: 8,
     backgroundColor: "#ecfdf5",
-    fontSize: 11,
-    fontWeight: "900",
-    lineHeight: 22,
-    textAlign: "center"
+    alignItems: "center",
+    justifyContent: "center"
   },
   menuActionIconDanger: {
-    color: "#b91c1c",
     backgroundColor: "#fee2e2"
   },
   menuActionText: {

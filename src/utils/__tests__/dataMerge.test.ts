@@ -1,5 +1,5 @@
 import { initialData } from "../../storage";
-import { Sale } from "../../types";
+import { InventoryMovement, Product, Sale } from "../../types";
 import { mergeAppDataSnapshots } from "../dataMerge";
 import { normalizedEstablishments } from "../establishments";
 
@@ -15,8 +15,35 @@ function sale(id: string, sequence: string, createdAt: string): Sale {
     tax: 0,
     total: 0,
     paymentMethod: "01",
-    status: "INTERNA",
+    status: "TICKET_OFFLINE",
     items: []
+  };
+}
+
+function product(stock: number, updatedAt: string): Product {
+  return {
+    id: "prod-1",
+    code: "P001",
+    name: "Producto",
+    price: 1,
+    ivaRate: 0.15,
+    stock,
+    updatedAt
+  };
+}
+
+function movement(id: string, quantity: number, createdAt: string): InventoryMovement {
+  return {
+    id,
+    productId: "prod-1",
+    productName: "Producto",
+    type: "salida",
+    quantity,
+    stockBefore: 10,
+    stockAfter: 10 - quantity,
+    reason: "Venta facturada",
+    userId: "user-1",
+    createdAt
   };
 }
 
@@ -124,5 +151,60 @@ describe("dataMerge", () => {
     const merged = mergeAppDataSnapshots(remote, local);
 
     expect(normalizedEstablishments(merged.issuer).map((item) => item.id)).toEqual(["002-003"]);
+  });
+
+  it("keeps the newer active establishment after syncing another device", () => {
+    const remote = {
+      ...initialData,
+      issuer: {
+        ...initialData.issuer,
+        establishment: "001",
+        emissionPoint: "001",
+        activeEstablishmentId: "001-001",
+        establishmentsUpdatedAt: "2026-05-01T00:00:00.000Z",
+        establishments: [
+          { id: "001-001", name: "Matriz", establishment: "001", emissionPoint: "001", address: "A", sequential: 2, active: true, updatedAt: "2026-05-01T00:00:00.000Z" },
+          { id: "002-010", name: "FacturaCacao", establishment: "002", emissionPoint: "010", address: "B", sequential: 7, active: true, updatedAt: "2026-05-01T00:00:00.000Z" }
+        ]
+      }
+    };
+    const local = {
+      ...initialData,
+      issuer: {
+        ...initialData.issuer,
+        establishment: "002",
+        emissionPoint: "010",
+        activeEstablishmentId: "002-010",
+        establishmentsUpdatedAt: "2026-05-02T00:00:00.000Z",
+        establishments: [
+          { id: "001-001", name: "Matriz", establishment: "001", emissionPoint: "001", address: "A", sequential: 2, active: true, updatedAt: "2026-05-01T00:00:00.000Z" },
+          { id: "002-010", name: "FacturaCacao", establishment: "002", emissionPoint: "010", address: "B", sequential: 7, active: true, updatedAt: "2026-05-02T00:00:00.000Z" }
+        ]
+      }
+    };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.issuer.activeEstablishmentId).toBe("002-010");
+    expect(merged.issuer.establishment).toBe("002");
+    expect(merged.issuer.emissionPoint).toBe("010");
+  });
+
+  it("rebuilds stock from inventory movements when two devices sell the same product", () => {
+    const remote = {
+      ...initialData,
+      products: [product(9, "2026-05-01T00:00:01.000Z")],
+      inventoryMovements: [movement("remote-sale-stock", 1, "2026-05-01T00:00:01.000Z")]
+    };
+    const local = {
+      ...initialData,
+      products: [product(9, "2026-05-01T00:00:02.000Z")],
+      inventoryMovements: [movement("local-sale-stock", 1, "2026-05-01T00:00:02.000Z")]
+    };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.products.find((item) => item.id === "prod-1")?.stock).toBe(8);
+    expect(merged.inventoryMovements).toHaveLength(2);
   });
 });

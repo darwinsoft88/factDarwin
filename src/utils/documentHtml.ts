@@ -3,8 +3,10 @@ import { Client, Issuer, RemissionGuide, Sale } from "../types";
 import { documentNumber } from "./documents";
 import { escapeHtml, formatGuideDate, formatShortDate } from "./format";
 import { estimateTicketPageHeightMm } from "./printFiles";
+import { issuerTaxRegimeLabel } from "./taxRegime";
 
 export function buildInternalTicketHtml(sale: Sale, client: Client, issuer: Issuer, pageHeightMm = estimateTicketPageHeightMm(sale)) {
+  const taxRegimeLegend = issuerTaxRegimeLabel(issuer);
   const rows = sale.items
     .map(
       (item) => `
@@ -52,9 +54,10 @@ export function buildInternalTicketHtml(sale: Sale, client: Client, issuer: Issu
     <h1>${escapeHtml(issuer.tradeName || issuer.businessName)}</h1>
     <div class="center muted">${escapeHtml(issuer.businessName)}</div>
     <div class="center muted">RUC ${escapeHtml(issuer.ruc)}</div>
+    ${taxRegimeLegend ? `<div class="center muted">${escapeHtml(taxRegimeLegend)}</div>` : ""}
     <div class="center muted">${escapeHtml(issuer.address)}</div>
     <div class="line"></div>
-    <div class="meta"><strong>NOTA DE VENTA INTERNA</strong></div>
+    <div class="meta"><strong>TICKET OFFLINE</strong></div>
     <div class="meta">No. ${escapeHtml(documentNumber(sale, issuer))}</div>
     <div class="meta">Fecha: ${escapeHtml(formatShortDate(sale.createdAt))}</div>
     <div class="meta">Cliente: ${escapeHtml(client.name)}</div>
@@ -78,6 +81,7 @@ export function buildInternalTicketHtml(sale: Sale, client: Client, issuer: Issu
 }
 
 export function buildProformaHtml(sale: Sale, client: Client, issuer: Issuer) {
+  const taxRegimeLegend = issuerTaxRegimeLabel(issuer);
   const rows = sale.items
     .map(
       (item) => `
@@ -146,6 +150,7 @@ export function buildProformaHtml(sale: Sale, client: Client, issuer: Issuer) {
     <div class="right">
       <strong>${escapeHtml(issuer.businessName)}</strong><br/>
       RUC ${escapeHtml(issuer.ruc)}<br/>
+      ${taxRegimeLegend ? `${escapeHtml(taxRegimeLegend)}<br/>` : ""}
       ${escapeHtml(issuer.address)}
     </div>
   </div>
@@ -176,6 +181,7 @@ export function buildProformaHtml(sale: Sale, client: Client, issuer: Issuer) {
 }
 
 export function buildCreditNoteRideHtml(sale: Sale, client: Client, issuer: Issuer, source?: Sale) {
+  const taxRegimeLegend = issuerTaxRegimeLabel(issuer);
   const creditNoteNumber = `${issuer.establishment}-${issuer.emissionPoint}-${sale.sequence}`;
   const authorization = sale.authorizationNumber || sale.accessKey;
   const supportNumber = sale.supportDocumentNumber || (source ? documentNumber(source, issuer) : "");
@@ -209,7 +215,10 @@ export function buildCreditNoteRideHtml(sale: Sale, client: Client, issuer: Issu
     .top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(72mm, 88mm); gap: 10px; align-items: stretch; }
     .issuer { border: 1.5px solid #1d4ed8; border-radius: 6px; padding: 10px; min-height: 42mm; }
     .doc { border: 1.5px solid #1d4ed8; border-radius: 6px; padding: 10px; min-height: 42mm; }
-    .company { font-size: 15px; font-weight: 800; margin-bottom: 6px; }
+    .company { font-size: 15px; font-weight: 800; margin-bottom: 6px; text-transform: uppercase; }
+    .issuer-line { margin-top: 4px; }
+    .issuer-label { color: #475569; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    .issuer-value { color: #111827; font-weight: 700; overflow-wrap: anywhere; }
     .label { color: #475569; font-size: 10px; font-weight: 700; margin-top: 5px; }
     .value { color: #111827; font-weight: 700; overflow-wrap: anywhere; word-break: break-word; }
     .auth { font-size: 9px; line-height: 1.25; }
@@ -246,10 +255,14 @@ export function buildCreditNoteRideHtml(sale: Sale, client: Client, issuer: Issu
     <div class="top">
       <div class="issuer">
         <div class="company">${escapeHtml(issuer.businessName)}</div>
-        <div><b>Nombre comercial:</b> ${escapeHtml(issuer.tradeName)}</div>
-        <div><b>RUC:</b> ${escapeHtml(issuer.ruc)}</div>
-        <div><b>Direccion matriz:</b> ${escapeHtml(issuer.address)}</div>
-        <div><b>Obligado contabilidad:</b> ${issuer.accountingRequired}</div>
+        ${issuer.tradeName ? `<div class="issuer-line"><span class="issuer-label">Nombre comercial:</span> <span class="issuer-value">${escapeHtml(issuer.tradeName)}</span></div>` : ""}
+        <div class="issuer-line"><span class="issuer-label">RUC:</span> <span class="issuer-value">${escapeHtml(issuer.ruc)}</span></div>
+        <div class="issuer-line"><span class="issuer-label">Dir. Matriz:</span> <span class="issuer-value">${escapeHtml(issuer.address)}</span></div>
+        <div class="issuer-line"><span class="issuer-label">Dir. Sucursal:</span> <span class="issuer-value">${escapeHtml(issuer.address)}</span></div>
+        <div class="issuer-line"><span class="issuer-label">Obligado a llevar contabilidad:</span> <span class="issuer-value">${issuer.accountingRequired}</span></div>
+        ${issuer.specialTaxpayer === "SI" && issuer.specialTaxpayerResolution ? `<div class="issuer-line"><span class="issuer-label">Contribuyente especial:</span> <span class="issuer-value">${escapeHtml(issuer.specialTaxpayerResolution)}</span></div>` : ""}
+        ${issuer.retentionAgent === "SI" && issuer.retentionAgentResolution ? `<div class="issuer-line"><span class="issuer-label">Agente de retencion Resolucion No.:</span> <span class="issuer-value">${escapeHtml(issuer.retentionAgentResolution)}</span></div>` : ""}
+        ${taxRegimeLegend ? `<div class="issuer-line"><span class="issuer-label">Regimen:</span> <span class="issuer-value">${escapeHtml(taxRegimeLegend)}</span></div>` : ""}
       </div>
       <div class="doc">
         <h1>NOTA DE CREDITO</h1>
@@ -322,6 +335,7 @@ export function formatGuideDetail(guide: RemissionGuide, client: Client | undefi
 }
 
 export function buildGuideRideHtml(guide: RemissionGuide, client: Client, issuer: Issuer, source?: Sale) {
+  const taxRegimeLegend = issuerTaxRegimeLabel(issuer);
   const guideNumber = `${issuer.establishment}-${issuer.emissionPoint}-${guide.sequence}`;
   const environment = guide.sriEnvironment || (issuer.environment === "1" ? "PRUEBAS" : "PRODUCCION");
   const authorization = guide.authorizationNumber || guide.accessKey;
@@ -353,7 +367,7 @@ export function buildGuideRideHtml(guide: RemissionGuide, client: Client, issuer
     .issuer { flex: 1; min-height: 0; }
     .issuer-info { line-height: 1.24; }
     .issuer-line { margin-top: 3px; }
-    .company { font-weight: 800; margin-bottom: 8px; font-size: 11px; }
+    .company { font-weight: 800; margin-bottom: 8px; font-size: 11px; text-transform: uppercase; }
     .doc { min-height: 68mm; }
     .ruc { font-size: 15px; font-weight: 900; margin-bottom: 8px; }
     .title { font-size: 14px; font-weight: 800; margin-bottom: 8px; }
@@ -382,10 +396,12 @@ export function buildGuideRideHtml(guide: RemissionGuide, client: Client, issuer
         <div class="issuer-info">
           <div class="company">${escapeHtml(issuer.businessName)}</div>
           <div class="issuer-line"><b>Nombre Comercial:</b> ${escapeHtml(issuer.tradeName)}</div>
-          <div class="issuer-line"><b>Direccion Matriz:</b> ${escapeHtml(issuer.address)}</div>
-          <div class="issuer-line"><b>Direccion Sucursal:</b> ${escapeHtml(issuer.address)}</div>
-          <div class="issuer-line"><b>Contribuyente especial:</b> ${issuer.specialTaxpayer}${issuer.specialTaxpayerResolution ? ` - ${escapeHtml(issuer.specialTaxpayerResolution)}` : ""}</div>
+          <div class="issuer-line"><b>Dir. Matriz:</b> ${escapeHtml(issuer.address)}</div>
+          <div class="issuer-line"><b>Dir. Sucursal:</b> ${escapeHtml(issuer.address)}</div>
           <div class="issuer-line"><b>OBLIGADO A LLEVAR CONTABILIDAD:</b> ${issuer.accountingRequired}</div>
+          ${issuer.specialTaxpayer === "SI" && issuer.specialTaxpayerResolution ? `<div class="issuer-line"><b>Contribuyente especial:</b> ${escapeHtml(issuer.specialTaxpayerResolution)}</div>` : ""}
+          ${issuer.retentionAgent === "SI" && issuer.retentionAgentResolution ? `<div class="issuer-line"><b>Agente de retencion Resolucion No.:</b> ${escapeHtml(issuer.retentionAgentResolution)}</div>` : ""}
+          ${taxRegimeLegend ? `<div class="issuer-line"><b>Regimen:</b> ${escapeHtml(taxRegimeLegend)}</div>` : ""}
         </div>
         </div>
       </div>
@@ -443,6 +459,7 @@ export function buildGuideRideHtml(guide: RemissionGuide, client: Client, issuer
         <b>Informacion adicional</b><br/>
         Destinatario: ${escapeHtml(client.name)}<br/>
         Transportista: ${escapeHtml(guide.transporterName)}<br/>
+        ${taxRegimeLegend ? `Regimen: ${escapeHtml(taxRegimeLegend)}<br/>` : ""}
         Clave: ${escapeHtml(guide.accessKey)}
       </div>
       <div class="signature">Recibi conforme</div>

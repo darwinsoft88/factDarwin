@@ -10,6 +10,7 @@ import { buildDashboard } from "../utils/dashboard";
 import { activeEstablishment } from "../utils/establishments";
 import { documentNumber } from "../utils/documents";
 import { formatShortDate } from "../utils/format";
+import { isTicketOffline } from "../utils/invoiceStatus";
 import { maxEmissionPointsForLicense, normalizeLicensePlanValue } from "../utils/license";
 import { documentTypeLabel } from "../utils/sales";
 import { money } from "../services/sri";
@@ -143,7 +144,7 @@ export function DashboardScreen({
               meta={`${formatShortDate(sale.createdAt)} | ${documentTypeLabel(sale)} | $${money(sale.total)} | Util. $${money(saleProfitValue(sale, data.products))} | ${sale.authorizationNumber || sale.accessKey || "Interno"}`}
               badge={sale.status}
               onOpen={() => onNavigate("ventas")}
-              secondaryLabel={sale.documentType === "nota_venta" && sale.status === "INTERNA" ? "Ir a facturar" : "Ver"}
+              secondaryLabel={sale.documentType === "nota_venta" && isTicketOffline(sale.status) ? "Ir a facturar" : "Ver"}
               onSecondary={() => onNavigate("ventas")}
             />
           );

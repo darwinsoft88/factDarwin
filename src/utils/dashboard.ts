@@ -1,6 +1,7 @@
 import { AppData } from "../types";
 import { accountingValue, productMinStock, saleProfitValue } from "./accounting";
 import { scopedReportData } from "./documents";
+import { isSriPending, isSriRejected, isTicketOffline } from "./invoiceStatus";
 import { isCreditNoteSale, isInvoiceSale } from "./sales";
 
 export function buildDashboard(data: AppData) {
@@ -10,11 +11,11 @@ export function buildDashboard(data: AppData) {
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-  const effectiveSales = scoped.sales.filter((sale) => (sale.documentType === "nota_venta" && sale.status === "INTERNA") || ((isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA"));
+  const effectiveSales = scoped.sales.filter((sale) => (sale.documentType === "nota_venta" && isTicketOffline(sale.status)) || ((isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA"));
   const todaySales = effectiveSales.filter((sale) => isDateInRange(sale.createdAt, todayStart, todayEnd));
   const monthSales = effectiveSales.filter((sale) => isDateInRange(sale.createdAt, monthStart, monthEnd));
-  const pending = scoped.sales.filter((sale) => isInvoiceSale(sale) && !["AUTORIZADA", "RECHAZADA", "ANULADA"].includes(sale.status));
-  const rejected = scoped.sales.filter((sale) => isInvoiceSale(sale) && sale.status === "RECHAZADA");
+  const pending = scoped.sales.filter((sale) => isInvoiceSale(sale) && isSriPending(sale.status));
+  const rejected = scoped.sales.filter((sale) => isInvoiceSale(sale) && isSriRejected(sale.status));
   const lowStock = data.products.filter((product) => product.stock <= productMinStock(product)).sort((a, b) => a.stock - b.stock);
   const recentSales = [...scoped.sales].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
 

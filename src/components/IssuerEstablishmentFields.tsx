@@ -1,6 +1,7 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Issuer, IssuerEstablishment } from "../types";
+import { sanitizeIntegerInput } from "../utils/numbers";
 import { Input, Select } from "./common";
 
 type IssuerEstablishmentFieldsProps = {
@@ -61,9 +62,9 @@ export function IssuerEstablishmentFields({
         </View>
       </View>
       <Input label="Direccion establecimiento" value={selectedEstablishment.address || issuer.address} onChangeText={(address) => onEstablishmentPatch({ address })} />
-      <Input label="Siguiente secuencial" value={sequentialText} onChangeText={onSequentialChange} keyboardType="number-pad" />
-      <Input label="Siguiente secuencial guia" value={remissionSequentialText} onChangeText={onRemissionSequentialChange} keyboardType="number-pad" />
-      <Input label="Siguiente secuencial nota credito" value={creditNoteSequentialText} onChangeText={onCreditNoteSequentialChange} keyboardType="number-pad" />
+      <Input label="Siguiente secuencial" value={sequentialText} onChangeText={(value) => onSequentialChange(sanitizeIntegerInput(value))} keyboardType="number-pad" />
+      <Input label="Siguiente secuencial guia" value={remissionSequentialText} onChangeText={(value) => onRemissionSequentialChange(sanitizeIntegerInput(value))} keyboardType="number-pad" />
+      <Input label="Siguiente secuencial nota credito" value={creditNoteSequentialText} onChangeText={(value) => onCreditNoteSequentialChange(sanitizeIntegerInput(value))} keyboardType="number-pad" />
     </>
   );
 }

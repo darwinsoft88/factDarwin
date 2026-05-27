@@ -14,6 +14,7 @@ import { showMessage } from "../utils/dialogs";
 import { activeEstablishment, activeIssuer, issuerForGuide, updateIssuerEstablishmentSequence } from "../utils/establishments";
 import { parseInputDate, toInputDate } from "../utils/format";
 import { generateId } from "../utils/id";
+import { canRetrySriStatus, isTicketOffline } from "../utils/invoiceStatus";
 import { handlePdfDocument, openHtmlViewer } from "../utils/printFiles";
 import { documentTypeLabel } from "../utils/sales";
 import { explainSriResult, sriUserMessage } from "../utils/sriMessages";
@@ -58,7 +59,7 @@ export function GuidesScreen({
   const scopedSales = useMemo(() => data.sales.filter((sale) => saleInActiveScope(sale, data)), [data]);
   const scopedGuides = useMemo(() => (data.guides || []).filter((guide) => guideInActiveScope(guide, data)), [data]);
   const movableDocuments = useMemo(
-    () => scopedSales.filter((sale) => sale.status === "AUTORIZADA" || sale.status === "INTERNA" || sale.status === "PROFORMA"),
+    () => scopedSales.filter((sale) => sale.status === "AUTORIZADA" || isTicketOffline(sale.status) || sale.status === "PROFORMA"),
     [scopedSales]
   );
   const [sourceSaleId, setSourceSaleId] = useState(movableDocuments[0]?.id || "");
@@ -255,7 +256,7 @@ export function GuidesScreen({
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo autorizar la guia.";
       if (draftData && guide) {
-        const rejectedGuide: RemissionGuide = { ...guide, status: "RECHAZADA", sriMessage: message };
+        const rejectedGuide: RemissionGuide = { ...guide, status: "ERROR_SRI", sriMessage: message };
         const finalData = appendAudit({
           ...draftData,
           guides: draftData.guides.map((item) => (item.id === rejectedGuide.id ? rejectedGuide : item))
@@ -347,7 +348,7 @@ export function GuidesScreen({
       const message = error instanceof Error ? error.message : "No se pudo reintentar la guia.";
       await persist(appendAudit({
         ...data,
-        guides: (data.guides || []).map((item) => (item.id === guide.id ? { ...correctedGuide, status: "RECHAZADA", sriMessage: message, retryHistory: [...(guide.retryHistory || []), retryAt] } : item))
+        guides: (data.guides || []).map((item) => (item.id === guide.id ? { ...correctedGuide, status: "ERROR_SRI", sriMessage: message, retryHistory: [...(guide.retryHistory || []), retryAt] } : item))
       }, user, "GUIDE_RETRY_FAILED", "guide", guide.id, `Reenvio fallido de guia ${guide.sequence}`, { error: message }));
       Alert.alert("No se pudo reintentar", message);
     } finally {
@@ -409,7 +410,7 @@ export function GuidesScreen({
               onOpen={canAccessSensitiveSupport(user.role) ? () => onXml(formatGuideDetail(guide, guideClient, issuerForGuide(data.issuer, guide), source)) : undefined}
               secondaryLabel={guide.status === "AUTORIZADA" ? "PDF guia" : undefined}
               onSecondary={() => guideClient && printGuide(guide, guideClient, source)}
-              retryLabel={canRetryDocuments(user.role) && guide.status !== "AUTORIZADA" && guide.status !== "ANULADA" ? (retryingGuideId === guide.id ? "..." : `Reintentar ${getRetryInfo(guide).today}/${MAX_DAILY_RETRIES}`) : undefined}
+              retryLabel={canRetryDocuments(user.role) && canRetrySriStatus(guide.status) ? (retryingGuideId === guide.id ? "..." : `Reintentar ${getRetryInfo(guide).today}/${MAX_DAILY_RETRIES}`) : undefined}
               onRetry={() => retryGuide(guide, guideClient, source)}
             />
           );

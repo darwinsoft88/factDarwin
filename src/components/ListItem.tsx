@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { InvoiceStatus } from "../types";
+import { displayInvoiceStatus } from "../utils/invoiceStatus";
 
 export type ActionHandler = () => void | Promise<void>;
 
@@ -83,6 +85,7 @@ export function ListItem({
   ].filter((action): action is { label: string; onPress: ActionHandler; tone: "primary" | "success" | "warning" | "info" | "danger" } => Boolean(action));
   const compactActions = actions.length > 2;
   const isProcessingAction = Boolean(processingActionLabel);
+  const actionMeta = compactActionMeta(meta);
   const runAction = async (label: string, action: ActionHandler) => {
     if (isProcessingAction) return;
     setProcessingActionLabel(label);
@@ -101,9 +104,9 @@ export function ListItem({
       <View style={styles.flex}>
         <View style={styles.itemHeader}>
           <Text style={styles.itemTitle} numberOfLines={2}>{title}</Text>
-          {badge ? <Text style={[styles.badge, badge === "AUTORIZADA" && styles.badgeOk, badge === "RECHAZADA" && styles.badgeError, badge === "ANULADA" && styles.badgeNeutral, badge === "INTERNA" && styles.badgeInfo, badge === "PROFORMA" && styles.badgeWarning]}>{badge}</Text> : null}
+          {badge ? <Text style={[styles.badge, badge === "AUTORIZADA" && styles.badgeOk, (badge === "DEVUELTA" || badge === "ERROR_SRI") && styles.badgeError, badge === "ANULADA" && styles.badgeNeutral, (badge === "TICKET_OFFLINE" || badge === "FIRMADA" || badge === "ENVIADA" || badge === "ENVIADA_SRI" || badge === "PENDIENTE_SRI") && styles.badgeInfo, badge === "PROFORMA" && styles.badgeWarning]}>{displayInvoiceStatus(badge as InvoiceStatus)}</Text> : null}
         </View>
-        <Text style={styles.itemMeta} numberOfLines={2}>
+        <Text style={styles.itemMeta} numberOfLines={3}>
           {meta}
         </Text>
       </View>
@@ -116,12 +119,18 @@ export function ListItem({
             <Pressable style={styles.actionModalBackdrop} onPress={() => setActionsVisible(false)}>
               <Pressable style={styles.actionSheet}>
                 <Text style={styles.actionSheetTitle}>{title}</Text>
-                <Text style={styles.actionSheetMeta} numberOfLines={2}>{meta}</Text>
-                {actions.map((action) => (
-                  <Pressable key={action.label} style={[styles.actionSheetButton, action.tone === "danger" && styles.actionSheetDanger]} onPress={() => { void runAction(action.label, action.onPress); }}>
-                    <Text style={[styles.actionSheetButtonText, action.tone === "danger" && styles.actionSheetDangerText]}>{action.label}</Text>
-                  </Pressable>
-                ))}
+                <View style={styles.actionSheetMetaBox}>
+                  <Text style={styles.actionSheetMeta} numberOfLines={2}>{actionMeta.summary}</Text>
+                  {actionMeta.reference ? <Text style={styles.actionSheetReference} numberOfLines={2}>{actionMeta.reference}</Text> : null}
+                </View>
+                <View style={styles.actionTileGrid}>
+                  {actions.map((action) => (
+                    <Pressable key={action.label} style={[styles.actionTile, actionTileStyle(action.tone)]} onPress={() => { void runAction(action.label, action.onPress); }}>
+                      <View style={[styles.actionTileMark, actionTileMarkStyle(action.tone)]} />
+                      <Text style={[styles.actionTileText, action.tone === "danger" && styles.actionSheetDangerText]} numberOfLines={2}>{action.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
                 <Pressable style={styles.actionSheetCancel} onPress={() => setActionsVisible(false)}>
                   <Text style={styles.actionSheetCancelText}>Cerrar</Text>
                 </Pressable>
@@ -142,6 +151,19 @@ export function ListItem({
   );
 }
 
+function compactActionMeta(meta: string) {
+  const parts = meta
+    .split(" | ")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const summary = parts.slice(0, 4).join(" | ");
+  const reference = parts.slice(4).join(" | ");
+  return {
+    summary,
+    reference: reference.length > 28 && /^[0-9A-Za-z |]+$/.test(reference) ? reference.replace(/(.{24})/g, "$1 ").trim() : reference
+  };
+}
+
 function actionButtonStyle(tone: "primary" | "success" | "warning" | "info" | "danger") {
   if (tone === "primary") return styles.invoiceButton;
   if (tone === "success") return styles.emailButton;
@@ -156,6 +178,22 @@ function actionButtonTextStyle(tone: "primary" | "success" | "warning" | "info" 
   if (tone === "warning") return styles.retryButtonText;
   if (tone === "danger") return styles.cancelButtonText;
   return styles.rideButtonText;
+}
+
+function actionTileStyle(tone: "primary" | "success" | "warning" | "info" | "danger") {
+  if (tone === "primary") return styles.actionTilePrimary;
+  if (tone === "success") return styles.actionTileSuccess;
+  if (tone === "warning") return styles.actionTileWarning;
+  if (tone === "danger") return styles.actionTileDanger;
+  return styles.actionTileInfo;
+}
+
+function actionTileMarkStyle(tone: "primary" | "success" | "warning" | "info" | "danger") {
+  if (tone === "primary") return styles.actionTileMarkPrimary;
+  if (tone === "success") return styles.actionTileMarkSuccess;
+  if (tone === "warning") return styles.actionTileMarkWarning;
+  if (tone === "danger") return styles.actionTileMarkDanger;
+  return styles.actionTileMarkInfo;
 }
 
 const styles = StyleSheet.create({
@@ -264,34 +302,96 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#ffffff",
     padding: 14,
-    gap: 9,
+    gap: 10,
     borderWidth: 1,
     borderColor: "#e5e7eb"
   },
   actionSheetTitle: {
     color: "#111827",
     fontWeight: "900",
-    fontSize: 15
+    fontSize: 15,
+    lineHeight: 20
+  },
+  actionSheetMetaBox: {
+    marginBottom: 1,
+    borderRadius: 8,
+    backgroundColor: "#f8fafc",
+    paddingHorizontal: 10,
+    paddingVertical: 8
   },
   actionSheetMeta: {
     color: "#64748b",
     fontSize: 12,
-    marginBottom: 4
+    lineHeight: 16,
+    flexShrink: 1
   },
-  actionSheetButton: {
-    minHeight: 44,
+  actionSheetReference: {
+    color: "#64748b",
+    fontSize: 11,
+    lineHeight: 14,
+    marginTop: 1,
+    flexShrink: 1
+  },
+  actionTileGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8
+  },
+  actionTile: {
+    width: "48.6%",
+    minHeight: 54,
     borderRadius: 8,
-    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
     justifyContent: "center",
-    paddingHorizontal: 12
+    gap: 6
   },
-  actionSheetButtonText: {
-    color: "#0f172a",
-    fontWeight: "900",
-    textAlign: "center"
+  actionTileInfo: {
+    borderColor: "#bfdbfe",
+    backgroundColor: "#eff6ff"
   },
-  actionSheetDanger: {
+  actionTilePrimary: {
+    borderColor: "#99f6e4",
+    backgroundColor: "#ecfdf5"
+  },
+  actionTileSuccess: {
+    borderColor: "#bbf7d0",
+    backgroundColor: "#f0fdf4"
+  },
+  actionTileWarning: {
+    borderColor: "#fde68a",
+    backgroundColor: "#fffbeb"
+  },
+  actionTileDanger: {
+    borderColor: "#fecaca",
     backgroundColor: "#fee2e2"
+  },
+  actionTileMark: {
+    width: 22,
+    height: 3,
+    borderRadius: 999
+  },
+  actionTileMarkInfo: {
+    backgroundColor: "#2563eb"
+  },
+  actionTileMarkPrimary: {
+    backgroundColor: "#0f766e"
+  },
+  actionTileMarkSuccess: {
+    backgroundColor: "#16a34a"
+  },
+  actionTileMarkWarning: {
+    backgroundColor: "#d97706"
+  },
+  actionTileMarkDanger: {
+    backgroundColor: "#b91c1c"
+  },
+  actionTileText: {
+    color: "#0f172a",
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: "900"
   },
   actionSheetDangerText: {
     color: "#991b1b"

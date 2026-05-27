@@ -82,7 +82,7 @@ export function CalendarDateInput({ label, value, onChange, allowClear = false }
 
 const styles = StyleSheet.create({
   inputGroup: {
-    gap: 5
+    gap: 4
   },
   label: {
     color: "#4b5563",
@@ -90,16 +90,17 @@ const styles = StyleSheet.create({
     fontWeight: "700"
   },
   dateField: {
-    minHeight: 44,
+    minHeight: 40,
     borderWidth: 1,
     borderColor: "#cbd5e1",
     borderRadius: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     backgroundColor: "#fbfdff",
     justifyContent: "center"
   },
   dateFieldText: {
     color: "#111827",
+    fontSize: 13,
     fontWeight: "800"
   },
   dateFieldPlaceholder: {

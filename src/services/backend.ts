@@ -39,6 +39,7 @@ export type BackendHealthResponse = {
 
 export type BackendLoginResponse = {
   ok?: boolean;
+  requiresCompanySelection?: boolean;
   token?: string;
   user?: {
     id: string;
@@ -200,12 +201,12 @@ export async function loginBackend(backendUrl: string, email: string, password: 
   const baseUrl = backendUrl.replace(/\/$/, "");
   const response = await postJson(`${baseUrl}/api/auth/login`, { email, password, companyId }, "No hay conexion con el servidor para validar la sesion. Puede seguir usando la app con los datos guardados en este dispositivo.");
   const result = (await readJson(response)) as BackendLoginResponse;
+  if (result.companyOptions?.length) {
+    const error = new Error(result.error || "Elija la empresa con la que desea trabajar.") as Error & { companyOptions?: BackendCompanyOption[] };
+    error.companyOptions = result.companyOptions;
+    throw error;
+  }
   if (!response.ok || !result.token) {
-    if (response.status === 409 && result.companyOptions?.length) {
-      const error = new Error(result.error || "Elija la empresa con la que desea trabajar.") as Error & { companyOptions?: BackendCompanyOption[] };
-      error.companyOptions = result.companyOptions;
-      throw error;
-    }
     if (response.status === 401) {
       throw new Error(result.error || "No encontramos una cuenta activa con ese correo o RUC.");
     }
@@ -393,12 +394,34 @@ export type HistoryResponse<T> = {
   error?: string;
 };
 
+export type CatalogQuery = {
+  search?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type CatalogResponse<T> = {
+  items: T[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+};
+
 export async function getSalesHistory<T>(backendUrl: string, token = "", query: HistoryQuery = {}) {
   return getHistory<T>(backendUrl, "/api/history/sales", token, query);
 }
 
 export async function getGuidesHistory<T>(backendUrl: string, token = "", query: HistoryQuery = {}) {
   return getHistory<T>(backendUrl, "/api/history/guides", token, query);
+}
+
+export async function searchBackendClients<T>(backendUrl: string, token = "", query: CatalogQuery = {}) {
+  return getCatalog<T>(backendUrl, "/api/catalog/clients", token, query);
+}
+
+export async function searchBackendProducts<T>(backendUrl: string, token = "", query: CatalogQuery = {}) {
+  return getCatalog<T>(backendUrl, "/api/catalog/products", token, query);
 }
 
 async function getHistory<T>(backendUrl: string, path: string, token: string, query: HistoryQuery) {
@@ -418,6 +441,34 @@ async function getHistory<T>(backendUrl: string, path: string, token: string, qu
   const result = (await readJson(response)) as HistoryResponse<T>;
   if (!response.ok || !result.ok) {
     throw new Error(result.error || "No se pudo consultar el historial.");
+  }
+
+  return {
+    items: result.items || [],
+    total: Number(result.total || 0),
+    limit: Number(result.limit || query.limit || 0),
+    offset: Number(result.offset || query.offset || 0),
+    hasMore: Boolean(result.hasMore)
+  };
+}
+
+async function getCatalog<T>(backendUrl: string, path: string, token: string, query: CatalogQuery): Promise<CatalogResponse<T>> {
+  const baseUrl = backendUrl.replace(/\/$/, "");
+  const params = new URLSearchParams();
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value) !== "") params.set(key, String(value));
+  });
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}?${params.toString()}`, { headers: authHeaders(token), cache: "no-store" });
+  } catch {
+    throw new Error("No hay conexion con el servidor para buscar registros.");
+  }
+
+  const result = (await readJson(response)) as HistoryResponse<T>;
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "No se pudo consultar el catalogo.");
   }
 
   return {
@@ -451,11 +502,15 @@ export async function getTechnicalLogs(backendUrl: string, token = "", limit = 8
 export async function getCompanyAssetsStatus(backendUrl: string, token = "") {
   const baseUrl = backendUrl.replace(/\/$/, "");
   let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
 
   try {
-    response = await fetch(`${baseUrl}/api/company/assets/status`, { headers: authHeaders(token) });
+    response = await fetch(`${baseUrl}/api/company/assets/status`, { headers: authHeaders(token), signal: controller.signal });
   } catch {
-    throw new Error("No hay conexion para consultar logo y certificado.");
+    throw new Error("No hay respuesta del servidor para consultar logo y certificado. Revise conexion o backend.");
+  } finally {
+    clearTimeout(timeout);
   }
 
   const result = (await readJson(response)) as CompanyAssetsStatus;

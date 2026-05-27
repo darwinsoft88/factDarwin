@@ -4,7 +4,7 @@ import { retentionTaxOptions } from "../constants/options";
 import { money } from "../services/sri";
 import { Issuer, RetentionTaxType, Sale } from "../types";
 import { documentNumber } from "../utils/documents";
-import { parseDecimal } from "../utils/numbers";
+import { parseDecimal, sanitizeDecimalInput, sanitizeIntegerInput } from "../utils/numbers";
 import { Input, PrimaryButton, Select } from "./common";
 
 type CalendarDateInputProps = {
@@ -82,17 +82,17 @@ export function ReceivedRetentionModal({
           <ScrollView contentContainerStyle={styles.creditModalContent}>
             <Select label="Impuesto retenido" value={taxType} onChange={(value) => onTaxTypeChange(value as RetentionTaxType)} options={retentionTaxOptions} />
             <Input label="No. comprobante recibido" value={documentNumberText} onChangeText={onDocumentNumberChange} placeholder="Ej: 001-001-000000123" />
-            <Input label="Autorizacion" value={authorizationNumber} onChangeText={onAuthorizationNumberChange} placeholder="Opcional" keyboardType="number-pad" />
+            <Input label="Autorizacion" value={authorizationNumber} onChangeText={(value) => onAuthorizationNumberChange(sanitizeIntegerInput(value))} placeholder="Opcional" keyboardType="number-pad" />
             <CalendarDateInputComponent label="Fecha recepcion" value={receivedAt} onChange={onReceivedAtChange} />
             <View style={styles.row}>
               <View style={styles.flex}>
-                <Input label="Base" value={base} onChangeText={onBaseChange} keyboardType="decimal-pad" />
+                <Input label="Base" value={base} onChangeText={(value) => onBaseChange(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
               </View>
               <View style={styles.flex}>
-                <Input label="Porcentaje" value={percentage} onChangeText={onPercentageChange} keyboardType="decimal-pad" />
+                <Input label="Porcentaje" value={percentage} onChangeText={(value) => onPercentageChange(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
               </View>
             </View>
-            <Input label="Valor retenido" value={amount} onChangeText={onAmountChange} placeholder="Se calcula si lo deja vacio" keyboardType="decimal-pad" />
+            <Input label="Valor retenido" value={amount} onChangeText={(value) => onAmountChange(sanitizeDecimalInput(value))} placeholder="Se calcula si lo deja vacio" keyboardType="decimal-pad" />
             <Input label="Notas" value={notes} onChangeText={onNotesChange} placeholder="Opcional" />
             <View style={styles.creditTotalsBox}>
               <Text style={styles.totalLine}>Base: ${money(baseValue)}</Text>

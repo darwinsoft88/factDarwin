@@ -3,7 +3,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { calculateLineTotal, money } from "../services/sri";
 import { Issuer, Sale } from "../types";
 import { documentNumber } from "../utils/documents";
-import { parseDecimal } from "../utils/numbers";
+import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
 import { buildCreditNoteItem, formatQuantity, getCreditLineAvailable, getCreditLineKey } from "../utils/sales";
 import { Input, PrimaryButton } from "./common";
 
@@ -74,7 +74,7 @@ export function CreditNoteModal({
                       <Input
                         label="Cantidad a devolver"
                         value={quantities[lineKey] || "0"}
-                        onChangeText={(value) => onQuantityChange(lineKey, value)}
+                        onChangeText={(value) => onQuantityChange(lineKey, sanitizeDecimalInput(value))}
                         keyboardType="decimal-pad"
                       />
                     </View>

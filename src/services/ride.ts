@@ -1,5 +1,6 @@
 import { Client, Issuer, Sale } from "../types";
-import { calculateLineDiscount, calculateLineSubtotal, calculateTotalDiscount, money } from "./sri";
+import { buildDocumentAdditionalInfo, calculateLineDiscount, calculateLineSubtotal, calculateTotalDiscount, money } from "./sri";
+import { issuerTaxRegimeLabel } from "../utils/taxRegime";
 
 export function buildRideHtml(sale: Sale, client: Client, issuer: Issuer) {
   const invoiceNumber = `${issuer.establishment}-${issuer.emissionPoint}-${sale.sequence}`;
@@ -7,6 +8,15 @@ export function buildRideHtml(sale: Sale, client: Client, issuer: Issuer) {
   const accessKey = sale.authorizationNumber || sale.accessKey;
   const readableAccessKey = groupAccessKey(accessKey);
   const barcodeSvg = buildCode128Svg(accessKey);
+  const taxRegimeLegend = issuerTaxRegimeLabel(issuer);
+  const additionalInfoRows = buildDocumentAdditionalInfo(client, issuer)
+    .filter((field): field is [string, string] => Boolean(field && field[1].trim()))
+    .map(([name, value]) => `
+          <tr>
+            <td class="info-name">${escapeHtml(name)}</td>
+            <td>${escapeHtml(value)}</td>
+          </tr>`)
+    .join("");
   const logo = issuer.logoUrl
     ? `<img class="logo-img" src="${escapeHtml(issuer.logoUrl)}" />`
     : `NO&nbsp;&nbsp;TIENE&nbsp;&nbsp;LOGO`;
@@ -49,15 +59,21 @@ export function buildRideHtml(sale: Sale, client: Client, issuer: Issuer) {
     .auth-number { font-size: 8.5px; line-height: 1.25; font-weight: 700; letter-spacing: 0.2px; }
     .grid2 { display: grid; grid-template-columns: 1fr 1.3fr; gap: 5px 12px; align-items: center; }
     .line { margin: 4px 0; }
-    .company { font-weight: 700; margin-bottom: 10px; }
+    .company { font-weight: 800; margin-bottom: 8px; text-transform: uppercase; }
+    .trade { font-weight: 700; margin-bottom: 8px; }
     .kv { display: grid; grid-template-columns: 42px 1fr; gap: 3px 10px; margin: 9px 0; }
-    .accounting { display: flex; justify-content: space-between; margin-top: 14px; font-weight: 700; }
+    .issuer-kv { display: grid; grid-template-columns: 44mm 1fr; gap: 7px 10px; align-items: start; }
+    .issuer-kv b { text-transform: uppercase; }
+    .accounting { display: flex; justify-content: space-between; margin-top: 10px; font-weight: 800; gap: 10px; }
     .barcode { margin-top: 4px; text-align: center; }
     .bars { width: 98%; max-width: 92mm; margin: 0 auto; overflow: hidden; }
     .bars svg { height: 42px; display: block; margin: 0 auto; }
     .bar-text { font-size: 6.5px; margin-top: 2px; line-height: 1.1; word-break: normal; font-weight: 700; letter-spacing: 0; }
-    .buyer { margin-top: 2mm; border: 1.5px solid #000; padding: 7px; display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 5px 16px; min-height: 19mm; }
-    .buyer .wide { grid-column: span 2; }
+    .buyer { margin-top: 2mm; border: 1.5px solid #000; padding: 5px 7px; display: grid; grid-template-columns: 31mm 1.35fr 16mm 27mm 27mm 1fr; gap: 3px 7px; min-height: 14mm; align-items: start; font-size: 8.8px; line-height: 1.18; }
+    .buyer-label { font-weight: 800; }
+    .buyer-value { overflow-wrap: anywhere; }
+    .buyer-name { grid-column: span 5; }
+    .buyer-address { grid-column: span 3; }
     table { width: 100%; border-collapse: collapse; }
     .details { margin-top: 2px; }
     th, td { border: 1px solid #000; padding: 5px 4px; font-size: 8.5px; vertical-align: middle; }
@@ -66,10 +82,13 @@ export function buildRideHtml(sale: Sale, client: Client, issuer: Issuer) {
     .center { text-align: center; }
     .bottom { display: grid; grid-template-columns: 1.18fr 0.82fr; gap: 5mm; margin-top: 2px; align-items: start; }
     .info-table th { padding: 4px; }
+    .info-table td { height: 15px; }
+    .info-name { width: 38%; font-weight: 700; }
     .totals td { height: 16px; }
     .totals td:first-child { font-weight: 700; }
     .payment { width: 76%; margin-top: 2px; }
     .muted { font-size: 7px; }
+    .tax-regime { margin-top: 7px; font-weight: 800; text-transform: uppercase; }
   </style>
 </head>
 <body>
@@ -79,14 +98,16 @@ export function buildRideHtml(sale: Sale, client: Client, issuer: Issuer) {
         <div class="logo">${logo}</div>
         <div class="box issuer-box">
           <div class="company">${escapeHtml(issuer.businessName)}</div>
-          <div class="line">${escapeHtml(issuer.tradeName)}</div>
-          <div class="kv">
-            <b>Direccion Matriz:</b><span>${escapeHtml(issuer.address)}</span>
-            <b>Direccion Sucursal:</b><span>${escapeHtml(issuer.address)}</span>
+          ${issuer.tradeName ? `<div class="trade">${escapeHtml(issuer.tradeName)}</div>` : ""}
+          <div class="issuer-kv">
+            <b>Dir. Matriz:</b><span>${escapeHtml(issuer.address)}</span>
+            <b>Dir. Sucursal:</b><span>${escapeHtml(issuer.address)}</span>
+            <b>Tipo contribuyente:</b><span>${issuer.taxpayerType === "natural" ? "PERSONA NATURAL" : "PERSONA JURIDICA"}</span>
+            ${issuer.specialTaxpayer === "SI" && issuer.specialTaxpayerResolution ? `<b>Contribuyente especial:</b><span>${escapeHtml(issuer.specialTaxpayerResolution)}</span>` : ""}
+            ${issuer.retentionAgent === "SI" && issuer.retentionAgentResolution ? `<b>Agente de retencion Resolucion No.:</b><span>${escapeHtml(issuer.retentionAgentResolution)}</span>` : ""}
           </div>
-          <div class="line"><b>Tipo contribuyente:</b> ${issuer.taxpayerType === "natural" ? "PERSONA NATURAL" : "PERSONA JURIDICA"}</div>
-          <div class="line"><b>Contribuyente especial:</b> ${issuer.specialTaxpayer}${issuer.specialTaxpayerResolution ? ` - ${escapeHtml(issuer.specialTaxpayerResolution)}` : ""}</div>
           <div class="accounting"><span>OBLIGADO A LLEVAR CONTABILIDAD</span><span>${issuer.accountingRequired}</span></div>
+          ${taxRegimeLegend ? `<div class="tax-regime">${escapeHtml(taxRegimeLegend)}</div>` : ""}
         </div>
       </div>
       <div class="box right-box">
@@ -113,13 +134,18 @@ export function buildRideHtml(sale: Sale, client: Client, issuer: Issuer) {
     </div>
 
     <div class="buyer">
-      <div><b>Razon Social / Nombres y Apellidos:</b></div>
-      <div class="wide">${escapeHtml(client.name)}</div>
-      <div><b>Identificacion</b><br />${escapeHtml(client.identification)}</div>
-      <div><b>Fecha</b><br />${formatDisplayDate(sale.createdAt)}</div>
-      <div><b>Placa / Matricula:</b></div>
-      <div><b>Guia</b></div>
-      <div class="wide"><b>Direccion:</b> ${escapeHtml(client.address)}</div>
+      <div class="buyer-label">Razon Social / Nombres:</div>
+      <div class="buyer-value buyer-name">${escapeHtml(client.name)}</div>
+      <div class="buyer-label">Identificacion:</div>
+      <div class="buyer-value">${escapeHtml(client.identification)}</div>
+      <div class="buyer-label">Fecha:</div>
+      <div class="buyer-value">${formatDisplayDate(sale.createdAt)}</div>
+      <div class="buyer-label">Placa / Matricula:</div>
+      <div class="buyer-value"></div>
+      <div class="buyer-label">Guia:</div>
+      <div class="buyer-value"></div>
+      <div class="buyer-label">Direccion:</div>
+      <div class="buyer-value buyer-address">${escapeHtml(client.address)}</div>
     </div>
 
     <table class="details">
@@ -141,8 +167,8 @@ export function buildRideHtml(sale: Sale, client: Client, issuer: Issuer) {
     <div class="bottom">
       <div>
         <table class="info-table">
-          <tr><th>Informacion Adicional</th></tr>
-          <tr><td>${client.email.trim() ? `<b>Email:</b> ${escapeHtml(client.email)}` : "Consumidor final / sin email"}</td></tr>
+          <tr><th colspan="2">Informacion Adicional</th></tr>
+          ${additionalInfoRows || `<tr><td colspan="2">Sin informacion adicional</td></tr>`}
         </table>
         <table class="payment">
           <tr><th>Forma de pago</th><th>Valor</th></tr>

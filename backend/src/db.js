@@ -299,6 +299,10 @@ db.exec(`
     ON clients(company_id, identification);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_products_company_code_unique
     ON products(company_id, code);
+  CREATE INDEX IF NOT EXISTS idx_clients_company_name
+    ON clients(company_id, name);
+  CREATE INDEX IF NOT EXISTS idx_products_company_name
+    ON products(company_id, name);
   CREATE INDEX IF NOT EXISTS idx_sale_items_company_sale
     ON sale_items(company_id, sale_id);
   CREATE INDEX IF NOT EXISTS idx_inventory_company_created_at
@@ -375,7 +379,7 @@ async function getSnapshot(companyId = "") {
 }
 
 async function saveSnapshot(data, companyId = "") {
-  data = normalizeDocumentScopes(data);
+  data = reconcileProductStockFromMovements(normalizeDocumentScopes(data));
   validateSnapshot(data);
 
   if (companyId) {
@@ -396,8 +400,9 @@ const saveTenantSnapshotTx = db.transaction((companyId, data, updatedAt) => {
   const mergedData = currentData
     ? normalizeDocumentScopes(applySnapshotPatch(currentData, { ...data, baseData: currentData }))
     : normalizeDocumentScopes(data);
-  validateSnapshot(mergedData);
-  const storedData = compactSnapshotForStorage(mergedData);
+  const reconciledData = reconcileProductStockFromMovements(mergedData);
+  validateSnapshot(reconciledData);
+  const storedData = compactSnapshotForStorage(reconciledData);
   db.prepare(`
     INSERT INTO saas_snapshots (company_id, data, updated_at)
     VALUES (@companyId, @data, @updatedAt)
@@ -406,13 +411,13 @@ const saveTenantSnapshotTx = db.transaction((companyId, data, updatedAt) => {
 
   db.prepare("INSERT INTO saas_snapshot_history (company_id, data, created_at) VALUES (@companyId, @data, @createdAt)")
     .run({ companyId, data: JSON.stringify(storedData), createdAt: updatedAt });
-  syncNormalizedTables(mergedData, updatedAt, companyId);
+  syncNormalizedTables(reconciledData, updatedAt, companyId);
 
   const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   const before = countSnapshotHistory(companyId);
   db.prepare("DELETE FROM saas_snapshot_history WHERE company_id = @companyId AND created_at < @cutoff").run({ companyId, cutoff });
   const after = countSnapshotHistory(companyId);
-  const summary = summarizeSnapshot(mergedData);
+  const summary = summarizeSnapshot(reconciledData);
   insertBackendAudit("TENANT_SNAPSHOT_MERGED", { companyId, ...summary, historyCount: after, prunedHistory: Math.max(0, before - after) });
   return { ok: true, updatedAt, summary: { ...summary, historyCount: after, prunedHistory: Math.max(0, before - after) } };
 });
@@ -421,7 +426,7 @@ const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "") =
   if (companyId) {
     const row = db.prepare("SELECT data FROM saas_snapshots WHERE company_id = @companyId").get({ companyId });
     const currentData = row?.data ? JSON.parse(String(row.data)) : null;
-    const data = normalizeDocumentScopes(applySnapshotPatch(currentData, patch));
+    const data = reconcileProductStockFromMovements(normalizeDocumentScopes(applySnapshotPatch(currentData, patch)));
     validateSnapshot(data);
     const storedData = compactSnapshotForStorage(data);
     db.prepare(`
@@ -439,7 +444,7 @@ const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "") =
 
   const row = db.prepare("SELECT data FROM app_snapshots WHERE id = 1").get();
   const currentData = row?.data ? JSON.parse(String(row.data)) : null;
-  const data = normalizeDocumentScopes(applySnapshotPatch(currentData, patch));
+  const data = reconcileProductStockFromMovements(normalizeDocumentScopes(applySnapshotPatch(currentData, patch)));
   validateSnapshot(data);
   const storedData = compactSnapshotForStorage(data);
 
@@ -537,6 +542,76 @@ async function listGuidesHistory(companyId = "", filters = {}) {
   return { items: rows.map(payloadFromRow), total, limit, offset, hasMore: offset + rows.length < total };
 }
 
+async function searchClients(companyId = "", filters = {}) {
+  const limit = clampLimit(filters.limit, 25, 100);
+  const offset = Math.max(0, Number(filters.offset || 0));
+  const params = { companyId: companyId || "", limit, offset };
+  const where = ["company_id = @companyId"];
+  const search = String(filters.search || "").trim();
+
+  if (search) {
+    params.search = `%${search}%`;
+    where.push("(name LIKE @search OR identification LIKE @search OR email LIKE @search OR phone LIKE @search)");
+  }
+
+  const whereSql = where.join(" AND ");
+  const rows = db.prepare(`
+    SELECT payload FROM clients
+    WHERE ${whereSql}
+    ORDER BY name ASC, identification ASC
+    LIMIT @limit OFFSET @offset
+  `).all(params);
+  const total = Number(db.prepare(`SELECT COUNT(*) AS total FROM clients WHERE ${whereSql}`).get(params)?.total || 0);
+  return { items: rows.map(payloadFromRow), total, limit, offset, hasMore: offset + rows.length < total };
+}
+
+async function searchProducts(companyId = "", filters = {}) {
+  const limit = clampLimit(filters.limit, 25, 100);
+  const offset = Math.max(0, Number(filters.offset || 0));
+  const params = { companyId: companyId || "", limit, offset };
+  const where = ["company_id = @companyId"];
+  const search = String(filters.search || "").trim();
+
+  if (search) {
+    params.search = `%${search}%`;
+    where.push("(code LIKE @search OR name LIKE @search)");
+  }
+
+  const whereSql = where.join(" AND ");
+  const rows = db.prepare(`
+    SELECT payload FROM products
+    WHERE ${whereSql}
+    ORDER BY code ASC, name ASC
+    LIMIT @limit OFFSET @offset
+  `).all(params);
+  const total = Number(db.prepare(`SELECT COUNT(*) AS total FROM products WHERE ${whereSql}`).get(params)?.total || 0);
+  return { items: rows.map(payloadFromRow), total, limit, offset, hasMore: offset + rows.length < total };
+}
+
+async function findDocumentByAccessKey(companyId = "", accessKey = "") {
+  const normalizedAccessKey = String(accessKey || "").trim();
+  if (!normalizedAccessKey) return null;
+
+  const params = { companyId: companyId || "", accessKey: normalizedAccessKey };
+  const sale = db.prepare(`
+    SELECT payload FROM sales
+    WHERE company_id = @companyId AND access_key = @accessKey
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(params);
+  if (sale) return { type: "sale", payload: payloadFromRow(sale) };
+
+  const guide = db.prepare(`
+    SELECT payload FROM remission_guides
+    WHERE company_id = @companyId AND access_key = @accessKey
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(params);
+  if (guide) return { type: "guide", payload: payloadFromRow(guide) };
+
+  return null;
+}
+
 const reserveDocumentSequenceTx = db.transaction(({ documentType = "factura", issuer, createdAt, companyId = "" }) => {
   const now = new Date().toISOString();
   issuer = normalizedIssuerForSequence(issuer);
@@ -577,7 +652,7 @@ async function reserveDocumentSequence(payload) {
 
 function syncNormalizedTables(data, updatedAt, companyId = "") {
   replaceTable("users", data.users || [], updatedAt, (user) => ({
-    id: user.id,
+    id: scopedRowId(companyId, user.id),
     company_id: companyId,
     name: user.name || "",
     email: normalizeUserEmail(user.email || ""),
@@ -590,7 +665,7 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
   ensureColumn("products", "min_stock", "REAL NOT NULL DEFAULT 5");
 
   replaceTable("clients", data.clients || [], updatedAt, (client) => ({
-    id: client.id,
+    id: scopedRowId(companyId, client.id),
     company_id: companyId,
     name: client.name || "",
     identification: normalizeClientIdentification(client.identification || ""),
@@ -603,7 +678,7 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
   }), companyId);
 
   replaceTable("products", data.products || [], updatedAt, (product) => ({
-    id: product.id,
+    id: scopedRowId(companyId, product.id),
     company_id: companyId,
     code: normalizeProductCode(product.code || ""),
     name: product.name || "",
@@ -617,7 +692,7 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
   }), companyId);
 
   replaceTable("sales", data.sales || [], updatedAt, (sale) => ({
-    id: sale.id,
+    id: scopedRowId(companyId, sale.id),
     company_id: companyId,
     ...documentScopeFromDocument(sale, data.issuer),
     document_type: sale.documentType || "factura",
@@ -637,9 +712,9 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
   }), companyId);
 
   replaceTable("sale_items", (data.sales || []).flatMap((sale) => (sale.items || []).map((item, index) => ({ sale, item, index }))), updatedAt, ({ sale, item, index }) => ({
-    id: `${sale.id}:${index}`,
+    id: `${scopedRowId(companyId, sale.id)}:${index}`,
     company_id: companyId,
-    sale_id: sale.id,
+    sale_id: scopedRowId(companyId, sale.id),
     line_index: index,
     product_id: item.productId || "",
     code: item.code || "",
@@ -654,7 +729,7 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
   }), companyId);
 
   replaceTable("remission_guides", data.guides || [], updatedAt, (guide) => ({
-    id: guide.id,
+    id: scopedRowId(companyId, guide.id),
     company_id: companyId,
     ...documentScopeFromDocument(guide, data.issuer),
     source_sale_id: guide.sourceSaleId || "",
@@ -675,7 +750,7 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
   }), companyId);
 
   replaceTable("inventory_movements", data.inventoryMovements || [], updatedAt, (movement) => ({
-    id: movement.id,
+    id: scopedRowId(companyId, movement.id),
     company_id: companyId,
     product_id: movement.productId || "",
     product_name: movement.productName || "",
@@ -692,7 +767,7 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
   }), companyId);
 
   replaceTable("app_audit_logs", data.auditLogs || [], updatedAt, (entry) => ({
-    id: entry.id,
+    id: scopedRowId(companyId, entry.id),
     company_id: companyId,
     event: entry.event || "",
     entity: entry.entity || "",
@@ -706,7 +781,7 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
   }), companyId);
 
   replaceTable("cash_closings", data.cashClosings || [], updatedAt, (closing) => ({
-    id: closing.id,
+    id: scopedRowId(companyId, closing.id),
     company_id: companyId,
     ...documentScopeFromDocument(closing, data.issuer),
     closing_date: closing.date || "",
@@ -721,20 +796,62 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
     payload: JSON.stringify(closing),
     updated_at: updatedAt
   }), companyId);
+  applyNormalizedDeletions(data.deletedIds || {}, companyId);
 }
 
 const companyScopedTables = new Set(["users", "clients", "products", "sales", "sale_items", "remission_guides", "inventory_movements", "app_audit_logs", "cash_closings"]);
 
 function replaceTable(table, items, updatedAt, mapRow, companyId = "") {
-  if (companyScopedTables.has(table)) {
-    db.prepare(`DELETE FROM ${table} WHERE company_id = @companyId`).run({ companyId });
+  const rows = uniqueRowsById(items.map(mapRow).filter((row) => row.id));
+  if (companyScopedTables.has(table) && companyId) {
+    if (table === "sale_items") {
+      const saleIds = Array.from(new Set(rows.map((row) => row.sale_id).filter(Boolean)));
+      const deleteBySale = db.prepare("DELETE FROM sale_items WHERE company_id = @companyId AND sale_id = @saleId");
+      saleIds.forEach((saleId) => deleteBySale.run({ companyId, saleId }));
+    }
+    if (table === "sales") {
+      deleteConflictingDocuments("sales", rows, companyId, true);
+    }
+    if (table === "remission_guides") {
+      deleteConflictingDocuments("remission_guides", rows, companyId, false);
+    }
+    upsertRows(table, rows);
   } else {
     db.prepare(`DELETE FROM ${table}`).run();
+    insertRows(table, rows);
   }
-  if (!items.length) return;
+}
 
-  const rows = items.map(mapRow).filter((row) => row.id);
-  insertRows(table, rows);
+function deleteConflictingDocuments(table, rows, companyId, includeDocumentType) {
+  const deleteByAccessKey = db.prepare(`DELETE FROM ${table} WHERE company_id = @companyId AND access_key = @accessKey AND id <> @id`);
+  const deleteBySaleSequence = includeDocumentType
+    ? db.prepare(`DELETE FROM ${table} WHERE company_id = @companyId AND document_type = @documentType AND environment = @environment AND establishment = @establishment AND emission_point = @emissionPoint AND sequence = @sequence AND id <> @id`)
+    : db.prepare(`DELETE FROM ${table} WHERE company_id = @companyId AND environment = @environment AND establishment = @establishment AND emission_point = @emissionPoint AND sequence = @sequence AND id <> @id`);
+
+  rows.forEach((row) => {
+    if (row.access_key) {
+      deleteByAccessKey.run({ companyId, accessKey: row.access_key, id: row.id });
+    }
+    if (row.sequence && row.environment && row.establishment && row.emission_point) {
+      deleteBySaleSequence.run({
+        companyId,
+        documentType: row.document_type,
+        environment: row.environment,
+        establishment: row.establishment,
+        emissionPoint: row.emission_point,
+        sequence: row.sequence,
+        id: row.id
+      });
+    }
+  });
+}
+
+function uniqueRowsById(rows) {
+  const byId = new Map();
+  rows.forEach((row) => {
+    byId.set(row.id, row);
+  });
+  return Array.from(byId.values());
 }
 
 function insertRows(table, rows) {
@@ -746,6 +863,82 @@ function insertRows(table, rows) {
     VALUES (${columns.map((column) => `@${column}`).join(", ")})
   `);
   rows.forEach((row) => insert.run(row));
+}
+
+function upsertRows(table, rows) {
+  if (!rows.length) return;
+
+  const columns = Object.keys(rows[0]);
+  const updates = columns.filter((column) => column !== "id").map((column) => `${column} = excluded.${column}`).join(", ");
+  const insert = db.prepare(`
+    INSERT INTO ${table} (${columns.join(", ")})
+    VALUES (${columns.map((column) => `@${column}`).join(", ")})
+    ON CONFLICT(id) DO UPDATE SET ${updates}
+  `);
+  rows.forEach((row) => insert.run(row));
+}
+
+function applyNormalizedDeletions(deletedIds, companyId = "") {
+  if (!companyId) return;
+  for (const [table, ids] of [["clients", deletedIds.clients], ["products", deletedIds.products], ["users", deletedIds.users]]) {
+    const deleteRow = db.prepare(`DELETE FROM ${table} WHERE company_id = @companyId AND id = @id`);
+    (Array.isArray(ids) ? ids : []).flatMap((id) => [scopedRowId(companyId, id), String(id || "")]).filter(Boolean).forEach((id) => {
+      deleteRow.run({ companyId, id });
+    });
+  }
+}
+
+function scopedRowId(companyId, id) {
+  const value = String(id || "");
+  return companyId && value ? `${companyId}:${value}` : value;
+}
+
+function reconcileProductStockFromMovements(data) {
+  if (!data || !Array.isArray(data.products) || !Array.isArray(data.inventoryMovements)) return data;
+
+  const movementsByProduct = new Map();
+  data.inventoryMovements.forEach((movement) => {
+    const productId = String(movement?.productId || "");
+    if (!productId) return;
+    if (!movementsByProduct.has(productId)) movementsByProduct.set(productId, []);
+    movementsByProduct.get(productId).push(movement);
+  });
+
+  const products = data.products.map((product) => {
+    const movements = movementsByProduct.get(product.id);
+    if (!movements?.length) return product;
+
+    const sorted = [...movements].sort(compareInventoryMovements);
+    let stock = finiteNumber(sorted[0]?.stockBefore, product.stock);
+    let updatedAt = product.updatedAt || "";
+    sorted.forEach((movement) => {
+      const quantity = Math.max(0, finiteNumber(movement.quantity, 0));
+      if (movement.type === "entrada") stock += quantity;
+      if (movement.type === "salida") stock -= quantity;
+      if (movement.type === "ajuste") stock = finiteNumber(movement.stockAfter, stock);
+      if (timestampOf(movement.createdAt) >= timestampOf(updatedAt)) updatedAt = movement.createdAt || updatedAt;
+    });
+
+    return { ...product, stock, updatedAt: updatedAt || product.updatedAt };
+  });
+
+  return { ...data, products };
+}
+
+function compareInventoryMovements(a, b) {
+  const dateDiff = timestampOf(a?.createdAt) - timestampOf(b?.createdAt);
+  if (dateDiff !== 0) return dateDiff;
+  return String(a?.id || "").localeCompare(String(b?.id || ""));
+}
+
+function finiteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function timestampOf(value) {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
 }
 
 function payloadFromRow(row) {
@@ -1261,5 +1454,5 @@ async function initialize() {
   return true;
 }
 
-module.exports = { addAudit, authenticateCompanyUser, changeCompanyUserPassword, createCompanyAccount, engine: "better-sqlite3", getAudit, getSnapshot, initialize, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reserveDocumentSequence, resetCompanyUserPassword, saveSnapshot };
+module.exports = { addAudit, authenticateCompanyUser, changeCompanyUserPassword, createCompanyAccount, engine: "better-sqlite3", findDocumentByAccessKey, getAudit, getSnapshot, initialize, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reserveDocumentSequence, resetCompanyUserPassword, searchClients, searchProducts, saveSnapshot };
 }

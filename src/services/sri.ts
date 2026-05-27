@@ -1,4 +1,5 @@
 import { Client, Issuer, RemissionGuide, Sale, SaleItem } from "../types";
+import { issuerTaxRegimeLabel } from "../utils/taxRegime";
 
 const RECEIPT_CODE_INVOICE = "01";
 const RECEIPT_CODE_CREDIT_NOTE = "04";
@@ -103,6 +104,7 @@ export function buildInvoiceXml(sale: Sale, client: Client, issuer: Issuer) {
   const issueDate = formatDate(new Date(sale.createdAt));
   const details = sale.items.map(buildDetailXml).join("");
   const taxes = buildTotalsTaxesXml(sale.items);
+  const additionalInfo = buildAdditionalInfoXml(buildDocumentAdditionalInfo(client, issuer));
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <factura id="comprobante" version="1.1.0">
@@ -142,9 +144,7 @@ export function buildInvoiceXml(sale: Sale, client: Client, issuer: Issuer) {
     </pagos>
   </infoFactura>
   <detalles>${details}</detalles>
-  ${client.email.trim() ? `<infoAdicional>
-    <campoAdicional nombre="Email">${escapeXml(client.email)}</campoAdicional>
-  </infoAdicional>` : ""}
+  ${additionalInfo}
 </factura>`;
 }
 
@@ -152,6 +152,11 @@ export function buildCreditNoteXml(sale: Sale, client: Client, issuer: Issuer) {
   const issueDate = formatDate(new Date(sale.createdAt));
   const details = sale.items.map(buildCreditNoteDetailXml).join("");
   const taxes = buildTotalsTaxesXml(sale.items);
+  const additionalInfo = buildAdditionalInfoXml([
+    ["DocumentoModificado", sale.supportDocumentNumber || ""],
+    sale.supportAuthorizationNumber ? ["AutorizacionSustento", sale.supportAuthorizationNumber] : null,
+    ...buildDocumentAdditionalInfo(client, issuer)
+  ]);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <notaCredito id="comprobante" version="1.1.0">
@@ -186,10 +191,7 @@ export function buildCreditNoteXml(sale: Sale, client: Client, issuer: Issuer) {
     <motivo>${escapeXml(sale.creditReason || "Anulacion total de factura")}</motivo>
   </infoNotaCredito>
   <detalles>${details}</detalles>
-  <infoAdicional>
-    <campoAdicional nombre="DocumentoModificado">${escapeXml(sale.supportDocumentNumber || "")}</campoAdicional>
-    ${sale.supportAuthorizationNumber ? `<campoAdicional nombre="AutorizacionSustento">${escapeXml(sale.supportAuthorizationNumber)}</campoAdicional>` : ""}
-  </infoAdicional>
+  ${additionalInfo}
 </notaCredito>`;
 }
 
@@ -211,6 +213,7 @@ export function buildRemissionGuideXml(guide: RemissionGuide, client: Client, is
         <numAutDocSustento>${sourceSale.authorizationNumber}</numAutDocSustento>
         <fechaEmisionDocSustento>${formatDate(new Date(sourceSale.createdAt))}</fechaEmisionDocSustento>`
     : "";
+  const additionalInfo = buildAdditionalInfoXml(buildDocumentAdditionalInfo(client, issuer));
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <guiaRemision id="comprobante" version="1.1.0">
@@ -249,7 +252,36 @@ export function buildRemissionGuideXml(guide: RemissionGuide, client: Client, is
       </detalles>
     </destinatario>
   </destinatarios>
+  ${additionalInfo}
 </guiaRemision>`;
+}
+
+export function buildDocumentAdditionalInfo(client: Client | null | undefined, issuer: Issuer) {
+  const taxRegimeLegend = issuerTaxRegimeLabel(issuer);
+  return [
+    client?.email?.trim() ? ["Email", client.email.trim()] : null,
+    taxRegimeLegend ? ["Regimen", taxRegimeLegend] : null,
+    issuer.specialTaxpayer === "SI" && issuer.specialTaxpayerResolution.trim()
+      ? ["Contribuyente especial", issuer.specialTaxpayerResolution.trim()]
+      : null,
+    issuer.retentionAgent === "SI" && issuer.retentionAgentResolution?.trim()
+      ? ["Agente de retencion", issuer.retentionAgentResolution.trim()]
+      : null,
+    issuer.accountingRequired ? ["Obligado a llevar contabilidad", issuer.accountingRequired] : null
+  ] as ([string, string] | null)[];
+}
+
+function buildAdditionalInfoXml(fields: ([string, string] | null)[]) {
+  const rows = fields
+    .filter((field): field is [string, string] => Boolean(field && field[1].trim()))
+    .map(([name, value]) => `    <campoAdicional nombre="${escapeXml(name)}">${escapeXml(limitAdditionalInfoValue(value))}</campoAdicional>`)
+    .join("\n");
+
+  return rows ? `<infoAdicional>\n${rows}\n  </infoAdicional>` : "";
+}
+
+function limitAdditionalInfoValue(value: string) {
+  return value.trim().slice(0, 300);
 }
 
 function buildDetailXml(item: SaleItem) {

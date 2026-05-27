@@ -1,6 +1,7 @@
 import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Client } from "../types";
+import { sanitizeIntegerInput } from "../utils/numbers";
 import { Input, PrimaryButton, Select } from "./common";
 
 type QuickClientForm = {
@@ -36,7 +37,7 @@ export function QuickClientEditor({ visible, form, onChange, onSave, onClose }: 
           </View>
           <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled">
             <Input label="Nombre / razon social" value={form.name} onChangeText={(name) => onChange({ ...form, name })} />
-            <Input label="Identificacion" value={form.identification} onChangeText={(identification) => onChange({ ...form, identification })} keyboardType="number-pad" />
+            <Input label="Identificacion" value={form.identification} onChangeText={(identification) => onChange({ ...form, identification: sanitizeIntegerInput(identification).slice(0, 13) })} keyboardType="number-pad" />
             <Select
               label="Tipo"
               value={form.identificationType}
@@ -50,7 +51,7 @@ export function QuickClientEditor({ visible, form, onChange, onSave, onClose }: 
               ]}
             />
             <Input label="Email" value={form.email} onChangeText={(email) => onChange({ ...form, email })} autoCapitalize="none" />
-            <Input label="Telefono WhatsApp" value={form.phone} onChangeText={(phone) => onChange({ ...form, phone })} keyboardType="phone-pad" />
+            <Input label="Telefono WhatsApp" value={form.phone} onChangeText={(phone) => onChange({ ...form, phone: sanitizeIntegerInput(phone).slice(0, 10) })} keyboardType="phone-pad" />
             <Input label="Direccion" value={form.address} onChangeText={(address) => onChange({ ...form, address })} />
             <PrimaryButton label="Guardar y continuar venta" onPress={onSave} />
           </ScrollView>

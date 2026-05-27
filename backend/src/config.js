@@ -85,7 +85,9 @@ module.exports = {
     dir: resolveBackendPath(process.env.PG_BACKUP_DIR || "./backups/postgres"),
     time: process.env.PG_BACKUP_TIME || "23:30",
     retentionDays: Number(process.env.PG_BACKUP_RETENTION_DAYS || 30),
-    pgDumpPath: process.env.PG_DUMP_PATH || "pg_dump"
+    pgDumpPath: process.env.PG_DUMP_PATH || "pg_dump",
+    pgRestorePath: process.env.PG_RESTORE_PATH || "pg_restore",
+    psqlPath: process.env.PSQL_PATH || "psql"
   },
   technicalLogs: {
     enabled: process.env.TECHNICAL_LOGS_ENABLED !== "false",

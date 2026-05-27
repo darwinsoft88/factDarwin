@@ -1,9 +1,9 @@
-import React from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal, grossToNetUnitPrice, money } from "../services/sri";
+import React, { useEffect, useRef, useState } from "react";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { calculateLineSubtotal, calculateLineTax, calculateLineTotal, grossToNetUnitPrice, money } from "../services/sri";
 import { SaleItem } from "../types";
-import { parseDecimal } from "../utils/numbers";
-import { Input, PrimaryButton, Select } from "./common";
+import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
+import { PrimaryButton, Select } from "./common";
 
 type SaleLineEditorForm = {
   quantity: string;
@@ -17,18 +17,41 @@ type SaleLineEditorProps = {
   item?: SaleItem;
   form: SaleLineEditorForm;
   onChange: (form: SaleLineEditorForm) => void;
-  onSave: () => void;
+  onSave: (draft?: SaleLineEditorForm) => void;
   onClose: () => void;
 };
 
 export function SaleLineEditor({ visible, item, form, onChange, onSave, onClose }: SaleLineEditorProps) {
-  const quantity = Math.max(0, parseDecimal(form.quantity) || 0);
-  const grossPrice = Math.max(0, parseDecimal(form.unitGrossPrice) || 0);
-  const discountValue = Math.max(0, parseDecimal(form.grossDiscount) || 0);
-  const grossDiscount = form.discountMode === "percent" ? grossPrice * quantity * discountValue / 100 : discountValue;
-  const unitPrice = item ? grossToNetUnitPrice(grossPrice, item.ivaRate) : 0;
-  const discount = item ? grossToNetUnitPrice(grossDiscount, item.ivaRate) : 0;
-  const previewItem = item ? { ...item, quantity, unitPrice, discount } : undefined;
+  const [draft, setDraft] = useState(form);
+  const initializedForLineRef = useRef("");
+
+  useEffect(() => {
+    if (!visible) return;
+    const lineKey = item ? `${item.productId}:${item.code}:${item.name}` : "none";
+    if (initializedForLineRef.current === lineKey) return;
+    initializedForLineRef.current = lineKey;
+    setDraft(form);
+  }, [form, item, visible]);
+
+  useEffect(() => {
+    if (visible) return;
+    initializedForLineRef.current = "";
+  }, [visible]);
+
+  const updateDraft = (nextDraft: SaleLineEditorForm) => {
+    setDraft(nextDraft);
+    onChange(nextDraft);
+  };
+
+  const quantity = Math.max(0, parseDecimal(draft.quantity) || 0);
+  const grossPrice = Math.max(0, parseDecimal(draft.unitGrossPrice) || 0);
+  const discountValue = Math.max(0, parseDecimal(draft.grossDiscount) || 0);
+  const ivaRate = Number.isFinite(Number(item?.ivaRate)) ? Number(item?.ivaRate) : 0;
+  const grossLineBeforeDiscount = grossPrice * quantity;
+  const grossDiscount = Math.min(grossLineBeforeDiscount, draft.discountMode === "percent" ? grossLineBeforeDiscount * discountValue / 100 : discountValue);
+  const unitPrice = item ? grossToNetUnitPrice(grossPrice, ivaRate) : 0;
+  const discount = item ? grossToNetUnitPrice(grossDiscount, ivaRate) : 0;
+  const previewItem = item ? { ...item, quantity, unitPrice, discount, ivaRate } : undefined;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -44,33 +67,87 @@ export function SaleLineEditor({ visible, item, form, onChange, onSave, onClose 
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled">
-            <Input label="Cantidad" value={form.quantity} onChangeText={(value) => onChange({ ...form, quantity: value })} keyboardType="decimal-pad" />
-            <Input label="Precio publico" value={form.unitGrossPrice} onChangeText={(value) => onChange({ ...form, unitGrossPrice: value })} keyboardType="decimal-pad" />
+            <DraftNumberInput label="Cantidad" value={draft.quantity} onChange={(value) => updateDraft({ ...draft, quantity: value })} />
+            <DraftNumberInput label="Precio publico" value={draft.unitGrossPrice} onChange={(value) => updateDraft({ ...draft, unitGrossPrice: value })} />
             <Select
               label="Tipo de descuento"
-              value={form.discountMode}
-              onChange={(value) => onChange({ ...form, discountMode: value as "amount" | "percent" })}
+              value={draft.discountMode}
+              onChange={(value) => updateDraft({ ...draft, discountMode: value as "amount" | "percent" })}
               options={[
                 { label: "Valor $", value: "amount" },
                 { label: "Porcentaje %", value: "percent" }
               ]}
             />
-            <Input label={form.discountMode === "percent" ? "Descuento %" : "Descuento publico"} value={form.grossDiscount} onChangeText={(value) => onChange({ ...form, grossDiscount: value })} keyboardType="decimal-pad" />
+            <DraftNumberInput label={draft.discountMode === "percent" ? "Descuento %" : "Descuento publico"} value={draft.grossDiscount} onChange={(value) => updateDraft({ ...draft, grossDiscount: value })} />
             {previewItem ? (
               <View style={styles.creditTotalsBox}>
                 <Text style={styles.totalLine}>Base: ${money(calculateLineSubtotal(previewItem))}</Text>
-                <Text style={styles.totalLine}>Descuento: ${money(calculateLineDiscount(previewItem))}</Text>
+                <Text style={styles.totalLine}>Descuento: ${money(grossDiscount)}</Text>
                 <Text style={styles.totalLine}>IVA: ${money(calculateLineTax(previewItem))}</Text>
                 <Text style={styles.totalStrong}>Total linea: ${money(calculateLineTotal(previewItem))}</Text>
               </View>
             ) : null}
-            <PrimaryButton label="Guardar cambio" onPress={onSave} />
+            <PrimaryButton label="Guardar cambio" onPress={() => onSave(draft)} />
           </ScrollView>
         </View>
       </View>
     </Modal>
   );
 }
+
+function DraftNumberInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  if (Platform.OS === "web") {
+    return (
+      <View style={styles.inputGroup}>
+        <Text style={styles.label}>{label}</Text>
+        {React.createElement("input", {
+          value,
+          inputMode: "decimal",
+          onInput: (event: { currentTarget?: { value?: string }; target?: { value?: string } }) => {
+            const text = event.currentTarget?.value ?? event.target?.value;
+            if (typeof text === "string") onChange(sanitizeDecimalInput(text));
+          },
+          onChange: (event: { currentTarget?: { value?: string }; target?: { value?: string } }) => {
+            const text = event.currentTarget?.value ?? event.target?.value;
+            if (typeof text === "string") onChange(sanitizeDecimalInput(text));
+          },
+          style: webInputStyle
+        })}
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.inputGroup}>
+      <Text style={styles.label}>{label}</Text>
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={(value) => onChange(sanitizeDecimalInput(value))}
+        onChange={(event) => {
+          const text = event.nativeEvent?.text ?? (event.target as unknown as { value?: string })?.value;
+          if (typeof text === "string") onChange(sanitizeDecimalInput(text));
+        }}
+        keyboardType="decimal-pad"
+        placeholderTextColor="#7d8796"
+      />
+    </View>
+  );
+}
+
+const webInputStyle = {
+  minHeight: 38,
+  borderWidth: 1,
+  borderStyle: "solid",
+  borderColor: "#cbd5e1",
+  borderRadius: 8,
+  paddingLeft: 12,
+  paddingRight: 12,
+  color: "#111827",
+  backgroundColor: "#fbfdff",
+  fontWeight: 700,
+  outlineColor: "#111827"
+} as const;
 
 const styles = StyleSheet.create({
   creditModalBackdrop: {
@@ -98,6 +175,24 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
     minWidth: 130
+  },
+  inputGroup: {
+    gap: 5
+  },
+  label: {
+    color: "#4b5563",
+    fontSize: 12,
+    fontWeight: "700"
+  },
+  input: {
+    minHeight: 38,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    color: "#111827",
+    backgroundColor: "#fbfdff",
+    fontWeight: "700"
   },
   creditModalTitle: {
     color: "#111827",

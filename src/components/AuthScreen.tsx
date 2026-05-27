@@ -1,6 +1,7 @@
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import React from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { AppLegalFooter } from "./AppLegalFooter";
 import { Input, PrimaryButton } from "./common";
 import { EstablishmentPickerModal } from "./EstablishmentPickerModal";
 import { LoginErrorModal } from "./LoginErrorModal";
@@ -8,6 +9,7 @@ import { PasswordVisibilityButton } from "./inputActions";
 import type { BackendCompanyOption } from "../services/backend";
 import type { IssuerEstablishment } from "../types";
 import { APP_BRAND } from "../constants/app";
+import { sanitizeIntegerInput } from "../utils/numbers";
 
 export type AuthScreenProps = {
   authMode: "login" | "register" | "forgot";
@@ -146,7 +148,7 @@ export function AuthScreen({
                 <Text style={styles.authTitle}>CREAR CUENTA</Text>
                 <Text style={styles.authSubtitle}>Registre su propia empresa con RUC activo en el SRI</Text>
                 <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" />
-                <Input label="RUC" value={registerForm.ruc} onChangeText={(ruc) => setRegisterForm({ ...registerForm, ruc })} keyboardType="number-pad" />
+                <Input label="RUC" value={registerForm.ruc} onChangeText={(ruc) => setRegisterForm({ ...registerForm, ruc: sanitizeIntegerInput(ruc).slice(0, 13) })} keyboardType="number-pad" />
                 <Input label="Razon social o nombre del negocio" value={registerForm.businessName} onChangeText={(businessName) => setRegisterForm({ ...registerForm, businessName })} placeholder="Ej. Comercial Andina" />
                 <Input label="Nombre comercial (opcional)" value={registerForm.tradeName} onChangeText={(tradeName) => setRegisterForm({ ...registerForm, tradeName })} placeholder="Ej. Market Andina" />
                 <Input label="Nombre de quien administrara la cuenta" value={registerForm.adminName} onChangeText={(adminName) => setRegisterForm({ ...registerForm, adminName })} placeholder="Ej. Maria Torres" />
@@ -179,6 +181,7 @@ export function AuthScreen({
               </Pressable>
             </>
           )}
+          <AppLegalFooter compact />
         </ScrollView>
       </KeyboardAvoidingView>
       <LoginErrorModal message={loginErrorModalMessage} onClose={() => setLoginErrorModalMessage("")} />

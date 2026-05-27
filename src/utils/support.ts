@@ -1,3 +1,4 @@
+import { APP_VERSION_LABEL, COPYRIGHT_TEXT } from "../constants/branding";
 import { BackendHealthResponse, BackupSummary, TechnicalLog } from "../services/backend";
 import { AppData, User } from "../types";
 import { activeEstablishment } from "./establishments";
@@ -57,6 +58,7 @@ export function buildSupportDiagnostic(data: AppData, user: User | null, state: 
 
   return [
     "DIAGNOSTICO FACTUDARWIN",
+    `Version app: ${APP_VERSION_LABEL}`,
     `Fecha: ${formatAuditDate(new Date().toISOString())}`,
     `Usuario: ${user?.name || "sin sesion"}${user?.role ? ` | ${roleLabel(user.role)}` : ""}`,
     `Empresa: ${data.issuer.businessName || data.issuer.tradeName || "sin nombre"}`,
@@ -85,7 +87,9 @@ export function buildSupportDiagnostic(data: AppData, user: User | null, state: 
     pending.length ? pending.slice(0, 10).map((item) => `- ${item.title} | ${formatAuditDate(item.createdAt)} | intentos ${item.attempts}${item.lastError ? ` | ${shortText(item.lastError, 120)}` : ""}`).join("\n") : "Sin pendientes.",
     "",
     "LOGS RECIENTES",
-    logLines.length ? logLines.join("\n") : "Sin logs cargados desde soporte."
+    logLines.length ? logLines.join("\n") : "Sin logs cargados desde soporte.",
+    "",
+    COPYRIGHT_TEXT
   ].filter((line) => line !== "").join("\n");
 }
 

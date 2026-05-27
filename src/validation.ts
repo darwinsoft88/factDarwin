@@ -2,6 +2,8 @@ import { calculateLineDiscount, calculateTotals, money } from "./services/sri";
 import { AppData, AppLicense, Client, Issuer, LicensePlan, LicenseStatus, Product, SaleItem, UserRole } from "./types";
 import { canUseEmissionScope } from "./utils/license";
 import { parseInputDate } from "./utils/format";
+import { normalizeInvoiceStatus } from "./utils/invoiceStatus";
+import { normalizeTaxRegime } from "./utils/taxRegime";
 
 const validRoles = new Set<UserRole>(["admin", "vendedor", "cajero", "contador"]);
 const validLicenseStatuses = new Set<LicenseStatus>(["trial", "active", "expired", "suspended"]);
@@ -121,6 +123,7 @@ export function validateIssuer(issuer: Issuer, backendUrl: string, errors: strin
   if (!/^\d{3}$/.test(issuer.emissionPoint)) errors.push("El punto de emision debe tener 3 digitos.");
   if (!Number.isInteger(Number(issuer.sequential)) || Number(issuer.sequential) <= 0) errors.push("El secuencial debe ser mayor a cero.");
   if (issuer.specialTaxpayer === "SI" && !issuer.specialTaxpayerResolution.trim()) errors.push("Ingrese la resolucion de contribuyente especial.");
+  if (issuer.retentionAgent === "SI" && !issuer.retentionAgentResolution?.trim()) errors.push("Ingrese la resolucion de agente de retencion.");
   if (!isValidUrl(backendUrl)) errors.push("La URL del backend no es valida.");
 }
 
@@ -186,6 +189,28 @@ export function normalizeClientForInvoice(client: Client): Client {
   return { ...client, identification };
 }
 
+export function isConsumerFinalClient(client?: Pick<Client, "id" | "identification" | "identificationType">) {
+  return Boolean(
+    client &&
+    (client.id === "c-final" ||
+      client.identificationType === "07" ||
+      normalizeClientIdentification(client.identification || "") === "9999999999999")
+  );
+}
+
+export function canonicalConsumerFinalClient(client?: Partial<Client>): Client {
+  return {
+    id: client?.id || "c-final",
+    name: "Consumidor Final",
+    identification: "9999999999999",
+    identificationType: "07",
+    email: "",
+    phone: "",
+    address: "Ecuador",
+    updatedAt: client?.updatedAt || ""
+  };
+}
+
 export function validateGuideForm(transporterName: string, transporterIdentification: string, transporterType: "04" | "05" | "06", plate: string, startAddress: string, endAddress: string, route: string, reason: string, startDate: string, endDate: string) {
   const errors: string[] = [];
   const identification = transporterIdentification.trim();
@@ -214,13 +239,16 @@ export function sanitizeAppData(data: AppData): AppData {
   const deletedProducts = new Set(deletedIds.products);
   const deletedUsers = new Set(deletedIds.users);
   const seenClients = new Set<string>();
-  const clients = data.clients.map((client) => ({
-    ...client,
-    identification: normalizeClientIdentification(client.identification),
-    email: client.email.trim(),
-    phone: client.phone.trim(),
-    updatedAt: client.updatedAt || ""
-  })).filter((client) => {
+  const clients = data.clients.map((client) => {
+    if (isConsumerFinalClient(client)) return canonicalConsumerFinalClient(client);
+    return {
+      ...client,
+      identification: normalizeClientIdentification(client.identification),
+      email: client.email.trim(),
+      phone: client.phone.trim(),
+      updatedAt: client.updatedAt || ""
+    };
+  }).filter((client) => {
     if (deletedClients.has(client.id)) return false;
     const key = normalizeClientIdentification(client.identification);
     if (!key || seenClients.has(key)) return false;
@@ -264,9 +292,10 @@ export function sanitizeAppData(data: AppData): AppData {
     clients,
     products,
     users,
+    sales: (data.sales || []).map((sale) => ({ ...sale, status: normalizeInvoiceStatus(sale.status, sale.sriMessage) })),
     auditLogs: data.auditLogs || [],
     receivedRetentions: data.receivedRetentions || [],
-    guides: data.guides || [],
+    guides: (data.guides || []).map((guide) => ({ ...guide, status: normalizeInvoiceStatus(guide.status, guide.sriMessage) })),
     cashClosings: data.cashClosings || [],
     pendingSync: data.pendingSync || [],
     deletedIds,
@@ -378,6 +407,9 @@ function sanitizeIssuer(issuer: Issuer): Issuer {
     ...source,
     ruc,
     email: normalizeUserEmail(source.email || ""),
+    taxRegime: normalizeTaxRegime(source.taxRegime),
+    retentionAgent: source.retentionAgent === "SI" ? "SI" : "NO",
+    retentionAgentResolution: source.retentionAgent === "SI" ? String(source.retentionAgentResolution || "").trim() : "",
     activeEstablishmentId: active.id,
     establishmentsUpdatedAt: source.establishmentsUpdatedAt || "",
     establishments,

@@ -5,7 +5,7 @@ import { normalizedEstablishments } from "./establishments";
 
 export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): AppData {
   const sameSequenceScope = sameIssuerSequenceScope(remoteData.issuer, localData.issuer);
-  return sanitizeAppData({
+  return sanitizeAppData(reconcileProductStockFromMovements({
     ...remoteData,
     ...localData,
     issuer: {
@@ -33,7 +33,7 @@ export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): 
     pendingSync: localData.pendingSync || [],
     deletedIds: mergeDeletedIds(remoteData.deletedIds, localData.deletedIds),
     historyPolicy: remoteData.historyPolicy || localData.historyPolicy
-  });
+  }));
 }
 
 export function addedEstablishmentIds(previousIssuer: Issuer, nextIssuer: Issuer) {
@@ -125,6 +125,43 @@ function prependUniqueById<T extends { id: string }>(remoteItems: T[], localItem
     result.push(item);
   });
   return result;
+}
+
+function reconcileProductStockFromMovements(data: AppData): AppData {
+  const movementsByProduct = new Map<string, AppData["inventoryMovements"]>();
+  (data.inventoryMovements || []).forEach((movement) => {
+    if (!movement.productId) return;
+    const movements = movementsByProduct.get(movement.productId) || [];
+    movements.push(movement);
+    movementsByProduct.set(movement.productId, movements);
+  });
+
+  const products = (data.products || []).map((product) => {
+    const movements = movementsByProduct.get(product.id);
+    if (!movements?.length) return product;
+
+    const sorted = [...movements].sort((a, b) => {
+      const dateDiff = timestampOf(a.createdAt) - timestampOf(b.createdAt);
+      return dateDiff !== 0 ? dateDiff : a.id.localeCompare(b.id);
+    });
+    let stock = finiteNumber(sorted[0]?.stockBefore, product.stock);
+    let updatedAt = product.updatedAt || "";
+    sorted.forEach((movement) => {
+      const quantity = Math.max(0, finiteNumber(movement.quantity, 0));
+      if (movement.type === "entrada") stock += quantity;
+      if (movement.type === "salida") stock -= quantity;
+      if (movement.type === "ajuste") stock = finiteNumber(movement.stockAfter, stock);
+      if (timestampOf(movement.createdAt) >= timestampOf(updatedAt)) updatedAt = movement.createdAt || updatedAt;
+    });
+    return { ...product, stock, updatedAt: updatedAt || product.updatedAt };
+  });
+
+  return { ...data, products };
+}
+
+function finiteNumber(value: unknown, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function timestampOf(value?: string) {

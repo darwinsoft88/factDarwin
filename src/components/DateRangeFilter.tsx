@@ -60,24 +60,24 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 10
+    gap: 8
   },
   flex: {
     flex: 1,
-    minWidth: 140
+    minWidth: 118
   },
   actionGroup: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8
+    gap: 7
   },
   smallButton: {
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "#0f766e",
     backgroundColor: "#e6fffb",
-    paddingHorizontal: 12,
-    paddingVertical: 8
+    paddingHorizontal: 11,
+    paddingVertical: 7
   },
   smallButtonText: {
     color: "#0f5f59",

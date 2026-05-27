@@ -10,7 +10,7 @@ import { appendAudit } from "../utils/audit";
 import { confirmAction, showMessage } from "../utils/dialogs";
 import { createInventoryMovement } from "../utils/inventory";
 import { generateId } from "../utils/id";
-import { parseDecimal } from "../utils/numbers";
+import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
 import { syncPatchToBackend } from "../utils/sync";
 import { findDuplicateProductCode, normalizeProductCode } from "../validation";
 
@@ -187,10 +187,10 @@ export function ProductsScreen({
           </View>
           <Text style={styles.inlineInfo}>Puede escanear con lector Bluetooth/USB; el codigo se guarda como codigo principal del producto.</Text>
           <Input label="Nombre" value={form.name} onChangeText={(name) => setForm({ ...form, name })} />
-          <Input label="Precio publico" value={form.price} onChangeText={(price) => setForm({ ...form, price })} keyboardType="decimal-pad" />
-          <Input label="Costo promedio" value={form.cost} onChangeText={(cost) => setForm({ ...form, cost })} keyboardType="decimal-pad" />
-          <Input label="Stock" value={form.stock} onChangeText={(stock) => setForm({ ...form, stock })} keyboardType="decimal-pad" />
-          <Input label="Stock minimo" value={form.minStock} onChangeText={(minStock) => setForm({ ...form, minStock })} keyboardType="decimal-pad" />
+          <Input label="Precio publico" value={form.price} onChangeText={(price) => setForm({ ...form, price: sanitizeDecimalInput(price) })} keyboardType="decimal-pad" />
+          <Input label="Costo promedio" value={form.cost} onChangeText={(cost) => setForm({ ...form, cost: sanitizeDecimalInput(cost) })} keyboardType="decimal-pad" />
+          <Input label="Stock" value={form.stock} onChangeText={(stock) => setForm({ ...form, stock: sanitizeDecimalInput(stock) })} keyboardType="decimal-pad" />
+          <Input label="Stock minimo" value={form.minStock} onChangeText={(minStock) => setForm({ ...form, minStock: sanitizeDecimalInput(minStock) })} keyboardType="decimal-pad" />
           <Select label="IVA" value={form.ivaRate} onChange={(ivaRate) => setForm({ ...form, ivaRate })} options={[{ label: "15%", value: "0.15" }, { label: "0%", value: "0" }]} />
           {editingId ? (
             <Pressable style={styles.smallButton} onPress={() => { setEditingId(""); setForm(emptyForm); }}>

@@ -27,10 +27,13 @@ export const initialData: AppData = {
     emissionPoint: "001",
     sequential: 1,
     environment: "1",
+    taxRegime: "general",
     taxpayerType: "natural",
     accountingRequired: "NO",
     specialTaxpayer: "NO",
     specialTaxpayerResolution: "",
+    retentionAgent: "NO",
+    retentionAgentResolution: "",
     remissionSequential: 1,
     creditNoteSequential: 1,
     activeEstablishmentId: "001-001",
@@ -153,6 +156,7 @@ export async function loadData() {
       issuer: {
         ...initialData.issuer,
         ...parsed.issuer,
+        taxRegime: parsed.issuer?.taxRegime || initialData.issuer.taxRegime,
         creditNoteSequential: parsed.issuer?.creditNoteSequential || 1,
         establishments: parsed.issuer?.establishments || initialData.issuer.establishments,
         establishmentsUpdatedAt: parsed.issuer?.establishmentsUpdatedAt || ""

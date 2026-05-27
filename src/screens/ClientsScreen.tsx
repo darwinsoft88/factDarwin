@@ -9,8 +9,9 @@ import { canDeleteCatalog, canEditCatalog } from "../utils/appAccess";
 import { appendAudit } from "../utils/audit";
 import { confirmAction, showMessage } from "../utils/dialogs";
 import { generateId } from "../utils/id";
+import { sanitizeIntegerInput } from "../utils/numbers";
 import { syncPatchToBackend } from "../utils/sync";
-import { findDuplicateClient, normalizeClientIdentification } from "../validation";
+import { findDuplicateClient, isConsumerFinalClient, normalizeClientIdentification } from "../validation";
 
 type ClientsListItemProps = {
   title: string;
@@ -128,6 +129,11 @@ export function ClientsScreen({
     }
 
     if (editingId) {
+      const currentClient = data.clients.find((client) => client.id === editingId);
+      if (isConsumerFinalClient(currentClient)) {
+        Alert.alert("Consumidor Final protegido", "Este cliente fiscal es del sistema y no debe editarse. Cree o edite el cliente real aparte.");
+        return;
+      }
       const updatedClient = { ...data.clients.find((client) => client.id === editingId), ...clientData, id: editingId } as Client;
       const nextData = appendAudit({ ...data, clients: data.clients.map((client) => (client.id === editingId ? updatedClient : client)) }, user, "CLIENT_UPDATED", "client", editingId, `Cliente actualizado: ${clientData.name}`);
       await persist(nextData);
@@ -150,6 +156,10 @@ export function ClientsScreen({
       Alert.alert("Acceso restringido", "Su usuario no tiene permiso para modificar clientes.");
       return;
     }
+    if (isConsumerFinalClient(client)) {
+      Alert.alert("Consumidor Final protegido", "Este cliente fiscal es del sistema y no debe editarse. Cree el cliente real con su cedula/RUC.");
+      return;
+    }
 
     setEditingId(client.id);
     setForm({
@@ -170,7 +180,7 @@ export function ClientsScreen({
           <Input
             label="Identificacion"
             value={form.identification}
-            onChangeText={(identification) => setForm({ ...form, identification })}
+            onChangeText={(identification) => setForm({ ...form, identification: sanitizeIntegerInput(identification).slice(0, 13) })}
             keyboardType="number-pad"
             rightElement={<InlineInputButton label={lookingUpClient ? "..." : "Consultar"} onPress={() => { void lookupClientIdentification(); }} />}
           />
@@ -187,7 +197,7 @@ export function ClientsScreen({
             ]}
           />
           <Input label="Email" value={form.email} onChangeText={(email) => setForm({ ...form, email })} autoCapitalize="none" />
-          <Input label="Telefono WhatsApp" value={form.phone} onChangeText={(phone) => setForm({ ...form, phone })} keyboardType="phone-pad" />
+          <Input label="Telefono WhatsApp" value={form.phone} onChangeText={(phone) => setForm({ ...form, phone: sanitizeIntegerInput(phone).slice(0, 10) })} keyboardType="phone-pad" />
           <Input label="Direccion" value={form.address} onChangeText={(address) => setForm({ ...form, address })} />
           {editingId ? (
             <Pressable style={styles.smallButton} onPress={() => { setEditingId(""); setForm(emptyForm); }}>

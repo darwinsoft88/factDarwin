@@ -39,18 +39,32 @@ export function AppMenuModal({
             <Text style={styles.appMenuTitle}>{userLabel}</Text>
             <Text style={styles.appMenuMeta}>{licenseLabel}</Text>
           </View>
-          <MenuAction icon="S" label="Sincronizar" onPress={onSync} />
-          <MenuAction icon="P" label="Pendientes sync" onPress={onOpenSyncCenter} />
-          {canSwitchEstablishment ? <MenuAction icon="E" label="Cambiar establecimiento" onPress={onSwitchEstablishment} /> : null}
-          <MenuAction icon="C" label="Configuracion" onPress={onOpenSettings} />
-          <MenuAction icon="L" label="Licencia" onPress={onOpenLicense} />
-          <MenuAction icon="?" label="Soporte" onPress={onOpenSupport} />
+          <MenuAction icon={<MenuGlyph name="sync" />} label="Sincronizar" onPress={onSync} />
+          <MenuAction icon={<MenuGlyph name="pending" />} label="Pendientes" onPress={onOpenSyncCenter} />
+          {canSwitchEstablishment ? <MenuAction icon={<MenuGlyph name="switch" />} label="Cambiar establecimiento" onPress={onSwitchEstablishment} /> : null}
+          <MenuAction icon={<MenuGlyph name="settings" />} label="Configuracion" onPress={onOpenSettings} />
+          <MenuAction icon={<MenuGlyph name="license" />} label="Licencia" onPress={onOpenLicense} />
+          <MenuAction icon={<MenuGlyph name="support" />} label="Soporte" onPress={onOpenSupport} />
           <View style={styles.appMenuDivider} />
-          <MenuAction icon=">" label="Salir" tone="danger" onPress={onLogout} />
+          <MenuAction icon={<MenuGlyph name="logout" tone="danger" />} label="Salir" tone="danger" onPress={onLogout} />
         </Pressable>
       </Pressable>
     </Modal>
   );
+}
+
+function MenuGlyph({ name, tone = "default" }: { name: "sync" | "pending" | "switch" | "settings" | "license" | "support" | "logout"; tone?: "default" | "danger" }) {
+  const color = tone === "danger" ? "#b91c1c" : "#0f766e";
+  const symbol = {
+    sync: "↻",
+    pending: "◷",
+    switch: "⇄",
+    settings: "⚙",
+    license: "◇",
+    support: "？",
+    logout: "›"
+  }[name];
+  return <Text style={[styles.menuGlyph, { color }]}>{symbol}</Text>;
 }
 
 const styles = StyleSheet.create({
@@ -62,12 +76,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12
   },
   appMenu: {
-    width: 238,
+    width: 252,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#e2e8f0",
     backgroundColor: "#ffffff",
-    padding: 8,
+    padding: 10,
     shadowColor: "#0f172a",
     shadowOpacity: 0.14,
     shadowRadius: 16,
@@ -76,7 +90,8 @@ const styles = StyleSheet.create({
   },
   appMenuHeader: {
     paddingHorizontal: 10,
-    paddingVertical: 8
+    paddingTop: 8,
+    paddingBottom: 10
   },
   appMenuTitle: {
     color: "#111827",
@@ -93,5 +108,11 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "#e2e8f0",
     marginVertical: 6
+  },
+  menuGlyph: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "900",
+    textAlign: "center"
   }
 });

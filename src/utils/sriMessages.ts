@@ -133,9 +133,9 @@ export function explainSriResult(result: AuthorizationResponse) {
   }
 
   return {
-    title: result.ok ? "Respuesta SRI recibida" : "Respuesta SRI con observaciones",
-    detail: text || "Revise el detalle tecnico.",
-    action: result.ok ? "" : "Use el detalle del documento para revisar la respuesta completa."
+    title: result.ok ? "Factura en revision SRI" : "Respuesta SRI con observaciones",
+    detail: text || "El SRI recibio el comprobante, pero aun no devolvio una autorizacion final.",
+    action: "Revise el documento y use Reintentar si queda pendiente."
   };
 }
 

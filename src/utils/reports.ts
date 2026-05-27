@@ -2,6 +2,7 @@ import { calculateLineSubtotal, calculateTotalDiscount } from "../services/sri";
 import { AppData, Sale } from "../types";
 import { accountingValue, saleCostValue, saleProfitValue } from "./accounting";
 import { formatShortDate, parseInputDate } from "./format";
+import { isSriPending, isSriRejected, isTicketOffline } from "./invoiceStatus";
 import { isCreditNoteSale, isEffectiveReportSale, isInvoiceSale, isTaxableSale } from "./sales";
 
 const monthLabels = [
@@ -70,11 +71,11 @@ export function buildSalesReport(data: AppData, periodType: string, year: string
     effectiveCount: taxableSales.length,
     authorizedCount: periodSales.filter(isTaxableSale).length,
     creditNoteCount: periodSales.filter((sale) => sale.documentType === "nota_credito" && sale.status === "AUTORIZADA").length,
-    internalCount: periodSales.filter((sale) => sale.documentType === "nota_venta" && sale.status === "INTERNA").length,
+    internalCount: periodSales.filter((sale) => sale.documentType === "nota_venta" && isTicketOffline(sale.status)).length,
     proformaCount: periodSales.filter((sale) => sale.documentType === "proforma" && sale.status === "PROFORMA").length,
     voidedCount: periodSales.filter((sale) => sale.status === "ANULADA").length,
-    rejectedCount: periodSales.filter((sale) => sale.status === "RECHAZADA").length,
-    pendingCount: periodSales.filter((sale) => !["AUTORIZADA", "ANULADA", "RECHAZADA", "INTERNA", "PROFORMA"].includes(sale.status)).length,
+    rejectedCount: periodSales.filter((sale) => isSriRejected(sale.status)).length,
+    pendingCount: periodSales.filter((sale) => isSriPending(sale.status)).length,
     subtotal15,
     subtotal0,
     iva15,

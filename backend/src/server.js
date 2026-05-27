@@ -4,7 +4,7 @@ const express = require("express");
 const fs = require("node:fs");
 const config = require("./config");
 const db = require("./db");
-const { authenticateCompanyUser, changeCompanyUserPassword, createCompanyAccount, getAudit, getSnapshot, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reserveDocumentSequence, resetCompanyUserPassword, saveSnapshot } = db;
+const { authenticateCompanyUser, changeCompanyUserPassword, createCompanyAccount, findDocumentByAccessKey, getAudit, getSnapshot, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reserveDocumentSequence, resetCompanyUserPassword, saveSnapshot, searchClients, searchProducts } = db;
 const { authenticateUser, hashPassword, requireAuth, signToken } = require("./auth");
 const { sendInvoiceEmail, sendPasswordResetEmail, sendTestEmail } = require("./email");
 const { licenseStatus, normalizeLicense, requireActiveLicense } = require("./license");
@@ -17,6 +17,9 @@ const { getTenantAssetStatus, getTenantLogo, saveTenantCertificate, saveTenantLo
 const { cleanupTechnicalLogs, errorLogger, listTechnicalLogs, logTechnical, requestLogger } = require("./technical-logs");
 
 const app = express();
+const sriAuthorizationLocks = new Map();
+const sriAuthorizationCache = new Map();
+const SRI_AUTHORIZATION_CACHE_TTL_MS = 10 * 60 * 1000;
 
 config.assertProductionConfig();
 
@@ -243,7 +246,21 @@ app.post("/api/auth/login", async (req, res, next) => {
       return;
     }
 
-    const saasUser = authenticateCompanyUser ? await authenticateCompanyUser(email, String(password || ""), device, companyId) : null;
+    let saasUser = null;
+    try {
+      saasUser = authenticateCompanyUser ? await authenticateCompanyUser(email, String(password || ""), device, companyId) : null;
+    } catch (error) {
+      if (error.statusCode === 409 && Array.isArray(error.companyOptions)) {
+        res.json({
+          ok: false,
+          requiresCompanySelection: true,
+          error: error.message || "Elija la empresa con la que desea trabajar.",
+          companyOptions: error.companyOptions
+        });
+        return;
+      }
+      throw error;
+    }
     if (saasUser) {
       const snapshot = await getSnapshot(saasUser.companyId);
       logTechnical("info", "tenant_auth_success", { companyId: saasUser.companyId, user: { id: saasUser.id, email: saasUser.email, role: saasUser.role } });
@@ -348,7 +365,8 @@ app.post("/api/facturas/autorizar", requireAuth(["admin", "vendedor", "cajero"])
       return;
     }
 
-    const result = await authorizeInvoice(xml, req.user?.companyId || "");
+    const companyId = req.user?.companyId || "";
+    const result = await authorizeSriDocumentOnce(companyId, xml, () => authorizeInvoice(xml, companyId));
     res.json(result);
   } catch (error) {
     next(error);
@@ -417,7 +435,8 @@ app.post("/api/guias/autorizar", requireAuth(["admin", "vendedor"]), requireSriL
       return;
     }
 
-    const result = await authorizeInvoice(xml, req.user?.companyId || "");
+    const companyId = req.user?.companyId || "";
+    const result = await authorizeSriDocumentOnce(companyId, xml, () => authorizeInvoice(xml, companyId));
     res.json(result);
   } catch (error) {
     next(error);
@@ -551,6 +570,32 @@ app.get("/api/history/guides", requireAuth(["admin", "vendedor", "cajero", "cont
   }
 });
 
+app.get("/api/catalog/clients", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+  try {
+    if (!searchClients) {
+      res.status(501).json({ error: "El motor de base de datos no soporta busqueda paginada de clientes." });
+      return;
+    }
+    const result = await searchClients(req.user?.companyId || "", req.query || {});
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/catalog/products", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+  try {
+    if (!searchProducts) {
+      res.status(501).json({ error: "El motor de base de datos no soporta busqueda paginada de productos." });
+      return;
+    }
+    const result = await searchProducts(req.user?.companyId || "", req.query || {});
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/data", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
   try {
     const { data } = req.body || {};
@@ -573,8 +618,9 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
     }
 
     const patch = req.body || {};
-    const hasChanges = ["sales", "products", "inventoryMovements", "auditLogs", "guides", "cashClosings", "clients", "users"].some((field) => Array.isArray(patch[field]) && patch[field].length > 0);
-    if (!hasChanges && !patch.issuer && !patch.license) {
+    const hasChanges = ["sales", "products", "inventoryMovements", "auditLogs", "guides", "cashClosings", "clients", "users", "receivedRetentions"].some((field) => Array.isArray(patch[field]) && patch[field].length > 0);
+    const hasDeletions = Object.values(patch.deletions || {}).some((ids) => Array.isArray(ids) && ids.length > 0);
+    if (!hasChanges && !hasDeletions && !patch.issuer && !patch.license) {
       res.status(400).json({ error: "Debe enviar al menos un cambio incremental." });
       return;
     }
@@ -585,6 +631,7 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
       userId: req.user?.id || "",
       sales: patch.sales?.length || 0,
       guides: patch.guides?.length || 0,
+      receivedRetentions: patch.receivedRetentions?.length || 0,
       cashClosings: patch.cashClosings?.length || 0,
       summary: result.summary || null
     });
@@ -655,6 +702,83 @@ function publicErrorMessage(error, statusCode) {
   }
 
   return "Error interno del backend. Revise los logs tecnicos para soporte.";
+}
+
+async function authorizeSriDocumentOnce(companyId = "", xml = "", runAuthorization) {
+  const accessKey = extractAccessKeyFromXml(xml);
+  if (!accessKey) return runAuthorization();
+
+  const lockKey = `${companyId || "legacy"}:${accessKey}`;
+  const storedResult = await storedAuthorizationResponse(companyId, accessKey);
+  if (storedResult) return storedResult;
+
+  const cachedResult = cachedAuthorizationResponse(lockKey);
+  if (cachedResult) return cachedResult;
+
+  if (sriAuthorizationLocks.has(lockKey)) {
+    const error = new Error("Este comprobante ya se esta enviando al SRI. Espere unos segundos y consulte el estado antes de reintentar.");
+    error.statusCode = 409;
+    throw error;
+  }
+
+  sriAuthorizationLocks.set(lockKey, Date.now());
+  try {
+    const result = await runAuthorization();
+    cacheAuthorizedResult(lockKey, result);
+    return result;
+  } finally {
+    sriAuthorizationLocks.delete(lockKey);
+  }
+}
+
+async function storedAuthorizationResponse(companyId, accessKey) {
+  if (typeof findDocumentByAccessKey !== "function") return null;
+  const stored = await findDocumentByAccessKey(companyId, accessKey);
+  const document = stored?.payload || null;
+  if (!document || document.status !== "AUTORIZADA") return null;
+
+  return {
+    ok: true,
+    sent: false,
+    status: "AUTORIZADA_LOCAL",
+    accessKey,
+    signedXml: document.signedXml || "",
+    authorizationStatus: "AUTORIZADO",
+    authorizationNumber: document.authorizationNumber || accessKey,
+    authorizationDate: document.authorizationDate || "",
+    sriEnvironment: document.sriEnvironment || "",
+    authorizedXml: document.authorizedXml || "",
+    sriMessage: "Comprobante ya autorizado en la base de datos. No se reenvio al SRI."
+  };
+}
+
+function cachedAuthorizationResponse(lockKey) {
+  const cached = sriAuthorizationCache.get(lockKey);
+  if (!cached) return null;
+  if (Date.now() - cached.createdAt > SRI_AUTHORIZATION_CACHE_TTL_MS) {
+    sriAuthorizationCache.delete(lockKey);
+    return null;
+  }
+  return {
+    ...cached.result,
+    sent: false,
+    status: cached.result.status || "AUTORIZADA_CACHE",
+    sriMessage: [cached.result.sriMessage, "Respuesta reutilizada temporalmente. No se reenvio al SRI."].filter(Boolean).join(" | ")
+  };
+}
+
+function cacheAuthorizedResult(lockKey, result) {
+  const authorized = result?.authorizationStatus === "AUTORIZADO" || String(result?.authorizedXml || "").includes("<estado>AUTORIZADO</estado>");
+  if (!authorized) return;
+  sriAuthorizationCache.set(lockKey, {
+    createdAt: Date.now(),
+    result: { ...result }
+  });
+}
+
+function extractAccessKeyFromXml(xml) {
+  const match = String(xml || "").match(/<claveAcceso>([^<]+)<\/claveAcceso>/);
+  return match ? match[1].trim() : "";
 }
 
 function validateIssuerForSequence(issuer) {

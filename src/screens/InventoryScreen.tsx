@@ -10,7 +10,8 @@ import { appendAudit } from "../utils/audit";
 import { showMessage } from "../utils/dialogs";
 import { formatShortDate } from "../utils/format";
 import { createInventoryMovement, movementReason, movementTypeLabel } from "../utils/inventory";
-import { parseDecimal } from "../utils/numbers";
+import { isTicketOffline } from "../utils/invoiceStatus";
+import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
 import { formatAuditDate } from "../utils/support";
 import { syncPatchToBackend } from "../utils/sync";
 
@@ -58,7 +59,7 @@ export function InventoryScreen({
   const visibleMovements = filteredMovements.slice(0, visibleMovementCount);
   const selectedProduct = data.products.find((product) => product.id === productId);
   const productKardex = useMemo(() => (data.inventoryMovements || []).filter((movement) => movement.productId === productId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [data.inventoryMovements, productId]);
-  const productSales = useMemo(() => data.sales.filter((sale) => sale.items.some((item) => item.productId === productId) && (sale.status === "AUTORIZADA" || sale.status === "INTERNA")), [data.sales, productId]);
+  const productSales = useMemo(() => data.sales.filter((sale) => sale.items.some((item) => item.productId === productId) && (sale.status === "AUTORIZADA" || isTicketOffline(sale.status))), [data.sales, productId]);
   const productUnitsSold = productSales.reduce((sum, sale) => sum + sale.items.filter((item) => item.productId === productId).reduce((lineSum, item) => lineSum + accountingValue(sale, item.quantity), 0), 0);
   const productProfit = productSales.reduce((sum, sale) => sum + sale.items.filter((item) => item.productId === productId).reduce((lineSum, item) => {
     const cost = Number.isFinite(Number(item.cost)) ? Number(item.cost) : productCost(selectedProduct);
@@ -139,7 +140,7 @@ export function InventoryScreen({
           ]}
         />
         {selectedProduct ? <Text style={styles.paragraph}>Stock actual: {selectedProduct.stock} | Minimo: {productMinStock(selectedProduct)} | Costo promedio: ${money(productCost(selectedProduct))}</Text> : null}
-        <Input label={type === "ajuste" ? "Nuevo stock" : "Cantidad"} value={quantity} onChangeText={setQuantity} keyboardType="decimal-pad" />
+        <Input label={type === "ajuste" ? "Nuevo stock" : "Cantidad"} value={quantity} onChangeText={(value) => setQuantity(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
         <Input label="Motivo" value={reason} onChangeText={setReason} placeholder={movementReason(type)} />
         <PrimaryButton label="Guardar movimiento" onPress={saveMovement} />
       </Section>

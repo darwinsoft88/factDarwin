@@ -1,5 +1,6 @@
 import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { AppLegalFooter } from "./AppLegalFooter";
 
 type SupportModalProps = {
   visible: boolean;
@@ -35,6 +36,7 @@ export function SupportModal({ visible, loading, diagnosticText, onClose, onRefr
             </View>
             {loading ? <Text style={styles.inlineInfo}>Consultando backend y logs tecnicos...</Text> : null}
             <Text selectable style={styles.diagnosticText}>{diagnosticText}</Text>
+            <AppLegalFooter compact />
           </ScrollView>
         </View>
       </View>

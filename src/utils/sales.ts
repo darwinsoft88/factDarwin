@@ -1,8 +1,9 @@
 import { Client, Sale, SaleItem } from "../types";
+import { isTicketOffline } from "./invoiceStatus";
 import { parseDecimal, roundMoney } from "./numbers";
 
 export function saleStatusReducesStock(status: Sale["status"]) {
-  return status === "AUTORIZADA" || status === "RECIBIDA" || status === "FIRMADA" || status === "INTERNA";
+  return status === "AUTORIZADA" || status === "ENVIADA" || status === "FIRMADA" || status === "ENVIADA_SRI" || status === "PENDIENTE_SRI" || isTicketOffline(status);
 }
 
 export function saleNeedsStockDiscount(status: Sale["status"]) {
@@ -34,7 +35,7 @@ export function isTaxableSale(sale: Sale) {
 
 export function isEffectiveReportSale(sale: Sale, reportType: string) {
   if (reportType === "tax") return isTaxableSale(sale);
-  return sale.status === "AUTORIZADA" || sale.status === "INTERNA";
+  return sale.status === "AUTORIZADA" || isTicketOffline(sale.status);
 }
 
 export function getCreditLineKey(item: SaleItem, index: number) {

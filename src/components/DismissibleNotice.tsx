@@ -6,9 +6,16 @@ type DismissibleNoticeProps = {
   tone?: "success" | "warning";
   title?: string;
   onDismiss: () => void;
+  autoDismissMs?: number;
 };
 
-export function DismissibleNotice({ message, tone = "warning", title, onDismiss }: DismissibleNoticeProps) {
+export function DismissibleNotice({ message, tone = "warning", title, onDismiss, autoDismissMs = 4500 }: DismissibleNoticeProps) {
+  React.useEffect(() => {
+    if (!message || autoDismissMs <= 0) return undefined;
+    const timer = setTimeout(onDismiss, autoDismissMs);
+    return () => clearTimeout(timer);
+  }, [autoDismissMs, message, onDismiss]);
+
   if (!message) return null;
 
   const boxStyle = tone === "success" ? styles.successBox : styles.warningBox;

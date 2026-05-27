@@ -282,6 +282,10 @@ async function ensureSchema() {
         ON clients(company_id, identification);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_products_company_code_unique
         ON products(company_id, code);
+      CREATE INDEX IF NOT EXISTS idx_clients_company_name
+        ON clients(company_id, name);
+      CREATE INDEX IF NOT EXISTS idx_products_company_name
+        ON products(company_id, name);
       CREATE INDEX IF NOT EXISTS idx_sale_items_company_sale
         ON sale_items(company_id, sale_id);
       CREATE INDEX IF NOT EXISTS idx_inventory_company_created_at
@@ -354,7 +358,7 @@ async function getSnapshot(companyId = "") {
 }
 
 async function saveSnapshot(data, companyId = "") {
-  data = normalizeDocumentScopes(data);
+  data = reconcileProductStockFromMovements(normalizeDocumentScopes(data));
   validateSnapshot(data);
   await ensureSchema();
 
@@ -371,6 +375,7 @@ async function saveSnapshot(data, companyId = "") {
       mergedData = currentData
         ? normalizeDocumentScopes(applySnapshotPatch(currentData, { ...data, baseData: currentData }))
         : normalizeDocumentScopes(data);
+      mergedData = reconcileProductStockFromMovements(mergedData);
       validateSnapshot(mergedData);
       const storedData = compactSnapshotForStorage(mergedData);
       await client.query(
@@ -427,7 +432,7 @@ async function mergeSnapshotPatch(patch, companyId = "") {
     const currentData = locked.rows[0]?.data
       ? typeof locked.rows[0].data === "string" ? JSON.parse(locked.rows[0].data) : locked.rows[0].data
       : null;
-    const data = normalizeDocumentScopes(applySnapshotPatch(currentData, patch));
+    const data = reconcileProductStockFromMovements(normalizeDocumentScopes(applySnapshotPatch(currentData, patch)));
     validateSnapshot(data);
     const storedData = compactSnapshotForStorage(data);
 
@@ -502,6 +507,75 @@ async function listGuidesHistory(companyId = "", filters = {}) {
   });
 }
 
+async function searchClients(companyId = "", filters = {}) {
+  await ensureSchema();
+  const limit = clampLimit(filters.limit, 25, 100);
+  const offset = Math.max(0, Number(filters.offset || 0));
+  const values = [companyId || ""];
+  const where = ["company_id = $1"];
+  const search = String(filters.search || "").trim();
+
+  if (search) {
+    values.push(`%${search}%`);
+    const index = values.length;
+    where.push(`(name ILIKE $${index} OR identification ILIKE $${index} OR email ILIKE $${index} OR phone ILIKE $${index})`);
+  }
+
+  const whereSql = where.join(" AND ");
+  const rows = await pool.query(
+    `SELECT payload FROM clients WHERE ${whereSql} ORDER BY name ASC, identification ASC LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+    [...values, limit, offset]
+  );
+  const totalResult = await pool.query(`SELECT COUNT(*)::int AS total FROM clients WHERE ${whereSql}`, values);
+  const total = Number(totalResult.rows[0]?.total || 0);
+  return { items: rows.rows.map(payloadFromPgRow), total, limit, offset, hasMore: offset + rows.rows.length < total };
+}
+
+async function searchProducts(companyId = "", filters = {}) {
+  await ensureSchema();
+  const limit = clampLimit(filters.limit, 25, 100);
+  const offset = Math.max(0, Number(filters.offset || 0));
+  const values = [companyId || ""];
+  const where = ["company_id = $1"];
+  const search = String(filters.search || "").trim();
+
+  if (search) {
+    values.push(`%${search}%`);
+    const index = values.length;
+    where.push(`(code ILIKE $${index} OR name ILIKE $${index})`);
+  }
+
+  const whereSql = where.join(" AND ");
+  const rows = await pool.query(
+    `SELECT payload FROM products WHERE ${whereSql} ORDER BY code ASC, name ASC LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+    [...values, limit, offset]
+  );
+  const totalResult = await pool.query(`SELECT COUNT(*)::int AS total FROM products WHERE ${whereSql}`, values);
+  const total = Number(totalResult.rows[0]?.total || 0);
+  return { items: rows.rows.map(payloadFromPgRow), total, limit, offset, hasMore: offset + rows.rows.length < total };
+}
+
+async function findDocumentByAccessKey(companyId = "", accessKey = "") {
+  await ensureSchema();
+  const normalizedAccessKey = String(accessKey || "").trim();
+  if (!normalizedAccessKey) return null;
+
+  const params = [companyId || "", normalizedAccessKey];
+  const sale = await pool.query(
+    "SELECT payload FROM sales WHERE company_id = $1 AND access_key = $2 ORDER BY updated_at DESC LIMIT 1",
+    params
+  );
+  if (sale.rows[0]) return { type: "sale", payload: payloadFromPgRow(sale.rows[0]) };
+
+  const guide = await pool.query(
+    "SELECT payload FROM remission_guides WHERE company_id = $1 AND access_key = $2 ORDER BY updated_at DESC LIMIT 1",
+    params
+  );
+  if (guide.rows[0]) return { type: "guide", payload: payloadFromPgRow(guide.rows[0]) };
+
+  return null;
+}
+
 async function listPayloadHistory(table, companyId, filters, options = {}) {
   const limit = clampLimit(filters.limit, 50, 500);
   const offset = Math.max(0, Number(filters.offset || 0));
@@ -527,7 +601,59 @@ async function listPayloadHistory(table, companyId, filters, options = {}) {
   );
   const totalResult = await pool.query(`SELECT COUNT(*)::int AS total FROM ${table} WHERE ${whereSql}`, values);
   const total = Number(totalResult.rows[0]?.total || 0);
-  return { items: rows.rows.map((row) => typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload), total, limit, offset, hasMore: offset + rows.rows.length < total };
+  return { items: rows.rows.map(payloadFromPgRow), total, limit, offset, hasMore: offset + rows.rows.length < total };
+}
+
+function payloadFromPgRow(row) {
+  return typeof row?.payload === "string" ? JSON.parse(row.payload) : row?.payload || null;
+}
+
+function reconcileProductStockFromMovements(data) {
+  if (!data || !Array.isArray(data.products) || !Array.isArray(data.inventoryMovements)) return data;
+
+  const movementsByProduct = new Map();
+  data.inventoryMovements.forEach((movement) => {
+    const productId = String(movement?.productId || "");
+    if (!productId) return;
+    if (!movementsByProduct.has(productId)) movementsByProduct.set(productId, []);
+    movementsByProduct.get(productId).push(movement);
+  });
+
+  const products = data.products.map((product) => {
+    const movements = movementsByProduct.get(product.id);
+    if (!movements?.length) return product;
+
+    const sorted = [...movements].sort(compareInventoryMovements);
+    let stock = finiteNumber(sorted[0]?.stockBefore, product.stock);
+    let updatedAt = product.updatedAt || "";
+    sorted.forEach((movement) => {
+      const quantity = Math.max(0, finiteNumber(movement.quantity, 0));
+      if (movement.type === "entrada") stock += quantity;
+      if (movement.type === "salida") stock -= quantity;
+      if (movement.type === "ajuste") stock = finiteNumber(movement.stockAfter, stock);
+      if (timestampOf(movement.createdAt) >= timestampOf(updatedAt)) updatedAt = movement.createdAt || updatedAt;
+    });
+
+    return { ...product, stock, updatedAt: updatedAt || product.updatedAt };
+  });
+
+  return { ...data, products };
+}
+
+function compareInventoryMovements(a, b) {
+  const dateDiff = timestampOf(a?.createdAt) - timestampOf(b?.createdAt);
+  if (dateDiff !== 0) return dateDiff;
+  return String(a?.id || "").localeCompare(String(b?.id || ""));
+}
+
+function finiteNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function timestampOf(value) {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
 }
 
 async function reserveDocumentSequence({ documentType = "factura", issuer, createdAt, companyId = "" }) {
@@ -580,7 +706,7 @@ async function reserveDocumentSequence({ documentType = "factura", issuer, creat
 
 async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
   await replaceTable(client, "users", data.users || [], (user) => ({
-    id: user.id,
+    id: scopedRowId(companyId, user.id),
     company_id: companyId,
     name: user.name || "",
     email: normalizeUserEmail(user.email || ""),
@@ -590,7 +716,7 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
   }), companyId);
 
   await replaceTable(client, "clients", data.clients || [], (item) => ({
-    id: item.id,
+    id: scopedRowId(companyId, item.id),
     company_id: companyId,
     name: item.name || "",
     identification: normalizeClientIdentification(item.identification || ""),
@@ -603,7 +729,7 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
   }), companyId);
 
   await replaceTable(client, "products", data.products || [], (item) => ({
-    id: item.id,
+    id: scopedRowId(companyId, item.id),
     company_id: companyId,
     code: normalizeProductCode(item.code || ""),
     name: item.name || "",
@@ -617,7 +743,7 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
   }), companyId);
 
   await replaceTable(client, "sales", data.sales || [], (sale) => ({
-    id: sale.id,
+    id: scopedRowId(companyId, sale.id),
     company_id: companyId,
     ...documentScopeFromDocument(sale, data.issuer),
     document_type: sale.documentType || "factura",
@@ -637,9 +763,9 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
   }), companyId);
 
   await replaceTable(client, "sale_items", (data.sales || []).flatMap((sale) => (sale.items || []).map((item, index) => ({ sale, item, index }))), ({ sale, item, index }) => ({
-    id: `${sale.id}:${index}`,
+    id: `${scopedRowId(companyId, sale.id)}:${index}`,
     company_id: companyId,
-    sale_id: sale.id,
+    sale_id: scopedRowId(companyId, sale.id),
     line_index: index,
     product_id: item.productId || "",
     code: item.code || "",
@@ -654,7 +780,7 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
   }), companyId);
 
   await replaceTable(client, "remission_guides", data.guides || [], (guide) => ({
-    id: guide.id,
+    id: scopedRowId(companyId, guide.id),
     company_id: companyId,
     ...documentScopeFromDocument(guide, data.issuer),
     source_sale_id: guide.sourceSaleId || "",
@@ -675,7 +801,7 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
   }), companyId);
 
   await replaceTable(client, "inventory_movements", data.inventoryMovements || [], (movement) => ({
-    id: movement.id,
+    id: scopedRowId(companyId, movement.id),
     company_id: companyId,
     product_id: movement.productId || "",
     product_name: movement.productName || "",
@@ -692,7 +818,7 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
   }), companyId);
 
   await replaceTable(client, "app_audit_logs", data.auditLogs || [], (entry) => ({
-    id: entry.id,
+    id: scopedRowId(companyId, entry.id),
     company_id: companyId,
     event: entry.event || "",
     entity: entry.entity || "",
@@ -706,7 +832,7 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
   }), companyId);
 
   await replaceTable(client, "cash_closings", data.cashClosings || [], (closing) => ({
-    id: closing.id,
+    id: scopedRowId(companyId, closing.id),
     company_id: companyId,
     ...documentScopeFromDocument(closing, data.issuer),
     closing_date: closing.date || "",
@@ -721,18 +847,58 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
     payload: closing,
     updated_at: updatedAt
   }), companyId);
+  await applyNormalizedDeletions(client, data.deletedIds || {}, companyId);
 }
 
 const companyScopedTables = new Set(["users", "clients", "products", "sales", "sale_items", "remission_guides", "inventory_movements", "app_audit_logs", "cash_closings"]);
 
 async function replaceTable(client, table, items, mapRow, companyId = "") {
-  if (companyScopedTables.has(table)) {
-    await client.query(`DELETE FROM ${table} WHERE company_id = $1`, [companyId]);
+  const rows = uniqueRowsById(items.map(mapRow).filter((row) => row.id));
+  if (companyScopedTables.has(table) && companyId) {
+    if (table === "sale_items") {
+      const saleIds = Array.from(new Set(rows.map((row) => row.sale_id).filter(Boolean)));
+      if (saleIds.length) {
+        await client.query("DELETE FROM sale_items WHERE company_id = $1 AND sale_id = ANY($2)", [companyId, saleIds]);
+      }
+    }
+    if (table === "sales") {
+      await deleteConflictingDocuments(client, "sales", rows, companyId, true);
+    }
+    if (table === "remission_guides") {
+      await deleteConflictingDocuments(client, "remission_guides", rows, companyId, false);
+    }
+    await upsertRows(client, table, rows);
   } else {
     await client.query(`DELETE FROM ${table}`);
+    await insertRows(client, table, rows);
   }
-  const rows = items.map(mapRow).filter((row) => row.id);
-  await insertRows(client, table, rows);
+}
+
+async function deleteConflictingDocuments(client, table, rows, companyId, includeDocumentType) {
+  for (const row of rows) {
+    if (row.access_key) {
+      await client.query(`DELETE FROM ${table} WHERE company_id = $1 AND access_key = $2 AND id <> $3`, [companyId, row.access_key, row.id]);
+    }
+    if (row.sequence && row.environment && row.establishment && row.emission_point) {
+      const params = includeDocumentType
+        ? [companyId, row.document_type, row.environment, row.establishment, row.emission_point, row.sequence, row.id]
+        : [companyId, row.environment, row.establishment, row.emission_point, row.sequence, row.id];
+      await client.query(
+        includeDocumentType
+          ? `DELETE FROM ${table} WHERE company_id = $1 AND document_type = $2 AND environment = $3 AND establishment = $4 AND emission_point = $5 AND sequence = $6 AND id <> $7`
+          : `DELETE FROM ${table} WHERE company_id = $1 AND environment = $2 AND establishment = $3 AND emission_point = $4 AND sequence = $5 AND id <> $6`,
+        params
+      );
+    }
+  }
+}
+
+function uniqueRowsById(rows) {
+  const byId = new Map();
+  rows.forEach((row) => {
+    byId.set(row.id, row);
+  });
+  return Array.from(byId.values());
 }
 
 async function insertRows(client, table, rows) {
@@ -745,6 +911,34 @@ async function insertRows(client, table, rows) {
     const values = columns.map((column) => column === "payload" ? JSON.stringify(row[column]) : row[column]);
     await client.query(sql, values);
   }
+}
+
+async function upsertRows(client, table, rows) {
+  if (!rows.length) return;
+
+  const columns = Object.keys(rows[0]);
+  const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
+  const updates = columns.filter((column) => column !== "id").map((column) => `${column} = EXCLUDED.${column}`).join(", ");
+  const sql = `INSERT INTO ${table} (${columns.join(", ")}) VALUES (${placeholders}) ON CONFLICT(id) DO UPDATE SET ${updates}`;
+  for (const row of rows) {
+    const values = columns.map((column) => column === "payload" ? JSON.stringify(row[column]) : row[column]);
+    await client.query(sql, values);
+  }
+}
+
+async function applyNormalizedDeletions(client, deletedIds, companyId = "") {
+  if (!companyId) return;
+  for (const [table, ids] of [["clients", deletedIds.clients], ["products", deletedIds.products], ["users", deletedIds.users]]) {
+    const scopedIds = (Array.isArray(ids) ? ids : []).flatMap((id) => [scopedRowId(companyId, id), String(id || "")]).filter(Boolean);
+    if (scopedIds.length) {
+      await client.query(`DELETE FROM ${table} WHERE company_id = $1 AND id = ANY($2)`, [companyId, scopedIds]);
+    }
+  }
+}
+
+function scopedRowId(companyId, id) {
+  const value = String(id || "");
+  return companyId && value ? `${companyId}:${value}` : value;
 }
 
 function clampLimit(value, fallback, max) {
@@ -1162,6 +1356,7 @@ module.exports = {
   engine: "postgres",
   getAudit,
   getSnapshot,
+  findDocumentByAccessKey,
   initialize: ensureSchema,
   listGuidesHistory,
   listSalesHistory,
@@ -1169,6 +1364,8 @@ module.exports = {
   mergeSnapshotPatch,
   reserveDocumentSequence,
   resetCompanyUserPassword,
+  searchClients,
+  searchProducts,
   changeCompanyUserPassword,
   saveSnapshot
 };

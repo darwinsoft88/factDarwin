@@ -6,11 +6,15 @@ import { Input, Select } from "./common";
 export type SalesStatusFilter =
   | "TODAS"
   | "AUTORIZADA"
-  | "RECHAZADA"
-  | "RECIBIDA"
+  | "DEVUELTA"
+  | "ERROR_SRI"
+  | "BORRADOR"
   | "FIRMADA"
+  | "ENVIADA"
+  | "ENVIADA_SRI"
+  | "PENDIENTE_SRI"
   | "ANULADA"
-  | "INTERNA"
+  | "TICKET_OFFLINE"
   | "PROFORMA"
   | "NOTA_CREDITO";
 
@@ -31,11 +35,13 @@ type SalesFiltersProps = {
 const statusOptions = [
   { label: "Todas", value: "TODAS" },
   { label: "Autorizadas", value: "AUTORIZADA" },
-  { label: "Rechazadas", value: "RECHAZADA" },
-  { label: "Recibidas", value: "RECIBIDA" },
+  { label: "Devueltas", value: "DEVUELTA" },
+  { label: "Error SRI", value: "ERROR_SRI" },
   { label: "Firmadas", value: "FIRMADA" },
+  { label: "Enviadas SRI", value: "ENVIADA" },
+  { label: "Borradores", value: "BORRADOR" },
   { label: "Anuladas", value: "ANULADA" },
-  { label: "Notas venta", value: "INTERNA" },
+  { label: "Notas internas", value: "TICKET_OFFLINE" },
   { label: "Proformas", value: "PROFORMA" },
   { label: "Notas credito", value: "NOTA_CREDITO" }
 ];

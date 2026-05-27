@@ -312,12 +312,16 @@ PG_BACKUP_DIR=./backups/postgres
 PG_BACKUP_TIME=23:30
 PG_BACKUP_RETENTION_DAYS=30
 PG_DUMP_PATH=pg_dump
+PG_RESTORE_PATH=pg_restore
+PSQL_PATH=psql
 ```
 
-En Windows, si `pg_dump` no esta en el PATH, usa la ruta completa:
+En Windows, si las herramientas de PostgreSQL no estan en el PATH, usa la ruta completa:
 
 ```env
 PG_DUMP_PATH=C:\Program Files\PostgreSQL\18\bin\pg_dump.exe
+PG_RESTORE_PATH=C:\Program Files\PostgreSQL\18\bin\pg_restore.exe
+PSQL_PATH=C:\Program Files\PostgreSQL\18\bin\psql.exe
 ```
 
 Respaldo manual:
@@ -327,7 +331,14 @@ cd backend
 npm run backup:postgres
 ```
 
-El respaldo se guarda como `.dump` en `backend/backups/postgres`. Para restaurar se usa `pg_restore` sobre una base vacia.
+El respaldo se guarda como `.dump` en `backend/backups/postgres`. Despues de crear cada respaldo, el backend hace una prueba real de restauracion:
+
+1. Crea una base temporal `factudarwin_restore_*`.
+2. Restaura el `.dump` con `pg_restore`.
+3. Verifica tablas criticas como empresas, snapshots, ventas, productos e inventario.
+4. Elimina la base temporal.
+
+Si la prueba falla, el respaldo manual o programado falla para que el problema se vea a tiempo.
 
 Tambien puedes revisar el estado con:
 

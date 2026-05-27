@@ -1,17 +1,12 @@
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
-import * as FileSystem from "expo-file-system/legacy";
-import * as Network from "expo-network";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  AppState,
-  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
-  Pressable,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -20,11 +15,12 @@ import {
   View
 } from "react-native";
 import { Empty, LoadMoreButton, Section } from "./src/components/common";
+import { AppHeader } from "./src/components/AppHeader";
 import { ActivePlanInfo } from "./src/components/ActivePlanInfo";
 import { AppMenuModal } from "./src/components/AppMenuModal";
+import { AppTabs } from "./src/components/AppTabs";
 import { AuditSection } from "./src/components/AuditSection";
 import { BarcodeScannerModal } from "./src/components/BarcodeScannerModal";
-import { CompanyLogoMark } from "./src/components/CompanyLogoMark";
 import { CalendarDateInput } from "./src/components/CalendarDateInput";
 import { CompanyAssetsSection } from "./src/components/CompanyAssetsSection";
 import { CrudSection } from "./src/components/CrudSection";
@@ -39,6 +35,11 @@ import { ListItem } from "./src/components/ListItem";
 import { AuthScreen } from "./src/components/AuthScreen";
 import { useAuthActions } from "./src/hooks/useAuthActions";
 import { useAuthState } from "./src/hooks/useAuthState";
+import { useAppBootstrap } from "./src/hooks/useAppBootstrap";
+import { useAvailableTabs } from "./src/hooks/useAvailableTabs";
+import { useKeyboardInset } from "./src/hooks/useKeyboardInset";
+import { useSyncAndBackup } from "./src/hooks/useSyncAndBackup";
+import { useSupportDiagnostics } from "./src/hooks/useSupportDiagnostics";
 import { NewEstablishmentModal } from "./src/components/NewEstablishmentModal";
 import { OnboardingModal } from "./src/components/OnboardingModal";
 import { PasswordChangeModal } from "./src/components/PasswordChangeModal";
@@ -47,7 +48,6 @@ import { PlanLimitCard } from "./src/components/PlanLimitCard";
 import { PlanUpgradeModal } from "./src/components/PlanUpgradeModal";
 import { ProcessingOverlay } from "./src/components/ProcessingOverlay";
 import { ProductionStatusSection } from "./src/components/ProductionStatusSection";
-import { ProductPriceOptionsModal } from "./src/components/ProductPriceOptionsModal";
 import { QuickClientEditor } from "./src/components/QuickClientEditor";
 import { ReceivedRetentionModal } from "./src/components/ReceivedRetentionModal";
 import { ReceivedRetentionsList } from "./src/components/ReceivedRetentionsList";
@@ -65,14 +65,13 @@ import { SupportModal } from "./src/components/SupportModal";
 import { SyncCenterModal } from "./src/components/SyncCenterModal";
 import { TechnicalLogsSection } from "./src/components/TechnicalLogsSection";
 import { XmlPreviewModal } from "./src/components/XmlPreviewModal";
-import { MenuIcon } from "./src/components/icons";
 import { IntegrationStatusInfo } from "./src/components/IntegrationStatusInfo";
 import { InvoiceStatsGrid } from "./src/components/InvoiceStatsGrid";
 import { IssuerEstablishmentFields } from "./src/components/IssuerEstablishmentFields";
 import { IssuerIdentityFields } from "./src/components/IssuerIdentityFields";
 import { IssuerServerSettings } from "./src/components/IssuerServerSettings";
 import { IssuerTaxSettings } from "./src/components/IssuerTaxSettings";
-import { APP_BRAND, AUTO_BACKUP_DEBOUNCE_MS, CONNECTIVITY_SYNC_THROTTLE_MS, LIST_BATCH_SIZE, REMOTE_REFRESH_THROTTLE_MS, WEB_REMOTE_REFRESH_INTERVAL_MS } from "./src/constants/app";
+import { LIST_BATCH_SIZE } from "./src/constants/app";
 import { DashboardScreen } from "./src/screens/DashboardScreen";
 import { ReportsScreen } from "./src/screens/ReportsScreen";
 import { CashClosingScreen } from "./src/screens/CashClosingScreen";
@@ -81,16 +80,16 @@ import { InventoryScreen } from "./src/screens/InventoryScreen";
 import { GuidesScreen } from "./src/screens/GuidesScreen";
 import { ProductsScreen } from "./src/screens/ProductsScreen";
 import { UsersScreen } from "./src/screens/UsersScreen";
-import { TechnicalLog, authorizeInvoice, backupAppData, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, loginBackend, lookupIdentityData, mergeBackendData, reserveDocumentSequence, restoreAppData, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
+import { TechnicalLog, authorizeInvoice, backupAppData, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, lookupIdentityData, reserveDocumentSequence, restoreAppData, searchBackendClients, searchBackendProducts, sendInvoiceEmail, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "./src/services/backend";
 import { buildRideHtml } from "./src/services/ride";
-import { hashPassword } from "./src/services/security";
 import { buildCreditNoteXml, buildInvoiceXml, calculateLineTotal, calculateTotalDiscount, calculateTotals, createAccessKey, createCreditNoteAccessKey, grossToNetUnitPrice, money, nextSequence } from "./src/services/sri";
-import { initialData, loadData, loadSession, saveData, saveSession } from "./src/storage";
-import { AppData, AppLicense, Client, DocumentType, InventoryMovement, IssuerEstablishment, PaymentMethod, PendingSyncItem, Product, ReceivedRetention, RetentionTaxType, Sale, SaleItem, User } from "./src/types";
+import { initialData } from "./src/storage";
+import { AppData, AppLicense, Client, DocumentType, InventoryMovement, IssuerEstablishment, PaymentMethod, Product, ReceivedRetention, RetentionTaxType, Sale, SaleItem, User } from "./src/types";
 import { productCost, productMinStock } from "./src/utils/accounting";
-import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, filterTabsByLicense, roleLabel, tabLabel, tabsForRole } from "./src/utils/appAccess";
+import { AppTab, appLicenseStatus, canAccessSensitiveSupport, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments, compactLicenseStatusLabel, roleLabel } from "./src/utils/appAccess";
 import { appendAudit } from "./src/utils/audit";
-import { addedEstablishmentIds, mergeAppDataSnapshots } from "./src/utils/dataMerge";
+import { resolveCompanyLogoUrl } from "./src/utils/assets";
+import { addedEstablishmentIds } from "./src/utils/dataMerge";
 import { formatSaleDetail } from "./src/utils/documentDetails";
 import { buildCreditNoteRideHtml, buildInternalTicketHtml, buildProformaHtml } from "./src/utils/documentHtml";
 import { compareSalesNewestFirst, getRetryInfo, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus, saleInActiveScope } from "./src/utils/documents";
@@ -100,24 +99,32 @@ import { pickWebFile, readWebFileBase64 } from "./src/utils/files";
 import { formatShortDate, formatSriDate, parseInputDate, shortText, toInputDate } from "./src/utils/format";
 import { generateId } from "./src/utils/id";
 import { buildStockCredits, buildStockMovements, getAvailableStockForSale, restoreSaleStock } from "./src/utils/inventory";
+import { canRetrySriStatus, displayInvoiceStatus, isSriRejected, isTicketOffline } from "./src/utils/invoiceStatus";
 import { canUseEmissionScope, maxEmissionPointsForLicense } from "./src/utils/license";
 import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleTicketDocument, openHtmlViewer } from "./src/utils/printFiles";
 import { parseDecimal, roundMoney } from "./src/utils/numbers";
 import { buildCreditNoteItemsFromQuantities, calculateGrossUnitPrice, calculateLineGrossDiscount, canEditSale, canIssueCreditNoteForSale, documentTypeLabel, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isCreditNoteSale, isFinalConsumerClient, isInvoiceSale, nextInternalSequence, nextProformaSequence, saleNeedsStockDiscount, saleStatusReducesStock, validateCreditNoteQuantities } from "./src/utils/sales";
 import { explainSriResult, sriUserMessage, userFriendlyActionError } from "./src/utils/sriMessages";
-import { buildSupportDiagnostic, formatAuditDate, formatBackendHealth, formatBackupSummary, formatSyncStatus, summarizeAppData, SyncState } from "./src/utils/support";
+import { formatBackendHealth, formatBackupSummary, formatSyncStatus, summarizeAppData, SyncState } from "./src/utils/support";
 import { syncPatchToBackend, syncSalePatchToBackend } from "./src/utils/sync";
-import { buildProductionChecklist, findDuplicateClient, normalizeClientForInvoice, normalizeClientIdentification, normalizeProductCode, sanitizeAppData, validateBeforeInternalSale, validateBeforeIssue, validateBeforeProforma, validateEmissionPointLicense, validateIssuer } from "./src/validation";
+import { buildProductionChecklist, canonicalConsumerFinalClient, findDuplicateClient, isConsumerFinalClient, normalizeClientForInvoice, normalizeClientIdentification, normalizeProductCode, sanitizeAppData, validateBeforeInternalSale, validateBeforeIssue, validateBeforeProforma, validateEmissionPointLicense, validateIssuer } from "./src/validation";
 
 type Tab = AppTab;
 
 const uid = generateId;
 
+function issuerForDocument(data: AppData, sale: Sale) {
+  const issuer = issuerForSale(data.issuer, sale);
+  return {
+    ...issuer,
+    logoUrl: resolveCompanyLogoUrl(issuer.logoUrl, data.backendUrl)
+  };
+}
+
 // Solo para pruebas iniciales. En producción, se debe crear al menos un usuario administrador desde el registro o la configuración inicial.
 function AppContent() {
   const headerTopPadding = Platform.OS === "android" ? (NativeStatusBar.currentHeight || 0) + 6 : 12;
   const [data, setData] = useState<AppData>(initialData);
-  const [ready, setReady] = useState(false);
   const [session, setSession] = useState<User | null>(null);
   const [backendToken, setBackendToken] = useState("");
   const [syncState, setSyncState] = useState<SyncState>("synced");
@@ -219,27 +226,20 @@ function AppContent() {
   const [xmlPreview, setXmlPreview] = useState("");
   const [appMenuVisible, setAppMenuVisible] = useState(false);
   const [syncCenterVisible, setSyncCenterVisible] = useState(false);
-  const [supportVisible, setSupportVisible] = useState(false);
-  const [supportDiagnostic, setSupportDiagnostic] = useState("");
-  const [supportLoading, setSupportLoading] = useState(false);
   const [syncActionLoading, setSyncActionLoading] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
-  const [keyboardInset, setKeyboardInset] = useState(0);
-  const autoBackupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autoBackupRunningRef = useRef(false);
-  const pendingAutoBackupRef = useRef<AppData | null>(null);
+  const keyboardInset = useKeyboardInset();
   const backendTokenRef = useRef("");
   const dataRef = useRef<AppData>(initialData);
   const sessionRef = useRef<User | null>(null);
   const syncStateRef = useRef<SyncState>("synced");
-  const remoteRefreshRunningRef = useRef(false);
-  const lastRemoteRefreshRef = useRef(0);
-  const connectivitySyncRunningRef = useRef(false);
-  const lastConnectivitySyncRef = useRef(0);
-  const scheduleAutoBackupRef = useRef<(snapshot: AppData) => void>(() => undefined);
-  const flushAutoBackupRef = useRef<() => Promise<void>>(async () => undefined);
-  const refreshFromBackendRef = useRef<(reason?: "login" | "active" | "manual") => Promise<void>>(async () => undefined);
-  const syncAfterConnectivityRestoredRef = useRef<(reason: "network" | "active" | "pending") => Promise<void>>(async () => undefined);
+  const supportDiagnostics = useSupportDiagnostics({
+    backendTokenRef,
+    dataRef,
+    sessionRef,
+    syncState,
+    onBeforeOpen: () => setAppMenuVisible(false)
+  });
 
   const { login, registerTenant, recoverPassword, chooseLoginEstablishment, submitNewPassword, logout } = useAuthActions({
     authState,
@@ -256,38 +256,18 @@ function AppContent() {
     setOnboardingVisible
   });
 
-  useEffect(() => {
-    Promise.all([loadData(), loadSession()])
-      .then(([storedData, storedSession]) => {
-        setData(storedData);
-        dataRef.current = storedData;
-        if (storedSession?.user) {
-          setSession(storedSession.user);
-          sessionRef.current = storedSession.user;
-          if (storedSession.user.mustChangePassword) {
-            setPasswordChangeVisible(true);
-            setPasswordChangeStatus({ tone: "info", message: "Por seguridad, cree una nueva contrasena para reemplazar la clave temporal." });
-          }
-          setBackendToken(storedSession.token || "");
-          backendTokenRef.current = storedSession.token || "";
-          setEmail(storedSession.user.email);
-          if (storedData.issuer.ruc && storedSession.companyRuc !== storedData.issuer.ruc) {
-            void saveSession(storedSession.user, storedSession.token || "", storedSession.passwordHash || "", storedData.issuer.ruc);
-          }
-        }
-      })
-      .catch(() => setData(initialData))
-      .finally(() => setReady(true));
-  }, [setEmail, setPasswordChangeStatus, setPasswordChangeVisible]);
+  const ready = useAppBootstrap({
+    backendTokenRef,
+    dataRef,
+    sessionRef,
+    setBackendToken,
+    setData,
+    setEmail,
+    setPasswordChangeStatus,
+    setPasswordChangeVisible,
+    setSession
+  });
 
-  useEffect(() => {
-    const show = Keyboard.addListener("keyboardDidShow", (event) => setKeyboardInset(event.endCoordinates.height));
-    const hide = Keyboard.addListener("keyboardDidHide", () => setKeyboardInset(0));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
 // Para desarrollo, se puede cargar una sesión de prueba automáticamente. En producción, se debe iniciar sin sesión para mostrar la pantalla de login o registro.
   useEffect(() => {
     if (ready && !session && data.users.length === 0) {
@@ -312,275 +292,68 @@ function AppContent() {
     syncStateRef.current = syncState;
   }, [syncState]);
 
-  const availableTabs = useMemo<Tab[]>(() => {
-    if (!session) return [];
-    return filterTabsByLicense(tabsForRole(session.role), data.license, session.role);
-  }, [data.license, session]);
+  const availableTabs = useAvailableTabs({ activeTab: tab, license: data.license, session, onTabChange: setTab });
 
-  useEffect(() => {
-    if (session && !availableTabs.includes(tab)) {
-      setTab("dashboard");
-    }
-  }, [availableTabs, session, tab]);
-
-  useEffect(() => {
-    return () => {
-      if (autoBackupTimerRef.current) clearTimeout(autoBackupTimerRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (Platform.OS === "web") return undefined;
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") {
-        void syncAfterConnectivityRestoredRef.current("active");
-      } else {
-        void flushAutoBackupRef.current();
-      }
-    });
-
-    return () => subscription.remove();
-  }, []);
-
-  useEffect(() => {
-    if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return undefined;
-
-    const refreshIfVisible = () => {
-      if (document.visibilityState === "visible") void refreshFromBackendRef.current("active");
-    };
-    const timer = window.setInterval(refreshIfVisible, WEB_REMOTE_REFRESH_INTERVAL_MS);
-    window.addEventListener("focus", refreshIfVisible);
-    window.addEventListener("online", refreshIfVisible);
-    document.addEventListener("visibilitychange", refreshIfVisible);
-
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener("focus", refreshIfVisible);
-      window.removeEventListener("online", refreshIfVisible);
-      document.removeEventListener("visibilitychange", refreshIfVisible);
-    };
-  }, []);
-
-  const persist = async (next: AppData) => {
-    const sanitized = sanitizeAppData(next);
-    setData(sanitized);
-    setSyncState(sanitized.autoBackupEnabled === false ? "synced" : "pending");
-    await saveData(sanitized);
-    scheduleAutoBackupRef.current(sanitized);
-  };
-
-  const scheduleAutoBackup = (snapshot: AppData) => {
-    if (!ready || snapshot.autoBackupEnabled === false || !snapshot.backendUrl) return;
-    pendingAutoBackupRef.current = snapshot;
-    if (autoBackupTimerRef.current) clearTimeout(autoBackupTimerRef.current);
-
-    autoBackupTimerRef.current = setTimeout(() => {
-      void flushAutoBackupRef.current();
-    }, AUTO_BACKUP_DEBOUNCE_MS);
-  };
-
-  const flushAutoBackup = async () => {
-    if (autoBackupTimerRef.current) {
-      clearTimeout(autoBackupTimerRef.current);
-      autoBackupTimerRef.current = null;
-    }
-
-    const snapshot = pendingAutoBackupRef.current;
-    if (!snapshot) return;
-    pendingAutoBackupRef.current = null;
-    await runAutoBackup(snapshot);
-  };
-
-  const runAutoBackup = async (snapshot: AppData) => {
-    if (snapshot.autoBackupEnabled === false) return;
-    if (autoBackupRunningRef.current) {
-      pendingAutoBackupRef.current = snapshot;
-      return;
-    }
-    autoBackupRunningRef.current = true;
-    setSyncState("syncing");
-
-    try {
-      const token = await ensureBackendToken(snapshot.backendUrl);
-      const flushed = await flushPendingSyncQueue(snapshot.backendUrl, token, snapshot);
-      snapshot = flushed;
-      let uploadSnapshot = snapshot;
-      try {
-        const remote = await restoreAppData<AppData>(snapshot.backendUrl, token);
-        if (remote?.data) {
-          uploadSnapshot = mergeAppDataSnapshots(remote.data, snapshot);
-        }
-      } catch {
-        uploadSnapshot = snapshot;
-      }
-      const backupResult = await backupAppData(snapshot.backendUrl, uploadSnapshot, token);
-      const updated = { ...snapshot, autoBackupLastAt: backupResult.updatedAt || new Date().toISOString(), autoBackupLastError: "" };
-      setData((current) => {
-        const merged = mergeAppDataSnapshots(uploadSnapshot, current);
-        merged.autoBackupLastAt = updated.autoBackupLastAt;
-        merged.autoBackupLastError = "";
-        dataRef.current = merged;
-        void saveData(merged);
-        return merged;
-      });
-      setSyncState("synced");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo ejecutar el respaldo automatico.";
-      const updated = { ...snapshot, autoBackupLastError: shortText(message, 180) };
-      setData((current) => {
-        const merged = { ...current, autoBackupLastError: updated.autoBackupLastError };
-        void saveData(merged);
-        return merged;
-      });
-      setSyncState("error");
-    } finally {
-      autoBackupRunningRef.current = false;
-      const pending = pendingAutoBackupRef.current;
-      if (pending) {
-        pendingAutoBackupRef.current = null;
-        void runAutoBackup(pending);
-      }
-    }
-  };
-
-  const flushPendingSyncQueue = async (backendUrl: string, token: string, snapshot: AppData) => {
-    const pending = snapshot.pendingSync || [];
-    if (pending.length === 0) return snapshot;
-
-    const remaining: PendingSyncItem[] = [];
-    for (const item of pending) {
-      try {
-        await mergeBackendData(backendUrl, item.patch, token);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "No se pudo enviar pendiente.";
-        remaining.push({
-          ...item,
-          attempts: item.attempts + 1,
-          lastError: shortText(message, 180)
-        });
-      }
-    }
-
-    const updated = {
-      ...snapshot,
-      pendingSync: remaining,
-      autoBackupLastError: remaining.length ? `${remaining.length} cambio(s) pendiente(s) por sincronizar.` : ""
-    };
-    setData((current) => {
-      const merged = { ...current, pendingSync: remaining, autoBackupLastError: updated.autoBackupLastError };
-      dataRef.current = merged;
-      void saveData(merged);
-      return merged;
-    });
-    return updated;
-  };
-
-  const applyRemoteSnapshot = async (snapshot: { data: AppData; updatedAt: string }, reason: string) => {
-    const current = dataRef.current;
-    const mergedSnapshot = mergeAppDataSnapshots(snapshot.data, current);
-    const restored = sanitizeAppData({
-      ...mergedSnapshot,
-      backendUrl: current.backendUrl,
-      autoBackupEnabled: current.autoBackupEnabled,
-      autoBackupLastAt: snapshot.updatedAt,
-      autoBackupLastError: ""
-    });
-    setData(restored);
-    dataRef.current = restored;
-    setSyncState("synced");
-    await saveData(restored);
-    if (reason !== "login") {
-      showMessage("Datos actualizados", `Se cargaron cambios del servidor (${formatAuditDate(snapshot.updatedAt)}).`);
-    }
-  };
-
-  const refreshFromBackend = async (reason: "login" | "active" | "manual" = "manual") => {
-    const current = dataRef.current;
-    if (!sessionRef.current || current.autoBackupEnabled === false || !current.backendUrl) return;
-    if ((current.pendingSync || []).length > 0 || pendingAutoBackupRef.current || autoBackupRunningRef.current) {
-      if (reason === "manual") showMessage("Sincronizacion pendiente", "Primero se debe terminar de subir el cambio local antes de cargar datos del servidor.");
-      return;
-    }
-    if (remoteRefreshRunningRef.current) return;
-
-    const now = Date.now();
-    if (reason !== "manual" && now - lastRemoteRefreshRef.current < REMOTE_REFRESH_THROTTLE_MS) return;
-    remoteRefreshRunningRef.current = true;
-    lastRemoteRefreshRef.current = now;
-
-    try {
-      const token = await ensureBackendToken(current.backendUrl);
-      const snapshot = await restoreAppData<AppData>(current.backendUrl, token);
-      if (!snapshot?.data) return;
-
-      const remoteUpdatedAt = new Date(snapshot.updatedAt).getTime();
-      const localSyncedAt = current.autoBackupLastAt ? new Date(current.autoBackupLastAt).getTime() : 0;
-      if (!Number.isFinite(remoteUpdatedAt) || remoteUpdatedAt <= localSyncedAt + 1000) {
-        if (reason === "manual") showMessage("Datos al dia", "Este dispositivo ya tiene la ultima copia del servidor.");
-        return;
-      }
-
-      await applyRemoteSnapshot({ data: snapshot.data, updatedAt: snapshot.updatedAt }, reason);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo actualizar desde el servidor.";
-      setData((latest) => {
-        const merged = { ...latest, autoBackupLastError: shortText(`Actualizacion servidor: ${message}`, 180) };
-        dataRef.current = merged;
-        void saveData(merged);
-        return merged;
-      });
-      setSyncState("error");
-    } finally {
-      remoteRefreshRunningRef.current = false;
-    }
-  };
-
-  const ensureBackendToken = async (backendUrl: string) => {
-    if (backendTokenRef.current) return backendTokenRef.current;
-    const storedSession = await loadSession();
-    if (storedSession?.token) {
-      backendTokenRef.current = storedSession.token;
-      setBackendToken(storedSession.token);
-      return storedSession.token;
-    }
-    if (!password) {
-      throw new Error("Para sincronizar debe iniciar sesion una vez con internet. Luego la app seguira trabajando offline con el token guardado.");
-    }
-    const result = await loginBackend(backendUrl, email, password, sessionRef.current?.companyId || "");
-    const token = result.token || "";
-    backendTokenRef.current = token;
-    setBackendToken(token);
-    if (sessionRef.current) {
-      const passwordHash = await hashPassword(password);
-      await saveSession(sessionRef.current, token, passwordHash, dataRef.current.issuer.ruc);
-    }
-    return token;
-  };
+  const {
+    ensureBackendToken,
+    openSyncCenter,
+    persist,
+    refreshFromBackend,
+    retryPendingSync,
+    runManualSync,
+    testSyncServer
+  } = useSyncAndBackup({
+    backendTokenRef,
+    data,
+    dataRef,
+    email,
+    password,
+    ready,
+    session,
+    sessionRef,
+    setAppMenuVisible,
+    setBackendToken,
+    setData,
+    setSyncActionLoading,
+    setSyncCenterVisible,
+    setSyncState,
+    syncState,
+    syncStateRef
+  });
 
   const switchActiveEstablishment = async (establishmentId: string) => {
-    const establishments = normalizedEstablishments(data.issuer);
-    const allowed = establishments.filter((item) => item.active !== false).slice(0, maxEmissionPointsForLicense(data.license));
+    const currentData = dataRef.current;
+    const establishments = normalizedEstablishments(currentData.issuer);
+    const allowed = establishments.filter((item) => item.active !== false).slice(0, maxEmissionPointsForLicense(currentData.license));
     const next = allowed.find((item) => item.id === establishmentId);
     if (!next) {
       Alert.alert("Establecimiento no disponible", "Ese punto de emision no esta activo o no esta permitido por la licencia.");
       return;
     }
 
-    const nextIssuer = issuerWithEstablishment({ ...data.issuer, establishments, activeEstablishmentId: next.id }, next);
+    const changedAt = new Date().toISOString();
+    const nextIssuer = issuerWithEstablishment({
+      ...currentData.issuer,
+      establishments: establishments.map((item) => item.id === next.id ? { ...item, updatedAt: changedAt } : item),
+      activeEstablishmentId: next.id,
+      establishmentsUpdatedAt: changedAt
+    }, { ...next, updatedAt: changedAt });
     const nextData = appendAudit(
-      { ...data, issuer: nextIssuer },
+      { ...currentData, issuer: nextIssuer },
       session || undefined,
       "ACTIVE_ESTABLISHMENT_CHANGED",
       "issuer",
-      data.issuer.ruc,
+      currentData.issuer.ruc,
       `Establecimiento activo cambiado a ${next.name} ${next.establishment}-${next.emissionPoint}`,
       { establishment: next.establishment, emissionPoint: next.emissionPoint }
     );
 
     setEstablishmentSwitcherVisible(false);
     setAppMenuVisible(false);
+    setData(nextData);
+    dataRef.current = nextData;
     await persist(nextData);
-    await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, issuer: nextIssuer, auditLogs: nextData.auditLogs.slice(0, 1) }, "Establecimiento pendiente de sincronizar", nextData, persist);
+    await syncPatchToBackend(currentData.backendUrl, backendTokenRef.current || backendToken, { baseData: currentData, issuer: nextIssuer, auditLogs: nextData.auditLogs.slice(0, 1) }, "Establecimiento pendiente de sincronizar", nextData, persist);
     showMessage("Establecimiento cambiado", `Ahora factura con ${next.name} ${next.establishment}-${next.emissionPoint}.`);
   };
 
@@ -592,155 +365,6 @@ function AppContent() {
     }
     Alert.alert(focus === "licencia" ? "Licencia" : "Configuracion", "Esta seccion esta disponible para usuarios administradores.");
   };
-
-  const openSupport = () => {
-    setAppMenuVisible(false);
-    setSupportVisible(true);
-    setSupportDiagnostic(buildSupportDiagnostic(dataRef.current, sessionRef.current, syncState));
-    void refreshSupportDiagnostic();
-  };
-
-  const runManualSync = async () => {
-    setAppMenuVisible(false);
-    if (dataRef.current.autoBackupEnabled === false || !dataRef.current.backendUrl) {
-      const enabled = sanitizeAppData({ ...dataRef.current, autoBackupEnabled: true, autoBackupLastError: "" });
-      setData(enabled);
-      dataRef.current = enabled;
-      await saveData(enabled);
-    }
-    await flushAutoBackup();
-    const current = dataRef.current;
-    if (current.autoBackupEnabled !== false && current.backendUrl && ((current.pendingSync || []).length > 0 || syncStateRef.current !== "synced" || Boolean(current.autoBackupLastError))) {
-      await runAutoBackup(current);
-    }
-    await refreshFromBackend("manual");
-  };
-
-  const hasReachableInternet = (networkState: Network.NetworkState) =>
-    networkState.isInternetReachable === true || (networkState.isInternetReachable !== false && networkState.isConnected === true);
-
-  const syncAfterConnectivityRestored = async (reason: "network" | "active" | "pending") => {
-    const current = dataRef.current;
-    if (!sessionRef.current || !current.backendUrl || current.autoBackupEnabled === false) return;
-    if ((current.pendingSync || []).length === 0 && !pendingAutoBackupRef.current && syncStateRef.current === "synced" && !current.autoBackupLastError) {
-      if (reason === "active") await refreshFromBackend("active");
-      return;
-    }
-    const now = Date.now();
-    if (connectivitySyncRunningRef.current || now - lastConnectivitySyncRef.current < CONNECTIVITY_SYNC_THROTTLE_MS) return;
-
-    try {
-      const networkState = await Network.getNetworkStateAsync();
-      if (!hasReachableInternet(networkState)) return;
-    } catch {
-      return;
-    }
-
-    connectivitySyncRunningRef.current = true;
-    lastConnectivitySyncRef.current = now;
-    try {
-      await flushAutoBackup();
-      const latest = dataRef.current;
-      if (latest.backendUrl && latest.autoBackupEnabled !== false && ((latest.pendingSync || []).length > 0 || syncStateRef.current !== "synced" || Boolean(latest.autoBackupLastError))) {
-        await runAutoBackup(latest);
-      }
-      if ((dataRef.current.pendingSync || []).length === 0) {
-        await refreshFromBackend("active");
-      }
-    } finally {
-      connectivitySyncRunningRef.current = false;
-    }
-  };
-
-  scheduleAutoBackupRef.current = scheduleAutoBackup;
-  flushAutoBackupRef.current = flushAutoBackup;
-  refreshFromBackendRef.current = refreshFromBackend;
-  syncAfterConnectivityRestoredRef.current = syncAfterConnectivityRestored;
-
-  const openSyncCenter = () => {
-    setAppMenuVisible(false);
-    setSyncCenterVisible(true);
-  };
-
-  const retryPendingSync = async () => {
-    setSyncActionLoading(true);
-    try {
-      await runManualSync();
-      showMessage("Sincronizacion", formatSyncStatus(syncState, dataRef.current));
-    } finally {
-      setSyncActionLoading(false);
-    }
-  };
-
-  const testSyncServer = async () => {
-    setSyncActionLoading(true);
-    try {
-      const health = await checkBackendHealth(dataRef.current.backendUrl);
-      showMessage("Servidor OK", `Backend responde: ${health.ok ? "SI" : "NO"}\nServicio: ${health.service || "FactuDarwin"}\nBase: ${health.database?.engine || "desconocida"}`);
-    } catch (error) {
-      showMessage("Servidor no disponible", error instanceof Error ? error.message : "No se pudo probar el servidor.");
-    } finally {
-      setSyncActionLoading(false);
-    }
-  };
-
-  const refreshSupportDiagnostic = async () => {
-    const current = dataRef.current;
-    setSupportLoading(true);
-    try {
-      const health = current.backendUrl ? await checkBackendHealth(current.backendUrl) : undefined;
-      let logs: TechnicalLog[] = [];
-      if (sessionRef.current && canAccessSensitiveSupport(sessionRef.current.role) && backendTokenRef.current) {
-        try {
-          logs = await getTechnicalLogs(current.backendUrl, backendTokenRef.current, 8);
-        } catch {
-          logs = [];
-        }
-      }
-      setSupportDiagnostic(buildSupportDiagnostic(current, sessionRef.current, syncState, health, logs));
-    } catch (error) {
-      setSupportDiagnostic(buildSupportDiagnostic(current, sessionRef.current, syncState, undefined, [], error instanceof Error ? error.message : "No se pudo probar el servidor."));
-    } finally {
-      setSupportLoading(false);
-    }
-  };
-
-  const shareSupportDiagnostic = async () => {
-    const text = supportDiagnostic || buildSupportDiagnostic(dataRef.current, sessionRef.current, syncState);
-    try {
-      const uri = `${FileSystem.cacheDirectory || FileSystem.documentDirectory}factudarwin-soporte.txt`;
-      await FileSystem.writeAsStringAsync(uri, text, { encoding: FileSystem.EncodingType.UTF8 });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: "text/plain", dialogTitle: "Compartir diagnostico" });
-        return;
-      }
-      showMessage("Diagnostico", text);
-    } catch (error) {
-      showMessage("No se pudo compartir", error instanceof Error ? error.message : "Intente nuevamente.");
-    }
-  };
-
-  useEffect(() => {
-    if (!ready || !session || data.autoBackupEnabled !== false || !data.backendUrl) return;
-    const enabled = sanitizeAppData({ ...data, autoBackupEnabled: true, autoBackupLastError: "" });
-    setData(enabled);
-    dataRef.current = enabled;
-    setSyncState("pending");
-    void saveData(enabled);
-    scheduleAutoBackupRef.current(enabled);
-  }, [data, ready, session]);
-
-  useEffect(() => {
-    if (!ready || !session) return undefined;
-    const subscription = Network.addNetworkStateListener((networkState) => {
-      if (hasReachableInternet(networkState)) {
-        void syncAfterConnectivityRestoredRef.current("network");
-      }
-    });
-
-    void syncAfterConnectivityRestoredRef.current("pending");
-    return () => subscription.remove();
-  }, [ready, session, session?.id]);
 
   if (!ready) {
     return (
@@ -810,37 +434,28 @@ function AppContent() {
     const licenseState = appLicenseStatus(data.license);
   const syncNotice = syncState === "synced" && (data.pendingSync || []).length === 0 && data.autoBackupEnabled !== false ? "" : formatSyncStatus(syncState, data);
   const currentEstablishment = activeEstablishment(data.issuer);
+  const connectedCompanyLabel = data.issuer.tradeName || data.issuer.businessName || data.issuer.ruc || "Empresa";
+  const currentEstablishmentLabel = `${currentEstablishment.name} ${currentEstablishment.establishment}-${currentEstablishment.emissionPoint}`;
   const switchableEstablishments = normalizedEstablishments(data.issuer).filter((item) => item.active !== false).slice(0, maxEmissionPointsForLicense(data.license));
 
   return (
     <SafeAreaView style={styles.screen}>
       <ExpoStatusBar style="dark" />
       <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-        <View style={[styles.header, { paddingTop: headerTopPadding }]}>
-          <View style={styles.brandRow}>
-            <CompanyLogoMark logoUrl={data.issuer.logoUrl} backendUrl={data.backendUrl} />
-            <View style={styles.flex}>
-              <Text style={styles.headerBrand}>{APP_BRAND}</Text>
-              <View style={styles.headerMetaRow}>
-                <Text style={styles.headerUser} numberOfLines={1}>{session.name || roleLabel(session.role)}</Text>
-                <Text style={[styles.licensePill, !licenseState.active && styles.licensePillError]} numberOfLines={1}>{compactLicenseStatusLabel(data.license)}</Text>
-              </View>
-              <Text style={styles.scopeStatus} numberOfLines={1}>{currentEstablishment.name} {currentEstablishment.establishment}-{currentEstablishment.emissionPoint}</Text>
-              {syncNotice ? <Text style={[styles.syncStatus, syncState === "error" && styles.syncStatusError]} numberOfLines={1}>{syncNotice}</Text> : null}
-            </View>
-          </View>
-          <Pressable accessibilityRole="button" accessibilityLabel="Abrir menu" style={styles.headerMenuButton} onPress={() => setAppMenuVisible(true)}>
-            <MenuIcon />
-          </Pressable>
-        </View>
+        <AppHeader
+          backendUrl={data.backendUrl}
+          companyLabel={connectedCompanyLabel}
+          establishmentLabel={currentEstablishmentLabel}
+          headerTopPadding={headerTopPadding}
+          license={data.license}
+          licenseActive={licenseState.active}
+          logoUrl={data.issuer.logoUrl}
+          syncError={syncState === "error"}
+          syncNotice={syncNotice}
+          onOpenMenu={() => setAppMenuVisible(true)}
+        />
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabs} contentContainerStyle={styles.tabsContent} keyboardShouldPersistTaps="handled">
-          {availableTabs.map((item) => (
-            <Pressable key={item} style={[styles.tab, tab === item && styles.tabActive]} onPress={() => setTab(item)}>
-              <Text style={[styles.tabText, tab === item && styles.tabTextActive]}>{tabLabel(item)}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+        <AppTabs availableTabs={availableTabs} activeTab={tab} onChange={setTab} />
 
         <ScrollView
           contentContainerStyle={[styles.content, keyboardInset > 0 && { paddingBottom: keyboardInset + 220 }]}
@@ -871,7 +486,7 @@ function AppContent() {
         onSwitchEstablishment={() => setEstablishmentSwitcherVisible(true)}
         onOpenSettings={() => openAdminSettings("configuracion")}
         onOpenLicense={() => openAdminSettings("licencia")}
-        onOpenSupport={openSupport}
+        onOpenSupport={supportDiagnostics.open}
         onLogout={logout}
       />
 
@@ -886,12 +501,12 @@ function AppContent() {
       />
 
       <SupportModal
-        visible={supportVisible}
-        loading={supportLoading}
-        diagnosticText={supportDiagnostic || buildSupportDiagnostic(data, session, syncState)}
-        onClose={() => setSupportVisible(false)}
-        onRefresh={() => { void refreshSupportDiagnostic(); }}
-        onShare={() => { void shareSupportDiagnostic(); }}
+        visible={supportDiagnostics.visible}
+        loading={supportDiagnostics.loading}
+        diagnosticText={supportDiagnostics.diagnosticText}
+        onClose={supportDiagnostics.close}
+        onRefresh={() => { void supportDiagnostics.refresh(); }}
+        onShare={() => { void supportDiagnostics.share(); }}
       />
 
       <EstablishmentPickerModal
@@ -960,7 +575,6 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   const [clientSearch, setClientSearch] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [saleScannerVisible, setSaleScannerVisible] = useState(false);
-  const [priceOptionsVisible, setPriceOptionsVisible] = useState(false);
   const [editingLineIndex, setEditingLineIndex] = useState<number | null>(null);
   const [lineEditForm, setLineEditForm] = useState({
     quantity: "1",
@@ -975,6 +589,9 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   const [visibleClientCount, setVisibleClientCount] = useState(LIST_BATCH_SIZE);
   const [visibleProductCount, setVisibleProductCount] = useState(LIST_BATCH_SIZE);
   const [visibleSaleCount, setVisibleSaleCount] = useState(LIST_BATCH_SIZE);
+  const [remoteClientResults, setRemoteClientResults] = useState<{ items: Client[]; total: number } | null>(null);
+  const [remoteProductResults, setRemoteProductResults] = useState<{ items: Product[]; total: number } | null>(null);
+  const [selectedRemoteClient, setSelectedRemoteClient] = useState<Client | null>(null);
   const [creditNoteSourceId, setCreditNoteSourceId] = useState("");
   const [creditNoteReason, setCreditNoteReason] = useState("Devolucion parcial");
   const [creditNoteQuantities, setCreditNoteQuantities] = useState<Record<string, string>>({});
@@ -1000,6 +617,10 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   });
 
   const totals = useMemo(() => calculateTotals(items), [items]);
+  const saleSummaryTotals = useMemo(() => ({
+    ...calculateTotals(items),
+    discount: calculateTotalDiscount(items)
+  }), [items]);
   const editingSale = useMemo(() => data.sales.find((sale) => sale.id === editingSaleId), [data.sales, editingSaleId]);
   const sourceTicket = useMemo(() => data.sales.find((sale) => sale.id === sourceTicketId), [data.sales, sourceTicketId]);
   const sourceProforma = useMemo(() => data.sales.find((sale) => sale.id === sourceProformaId), [data.sales, sourceProformaId]);
@@ -1008,23 +629,37 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   const retentionSale = useMemo(() => data.sales.find((sale) => sale.id === retentionSaleId), [data.sales, retentionSaleId]);
   const retentionClient = useMemo(() => data.clients.find((client) => client.id === retentionSale?.clientId), [retentionSale, data.clients]);
   const selectedProduct = useMemo(() => data.products.find((item) => item.id === productId), [data.products, productId]);
-  const selectedClient = useMemo(() => data.clients.find((item) => item.id === clientId), [data.clients, clientId]);
-  const filteredClientsForSale = useMemo(() => {
+  const clientsForSale = useMemo(() => data.clients.map((client) => isConsumerFinalClient(client) ? canonicalConsumerFinalClient(client) : client), [data.clients]);
+  const selectedClient = useMemo(() => {
+    if (selectedRemoteClient?.id === clientId) return selectedRemoteClient;
+    const remoteClient = remoteClientResults?.items.find((item) => item.id === clientId);
+    if (remoteClient) return remoteClient;
+    const localClient = clientsForSale.find((item) => item.id === clientId);
+    if (localClient) return localClient;
+    return undefined;
+  }, [clientId, clientsForSale, remoteClientResults, selectedRemoteClient]);
+  const localFilteredClientsForSale = useMemo(() => {
     const search = clientSearch.trim().toLowerCase();
-    if (!search) return data.clients;
-    return data.clients.filter((client) => client.name.toLowerCase().includes(search) || client.identification.includes(search));
-  }, [clientSearch, data.clients]);
-  const filteredProductsForSale = useMemo(() => {
+    if (!search) return clientsForSale;
+    return clientsForSale.filter((client) => client.name.toLowerCase().includes(search) || client.identification.includes(search));
+  }, [clientSearch, clientsForSale]);
+  const localFilteredProductsForSale = useMemo(() => {
     const search = productSearch.trim().toLowerCase();
     if (!search) return data.products;
     return data.products.filter((product) => product.name.toLowerCase().includes(search) || product.code.toLowerCase().includes(search));
   }, [data.products, productSearch]);
+  const filteredClientsForSale = remoteClientResults?.items ?? localFilteredClientsForSale;
+  const filteredProductsForSale = remoteProductResults?.items ?? localFilteredProductsForSale;
+  const filteredClientCount = remoteClientResults?.total ?? localFilteredClientsForSale.length;
+  const filteredProductCount = remoteProductResults?.total ?? localFilteredProductsForSale.length;
   const visibleClientsForSale = filteredClientsForSale.slice(0, visibleClientCount);
   const visibleProductsForSale = filteredProductsForSale.slice(0, visibleProductCount);
 
   useEffect(() => {
     setUnitGrossPrice(selectedProduct ? money(selectedProduct.price) : "");
-  }, [selectedProduct]);
+    setGrossDiscount("0");
+    setDiscountMode("amount");
+  }, [productId, selectedProduct]);
 
   useEffect(() => {
     setVisibleClientCount(LIST_BATCH_SIZE);
@@ -1035,9 +670,64 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   }, [productSearch]);
 
   useEffect(() => {
+    const search = clientSearch.trim();
+    if (!backendToken || !data.backendUrl || search.length < 2) {
+      setRemoteClientResults(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchBackendClients<Client>(data.backendUrl, backendToken, { search, limit: visibleClientCount, offset: 0 })
+        .then((result) => {
+          const normalizedSearch = search.toLowerCase();
+          const items = result.items
+            .map((client) => isConsumerFinalClient(client) ? canonicalConsumerFinalClient(client) : client)
+            .filter((client) => client.name.toLowerCase().includes(normalizedSearch) || client.identification.includes(normalizedSearch));
+          const total = items.length < result.items.length ? items.length : result.total;
+          if (!cancelled) setRemoteClientResults({ items, total });
+        })
+        .catch(() => {
+          if (!cancelled) setRemoteClientResults(null);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [backendToken, clientSearch, data.backendUrl, visibleClientCount]);
+
+  useEffect(() => {
+    const search = productSearch.trim();
+    if (!backendToken || !data.backendUrl || search.length < 2) {
+      setRemoteProductResults(null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      searchBackendProducts<Product>(data.backendUrl, backendToken, { search, limit: visibleProductCount, offset: 0 })
+        .then((result) => {
+          if (!cancelled) setRemoteProductResults({ items: result.items, total: result.total });
+        })
+        .catch(() => {
+          if (!cancelled) setRemoteProductResults(null);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [backendToken, data.backendUrl, productSearch, visibleProductCount]);
+
+  useEffect(() => {
     if (filteredClientsForSale.length === 0) return;
     if (filteredClientsForSale.some((client) => client.id === clientId)) return;
-    setClientId(filteredClientsForSale[0]?.id || "");
+    const nextClient = filteredClientsForSale[0];
+    setClientId(nextClient?.id || "");
+    setSelectedRemoteClient(nextClient || null);
   }, [clientId, filteredClientsForSale]);
 
   useEffect(() => {
@@ -1046,13 +736,6 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
     setProductId(filteredProductsForSale[0]?.id || "");
   }, [filteredProductsForSale, productId]);
 
-  const currentGrossPrice = parseDecimal(unitGrossPrice);
-  const currentQty = Math.max(0, parseDecimal(quantity) || 0);
-  const currentGrossLineTotal = currentGrossPrice > 0 ? currentGrossPrice * currentQty : 0;
-  const currentGrossDiscount =
-    discountMode === "percent"
-      ? currentGrossLineTotal * Math.max(0, parseDecimal(grossDiscount) || 0) / 100
-      : Math.max(0, parseDecimal(grossDiscount) || 0);
   const scopedSales = useMemo(() => data.sales.filter((sale) => saleInActiveScope(sale, data)), [data]);
   const filteredSales = useMemo(() => {
     const search = invoiceSearch.trim().toLowerCase();
@@ -1062,7 +745,12 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
     return scopedSales.filter((sale) => {
       const client = data.clients.find((item) => item.id === sale.clientId);
       const convertedDocument = sale.status === "ANULADA" && Boolean(sale.voidReason?.toLowerCase().includes("convertida a"));
-      const matchesStatus = statusFilter === "TODAS" || sale.status === statusFilter || (statusFilter === "NOTA_CREDITO" && isCreditNoteSale(sale));
+      const matchesStatus =
+        statusFilter === "TODAS" ||
+        sale.status === statusFilter ||
+        (statusFilter === "FIRMADA" && sale.status === "PENDIENTE_SRI") ||
+        (statusFilter === "ENVIADA" && sale.status === "ENVIADA_SRI") ||
+        (statusFilter === "NOTA_CREDITO" && isCreditNoteSale(sale));
       const saleDate = new Date(sale.createdAt);
       const matchesStartDate = !saleStartDate.trim() || (startBoundary && !Number.isNaN(saleDate.getTime()) && saleDate >= startBoundary);
       const matchesEndDate = !saleEndDate.trim() || (endBoundary && !Number.isNaN(saleDate.getTime()) && saleDate <= endBoundary);
@@ -1105,7 +793,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
 
   const invoiceStats = useMemo(() => {
     const authorized = scopedSales.filter((sale) => isInvoiceSale(sale) && sale.status === "AUTORIZADA");
-    const rejected = scopedSales.filter((sale) => sale.status === "RECHAZADA");
+    const rejected = scopedSales.filter((sale) => isSriRejected(sale.status));
     const internal = scopedSales.filter((sale) => sale.documentType === "nota_venta");
     const creditNotes = scopedSales.filter((sale) => sale.documentType === "nota_credito" && sale.status === "AUTORIZADA");
     const proformas = scopedSales.filter((sale) => sale.documentType === "proforma" && sale.status === "PROFORMA");
@@ -1131,10 +819,21 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   const selectedProductProjectedStock = selectedProduct ? selectedProduct.stock - Math.max(0, parseDecimal(quantity) || 0) : 0;
   const selectedProductLowStock = Boolean(selectedProduct && selectedProductProjectedStock <= productMinStock(selectedProduct));
 
-  const adjustQuantity = (amount: number) => {
-    const current = Math.max(0, parseDecimal(quantity) || 0);
-    const next = Math.max(1, current + amount);
-    setQuantity(formatQuantity(next));
+  const selectProductForSale = (nextProductId: string) => {
+    const nextProduct = data.products.find((item) => item.id === nextProductId);
+    setProductId(nextProductId);
+    setUnitGrossPrice(nextProduct ? money(nextProduct.price) : "");
+    setGrossDiscount("0");
+    setDiscountMode("amount");
+    setQuantity("1");
+    setIssueNotice("");
+  };
+
+  const selectClientForSale = (nextClientId: string, nextClient?: Client) => {
+    const resolvedClient = nextClient || filteredClientsForSale.find((client) => client.id === nextClientId) || clientsForSale.find((client) => client.id === nextClientId);
+    setClientId(nextClientId);
+    setSelectedRemoteClient(resolvedClient ? (isConsumerFinalClient(resolvedClient) ? canonicalConsumerFinalClient(resolvedClient) : resolvedClient) : null);
+    setIssueNotice("");
   };
 
   const addProductToSale = (product: Product | undefined, qty: number, grossPrice: number, discountValue: number, mode: "amount" | "percent") => {
@@ -1224,17 +923,13 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
     Alert.alert("Producto no encontrado", "No se encontro un producto con ese codigo o descripcion.");
   };
 
-  const openPriceOptions = () => {
-    if (!selectedProduct) {
-      Alert.alert("Producto requerido", "Seleccione un producto para ajustar precio o descuento.");
-      return;
-    }
-    setPriceOptionsVisible(true);
-  };
-
   const openQuickClientEditor = () => {
     if (!selectedClient) {
       Alert.alert("Cliente requerido", "Seleccione un cliente para editarlo.");
+      return;
+    }
+    if (isConsumerFinalClient(selectedClient)) {
+      Alert.alert("Consumidor Final protegido", "Este cliente fiscal no se edita. Seleccione o cree el cliente real con su cedula/RUC.");
       return;
     }
     setQuickClientForm({
@@ -1250,6 +945,10 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
 
   const saveQuickClient = async () => {
     if (!selectedClient) return;
+    if (isConsumerFinalClient(selectedClient)) {
+      Alert.alert("Consumidor Final protegido", "Este cliente fiscal no se puede modificar.");
+      return;
+    }
     const clientData = {
       ...quickClientForm,
       name: quickClientForm.name.trim(),
@@ -1269,11 +968,23 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       return;
     }
     const updatedClient = { ...selectedClient, ...clientData };
+    const existingClient = data.clients.some((client) => client.id === selectedClient.id);
+    const nextClients = existingClient
+      ? data.clients.map((client) => client.id === selectedClient.id ? updatedClient : client)
+      : [updatedClient, ...data.clients];
     const nextData = appendAudit({
       ...data,
-      clients: data.clients.map((client) => client.id === selectedClient.id ? updatedClient : client)
+      clients: nextClients
     }, user, "CLIENT_UPDATED_FROM_SALE", "client", selectedClient.id, `Cliente actualizado desde venta: ${updatedClient.name}`);
 
+    setClientId(updatedClient.id);
+    setSelectedRemoteClient(updatedClient);
+    setRemoteClientResults((current) => current ? {
+      ...current,
+      items: current.items.some((client) => client.id === updatedClient.id)
+        ? current.items.map((client) => client.id === updatedClient.id ? updatedClient : client)
+        : [updatedClient, ...current.items]
+    } : current);
     await persist(nextData);
     await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [updatedClient], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", nextData, persist);
     setQuickClientVisible(false);
@@ -1298,19 +1009,19 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
     setLineEditForm({ quantity: "1", unitGrossPrice: "0", grossDiscount: "0", discountMode: "amount" });
   };
 
-  const saveLineEdit = () => {
+  const saveLineEdit = (draft = lineEditForm) => {
     if (editingLineIndex === null) return;
     const currentItem = items[editingLineIndex];
     if (!currentItem) return;
     const product = data.products.find((item) => item.id === currentItem.productId);
-    const qty = parseDecimal(lineEditForm.quantity);
-    const grossPrice = parseDecimal(lineEditForm.unitGrossPrice);
-    const discountValue = Math.max(0, parseDecimal(lineEditForm.grossDiscount) || 0);
+    const qty = parseDecimal(draft.quantity);
+    const grossPrice = parseDecimal(draft.unitGrossPrice);
+    const discountValue = Math.max(0, parseDecimal(draft.grossDiscount) || 0);
     if (!product || !qty || qty <= 0 || !grossPrice || grossPrice <= 0) {
       Alert.alert("Linea incompleta", "Ingrese cantidad y precio validos.");
       return;
     }
-    if (lineEditForm.discountMode === "percent" && discountValue > 100) {
+    if (draft.discountMode === "percent" && discountValue > 100) {
       Alert.alert("Descuento invalido", "El porcentaje de descuento no puede ser mayor a 100%.");
       return;
     }
@@ -1323,7 +1034,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         return;
       }
     }
-    const discountGrossValue = lineEditForm.discountMode === "percent" ? grossPrice * qty * discountValue / 100 : discountValue;
+    const discountGrossValue = draft.discountMode === "percent" ? grossPrice * qty * discountValue / 100 : discountValue;
     const unitPrice = grossToNetUnitPrice(grossPrice, currentItem.ivaRate);
     const discount = grossToNetUnitPrice(discountGrossValue, currentItem.ivaRate);
     if (discount > qty * unitPrice) {
@@ -1333,6 +1044,28 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
     setItems((current) => current.map((item, index) => index === editingLineIndex ? { ...item, quantity: qty, unitPrice, discount } : item));
     closeLineEditor();
     setIssueNotice("Detalle actualizado.");
+  };
+
+  const adjustSaleLineQuantity = (index: number, amount: number) => {
+    const item = items[index];
+    if (!item) return;
+    const nextQuantity = Math.max(1, item.quantity + amount);
+    if (nextQuantity === item.quantity) return;
+
+    const activeDocumentType = sourceTicket || sourceProforma ? documentType : editingSale?.documentType || documentType;
+    if (amount > 0 && activeDocumentType !== "proforma") {
+      const product = data.products.find((productItem) => productItem.id === item.productId);
+      const quantityInOtherLines = items.reduce((sum, currentItem, itemIndex) => itemIndex !== index && currentItem.productId === item.productId ? sum + currentItem.quantity : sum, 0);
+      const availableStock = product ? getAvailableStockForSale(product, editingSale || sourceTicket) : 0;
+      if (availableStock < quantityInOtherLines + nextQuantity) {
+        Alert.alert("Stock insuficiente", `Disponible: ${availableStock}. En otras lineas ya tiene ${quantityInOtherLines}.`);
+        return;
+      }
+    }
+
+    const ratio = item.quantity > 0 ? nextQuantity / item.quantity : 1;
+    const nextDiscount = roundMoney((item.discount || 0) * ratio);
+    setItems((current) => current.map((currentItem, itemIndex) => itemIndex === index ? { ...currentItem, quantity: nextQuantity, discount: nextDiscount } : currentItem));
   };
 
   const saveInternalSaleFromCurrentForm = async (options?: { offlineFallback?: boolean }) => {
@@ -1357,7 +1090,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       tax: totals.tax,
       total: totals.total,
       paymentMethod,
-      status: "INTERNA",
+      status: "TICKET_OFFLINE",
       items
     };
     const restoredProducts = editingSale && saleStatusReducesStock(editingSale.status) ? restoreSaleStock(data.products, editingSale) : data.products;
@@ -1421,7 +1154,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
 
   const issue = async () => {
     setIssueNotice("");
-    const client = data.clients.find((item) => item.id === clientId);
+    const client = selectedClient;
     if (!client || items.length === 0) {
       showMessage("Documento incompleto", "Seleccione cliente y agregue al menos un producto.");
       return;
@@ -1595,19 +1328,23 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         authorizedXml: sriResult.authorizedXml,
         status: resolveInvoiceStatus(sriResult)
       };
-      showMessage(explainSriResult(sriResult).title, sriUserMessage(sriResult));
+      if (finalSale.status !== "AUTORIZADA") {
+        const message = sriUserMessage(sriResult) || "El SRI recibio el comprobante, pero aun no devolvio autorizacion. Revise el documento y use Reintentar si queda pendiente.";
+        setIssueNotice(message);
+        showMessage("Factura no autorizada", message);
+      }
     } catch (error) {
       const message = userFriendlyActionError(error, "authorize-invoice");
       finalSale = {
         ...sale,
-        status: "RECHAZADA",
+        status: "ERROR_SRI",
         sriMessage: message
       };
       setIssueNotice(message);
       showMessage("No se pudo firmar", message);
     }
 
-    const shouldMoveStock = !sourceTicket && finalSale.status !== "RECHAZADA" && finalSale.status !== "ANULADA";
+    const shouldMoveStock = !sourceTicket && !isSriRejected(finalSale.status) && finalSale.status !== "ANULADA";
     const saleStockChanges = new Map<string, number>();
     if (shouldMoveStock) {
       items.forEach((item) => {
@@ -1692,7 +1429,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       return;
     }
 
-    const html = buildRideHtml(sale, client, issuerForSale(data.issuer, sale));
+    const html = buildRideHtml(sale, client, issuerForDocument(data, sale));
 
     if (typeof window !== "undefined" && "document" in window) {
       openHtmlViewer(html, `RIDE ${sale.sequence}`);
@@ -1704,7 +1441,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
 
   const createTicket = async (sale: Sale, client: Client) => {
     const pageHeightMm = estimateTicketPageHeightMm(sale);
-    const html = buildInternalTicketHtml(sale, client, issuerForSale(data.issuer, sale), pageHeightMm);
+    const html = buildInternalTicketHtml(sale, client, issuerForDocument(data, sale), pageHeightMm);
 
     if (typeof window !== "undefined" && "document" in window) {
       openHtmlViewer(html, `Ticket ${sale.sequence}`);
@@ -1715,7 +1452,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   };
 
   const createProforma = async (sale: Sale, client: Client) => {
-    const html = buildProformaHtml(sale, client, issuerForSale(data.issuer, sale));
+    const html = buildProformaHtml(sale, client, issuerForDocument(data, sale));
 
     if (typeof window !== "undefined" && "document" in window) {
       openHtmlViewer(html, `Proforma ${sale.sequence}`);
@@ -1731,7 +1468,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       return;
     }
 
-    const html = buildCreditNoteRideHtml(sale, client, issuerForSale(data.issuer, sale), source);
+    const html = buildCreditNoteRideHtml(sale, client, issuerForDocument(data, sale), source);
     if (Platform.OS === "web") {
       openHtmlViewer(html, `Nota credito ${sale.sequence}`);
       return;
@@ -1754,7 +1491,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
     const isCreditNote = isCreditNoteSale(sale);
     const documentLabel = isCreditNote ? "nota de credito" : "factura";
     const documentTitle = isCreditNote ? "Nota de credito" : "Factura";
-    const saleIssuer = issuerForSale(data.issuer, sale);
+    const saleIssuer = issuerForDocument(data, sale);
     const documentNumber = `${saleIssuer.establishment}-${saleIssuer.emissionPoint}-${sale.sequence}`;
 
     try {
@@ -1820,7 +1557,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       return;
     }
 
-    const saleIssuer = issuerForSale(data.issuer, sale);
+    const saleIssuer = issuerForDocument(data, sale);
     const html = buildRideHtml(sale, client, saleIssuer);
 
     if (Platform.OS === "web") {
@@ -1952,10 +1689,16 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       notes: retentionNotes.trim()
     };
 
-    await persist(appendAudit({
+    const nextData = appendAudit({
       ...data,
       receivedRetentions: [retention, ...(data.receivedRetentions || [])]
-    }, user, "RETENTION_RECEIVED_CREATED", "retention", retention.id, `Retencion recibida ${retention.taxType} $${money(retention.amount)} para factura ${retentionSale.sequence}`, { saleId: retentionSale.id, documentNumber: retention.documentNumber }));
+    }, user, "RETENTION_RECEIVED_CREATED", "retention", retention.id, `Retencion recibida ${retention.taxType} $${money(retention.amount)} para factura ${retentionSale.sequence}`, { saleId: retentionSale.id, documentNumber: retention.documentNumber });
+    await persist(nextData);
+    await syncPatchToBackend(data.backendUrl, backendToken, {
+      baseData: data,
+      receivedRetentions: [retention],
+      auditLogs: nextData.auditLogs.slice(0, 1)
+    }, "Retencion pendiente de sincronizar", nextData, persist);
 
     closeRetentionForm();
     showMessage("Retencion guardada", `Se registro una retencion de ${retention.taxType} por $${money(retention.amount)}.`);
@@ -2143,7 +1886,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       const message = error instanceof Error ? error.message : "No se pudo emitir la nota de credito.";
       await persist(appendAudit({
         ...draftData,
-        sales: draftData.sales.map((sale) => (sale.id === creditNote.id ? { ...creditNote, status: "RECHAZADA", sriMessage: message, signedXml: xml } : sale))
+        sales: draftData.sales.map((sale) => (sale.id === creditNote.id ? { ...creditNote, status: "ERROR_SRI", sriMessage: message, signedXml: xml } : sale))
       }, user, "CREDIT_NOTE_FAILED", "sale", creditNote.id, `Nota de credito ${creditNote.sequence} rechazada`, { error: message }));
       Alert.alert("Nota de credito rechazada", message);
     } finally {
@@ -2190,7 +1933,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         retryHistory: [...(sale.retryHistory || []), retryAt]
       };
       const stockMovements: InventoryMovement[] = [];
-      const shouldDiscountStock = isInvoiceSale(sale) && saleNeedsStockDiscount(sale.status) && updatedSale.status !== "RECHAZADA" && updatedSale.status !== "ANULADA";
+      const shouldDiscountStock = isInvoiceSale(sale) && saleNeedsStockDiscount(sale.status) && !isSriRejected(updatedSale.status) && updatedSale.status !== "ANULADA";
       const shouldRestoreCreditStock = isCreditNoteSale(sale) && sale.status !== "AUTORIZADA" && updatedSale.status === "AUTORIZADA";
       const stockSourceSale = shouldRestoreCreditStock ? data.sales.find((item) => item.id === sale.sourceSaleId) : undefined;
       const nextProducts = shouldDiscountStock
@@ -2246,7 +1989,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
       const message = error instanceof Error ? error.message : "No se pudo reintentar el documento.";
       await persist(appendAudit({
         ...data,
-        sales: data.sales.map((item) => (item.id === sale.id ? { ...item, status: "RECHAZADA", sriMessage: message, retryHistory: [...(sale.retryHistory || []), retryAt] } : item))
+        sales: data.sales.map((item) => (item.id === sale.id ? { ...item, status: "ERROR_SRI", sriMessage: message, retryHistory: [...(sale.retryHistory || []), retryAt] } : item))
       }, user, isCreditNoteSale(sale) ? "CREDIT_NOTE_RETRY_FAILED" : "INVOICE_RETRY_FAILED", "sale", sale.id, `Reenvio fallido de ${documentTypeLabel(sale)} ${sale.sequence}`, { error: message }));
       Alert.alert("No se pudo reintentar", message);
     } finally {
@@ -2273,7 +2016,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
   };
 
   const invoiceFromTicket = (sale: Sale) => {
-    if (sale.documentType !== "nota_venta" || sale.status !== "INTERNA") {
+    if (sale.documentType !== "nota_venta" || !isTicketOffline(sale.status)) {
       Alert.alert("Ticket no disponible", "Solo se pueden facturar tickets internos activos.");
       return;
     }
@@ -2395,11 +2138,11 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
             search={clientSearch}
             selectedClientId={clientId}
             visibleClients={visibleClientsForSale}
-            filteredClientCount={filteredClientsForSale.length}
+            filteredClientCount={filteredClientCount}
             selectedClient={selectedClient}
-            canLoadMore={visibleClientsForSale.length < filteredClientsForSale.length}
+            canLoadMore={visibleClientsForSale.length < filteredClientCount}
             onSearchChange={setClientSearch}
-            onClientChange={setClientId}
+            onClientChange={selectClientForSale}
             onLoadMore={() => setVisibleClientCount((count) => count + LIST_BATCH_SIZE)}
             onEditClient={openQuickClientEditor}
           />
@@ -2410,36 +2153,39 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
             search={productSearch}
             selectedProductId={productId}
             visibleProducts={visibleProductsForSale}
-            filteredProductCount={filteredProductsForSale.length}
+            filteredProductCount={filteredProductCount}
             selectedProduct={selectedProduct}
-            canLoadMore={visibleProductsForSale.length < filteredProductsForSale.length}
+            canLoadMore={visibleProductsForSale.length < filteredProductCount}
             onSearchChange={setProductSearch}
-            onProductChange={setProductId}
+            onProductChange={selectProductForSale}
             onSearchSubmit={addProductSearchSubmit}
             onOpenScanner={() => setSaleScannerVisible(true)}
             onLoadMore={() => setVisibleProductCount((count) => count + LIST_BATCH_SIZE)}
+            onAddSelected={addItem}
           />
           <SaleProductControls
             product={selectedProduct}
-            quantity={quantity}
-            currentQty={currentQty}
-            currentGrossPrice={currentGrossPrice}
-            currentGrossDiscount={currentGrossDiscount}
-            currentGrossLineTotal={currentGrossLineTotal}
             lowStock={selectedProductLowStock}
             projectedStock={selectedProductProjectedStock}
-            onQuantityChange={setQuantity}
-            onAdjustQuantity={adjustQuantity}
-            onOpenPriceOptions={openPriceOptions}
-            onAdd={addItem}
           />
         </View>
 
-        <SaleItemsList items={items} onEdit={openLineEditor} onDelete={(index) => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} />
+        <SaleItemsList
+          items={items}
+          onAdjustQuantity={adjustSaleLineQuantity}
+          onEdit={openLineEditor}
+          onDelete={(index) => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+        />
         <View style={styles.saleGroupCompact}>
           <PaymentMethodPicker value={paymentMethod} onChange={setPaymentMethod} />
         </View>
-        <SaleTotalsBox subtotal={totals.subtotal} discount={calculateTotalDiscount(items)} tax={totals.tax} total={totals.total} />
+        <SaleTotalsBox
+          key={`${items.length}-${saleSummaryTotals.subtotal}-${saleSummaryTotals.discount}-${saleSummaryTotals.tax}-${saleSummaryTotals.total}`}
+          subtotal={saleSummaryTotals.subtotal}
+          discount={saleSummaryTotals.discount}
+          tax={saleSummaryTotals.tax}
+          total={saleSummaryTotals.total}
+        />
         <DismissibleNotice message={issueNotice} onDismiss={() => setIssueNotice("")} />
         <SaleSubmitButton issuing={issuing} documentType={documentType} editingSale={editingSale} sourceTicket={sourceTicket} sourceProforma={sourceProforma} onSubmit={issue} />
       </Section>
@@ -2468,20 +2214,20 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
             <ListItem
               key={sale.id}
               title={`${sale.sequence} - ${client?.name ?? "Cliente"}`}
-              meta={`${formatShortDate(sale.createdAt)} | ${documentTypeLabel(sale)} | ${sale.status} | $${money(sale.total)} | ${sale.authorizationNumber || sale.accessKey || "Interno"}${sale.sriMessage ? ` | ${shortText(sale.sriMessage, 90)}` : ""}`}
+              meta={`${formatShortDate(sale.createdAt)} | ${documentTypeLabel(sale)} | ${displayInvoiceStatus(sale.status)} | $${money(sale.total)} | ${sale.authorizationNumber || sale.accessKey || "Interno"}${sale.sriMessage ? ` | ${shortText(sale.sriMessage, 90)}` : ""}`}
               badge={sale.status}
               onOpen={canAccessSensitiveSupport(user.role) ? () => client && onXml(formatSaleDetail(sale, client, data.issuer)) : undefined}
-              secondaryLabel={(isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA" ? "RIDE" : sale.documentType === "nota_venta" && sale.status === "INTERNA" ? "Ticket" : sale.documentType === "proforma" && sale.status === "PROFORMA" ? "Proforma" : undefined}
+              secondaryLabel={(isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA" ? "Ver RIDE" : sale.documentType === "nota_venta" && isTicketOffline(sale.status) ? "Ver nota" : sale.documentType === "proforma" && sale.status === "PROFORMA" ? "Ver proforma" : undefined}
               onSecondary={() => {
                 if (!client) return;
                 if (isCreditNoteSale(sale)) return createCreditNoteRide(sale, client, data.sales.find((item) => item.id === sale.sourceSaleId));
                 return isInvoiceSale(sale) ? createRide(sale, client) : sale.documentType === "proforma" ? createProforma(sale, client) : createTicket(sale, client);
               }}
-              invoiceLabel={canIssueFromInternalDocuments(user.role) && sale.documentType === "nota_venta" && sale.status === "INTERNA" ? "Facturar" : undefined}
+              invoiceLabel={canIssueFromInternalDocuments(user.role) && sale.documentType === "nota_venta" && isTicketOffline(sale.status) ? "Facturar" : undefined}
               onInvoice={() => invoiceFromTicket(sale)}
-              ticketLabel={canIssueFromInternalDocuments(user.role) && sale.documentType === "proforma" && sale.status === "PROFORMA" ? "A ticket" : undefined}
+              ticketLabel={canIssueFromInternalDocuments(user.role) && sale.documentType === "proforma" && sale.status === "PROFORMA" ? "Convertir a nota interna" : undefined}
               onTicket={() => convertProforma(sale, "nota_venta")}
-              proformaInvoiceLabel={canIssueFromInternalDocuments(user.role) && sale.documentType === "proforma" && sale.status === "PROFORMA" ? "A factura" : undefined}
+              proformaInvoiceLabel={canIssueFromInternalDocuments(user.role) && sale.documentType === "proforma" && sale.status === "PROFORMA" ? "Convertir a factura" : undefined}
               onProformaInvoice={() => convertProforma(sale, "factura")}
               emailLabel={(isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA" ? "Email" : undefined}
               onEmail={() => client && emailSale(sale, client)}
@@ -2495,7 +2241,7 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
               onRetention={() => openRetentionForm(sale)}
               editLabel={canIssueFromInternalDocuments(user.role) && canEditSale(sale) ? "Editar" : undefined}
               onEdit={() => editSale(sale)}
-              retryLabel={canRetryDocuments(user.role) && (isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status !== "AUTORIZADA" && sale.status !== "ANULADA" ? (retryingSaleId === sale.id ? "..." : `Reintentar ${getRetryInfo(sale).today}/${MAX_DAILY_RETRIES}`) : undefined}
+              retryLabel={canRetryDocuments(user.role) && (isInvoiceSale(sale) || isCreditNoteSale(sale)) && canRetrySriStatus(sale.status) ? (retryingSaleId === sale.id ? "..." : `Reintentar ${getRetryInfo(sale).today}/${MAX_DAILY_RETRIES}`) : undefined}
               onRetry={() => client && retrySale(sale, client)}
               cancelLabel={canVoidDocuments(user.role) && sale.status !== "AUTORIZADA" && sale.status !== "ANULADA" ? "Anular" : undefined}
               onCancel={() => voidSale(sale)}
@@ -2574,23 +2320,6 @@ function SalesView({ data, user, backendToken, persist, onXml }: { data: AppData
         onSave={saveLineEdit}
         onClose={closeLineEditor}
       />
-      <ProductPriceOptionsModal
-        visible={priceOptionsVisible}
-        product={selectedProduct}
-        quantity={quantity}
-        unitGrossPrice={unitGrossPrice}
-        grossDiscount={grossDiscount}
-        discountMode={discountMode}
-        onQuantityChange={setQuantity}
-        onUnitGrossPriceChange={setUnitGrossPrice}
-        onGrossDiscountChange={setGrossDiscount}
-        onDiscountModeChange={setDiscountMode}
-        onAdd={() => {
-          setPriceOptionsVisible(false);
-          addItem();
-        }}
-        onClose={() => setPriceOptionsVisible(false)}
-      />
       <BarcodeScannerModal
         visible={saleScannerVisible}
         title="Escanear producto"
@@ -2643,7 +2372,10 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
     creditNoteSequential: "1"
   });
   const [certificatePassword, setCertificatePassword] = useState("");
+  const [certificateUploadModalVisible, setCertificateUploadModalVisible] = useState(false);
+  const [pendingCertificateFile, setPendingCertificateFile] = useState<{ fileName: string; base64: string } | null>(null);
   const [uploadingAsset, setUploadingAsset] = useState(false);
+  const [checkingAssetStatus, setCheckingAssetStatus] = useState(false);
   const productionChecklist = useMemo(() => buildProductionChecklist({ ...issuer, sequential: Number(sequentialText), remissionSequential: Number(remissionSequentialText), creditNoteSequential: Number(creditNoteSequentialText) }, backendUrl, connectionResult), [backendUrl, connectionResult, creditNoteSequentialText, issuer, remissionSequentialText, sequentialText]);
   const establishments = useMemo(() => editableEstablishments(issuer), [issuer]);
   const selectedEstablishment = establishments.find((item) => item.id === issuer.activeEstablishmentId && item.active)
@@ -2662,6 +2394,11 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
   };
 
   const refreshAssetsStatus = useCallback(async (showAlert = true) => {
+    if (showAlert) {
+      setCheckingAssetStatus(true);
+      setAssetStatus("Consultando logo y firma en el servidor...");
+      setAssetStatusTone("info");
+    }
     try {
       const status = await getCompanyAssetsStatus(backendUrl, backendToken);
       const logoText = status.logo?.configured ? "Logo configurado" : "Logo pendiente";
@@ -2678,6 +2415,8 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
       setAssetStatus(message);
       setAssetStatusTone("error");
       if (showAlert) Alert.alert("Activos no disponibles", message);
+    } finally {
+      if (showAlert) setCheckingAssetStatus(false);
     }
   }, [backendToken, backendUrl]);
 
@@ -3203,19 +2942,50 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
       Alert.alert("Selector pendiente", "En movil agregaremos selector nativo de archivos. Por ahora use la version web para subir .p12.");
       return;
     }
-    if (!certificatePassword) {
+    try {
+      setUploadingAsset(true);
+      const file = await pickWebFile(".p12,application/x-pkcs12");
+      if (!file) return;
+      const base64 = await readWebFileBase64(file);
+      setPendingCertificateFile({ fileName: file.name, base64 });
+      setCertificatePassword("");
+      setCertificateUploadModalVisible(true);
+      setAssetStatus(`Firma seleccionada: ${file.name}. Ingrese la contrasena para validarla.`);
+      setAssetStatusTone("info");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Revise el .p12 e intente nuevamente.";
+      setAssetStatus(`Error al seleccionar certificado: ${message}`);
+      setAssetStatusTone("error");
+      Alert.alert("No se pudo seleccionar certificado", message);
+    } finally {
+      setUploadingAsset(false);
+    }
+  };
+
+  const cancelCertificateUpload = () => {
+    if (uploadingAsset) return;
+    setCertificateUploadModalVisible(false);
+    setPendingCertificateFile(null);
+    setCertificatePassword("");
+  };
+
+  const confirmCertificateUpload = async () => {
+    if (!pendingCertificateFile) {
+      Alert.alert("Seleccione la firma", "Primero seleccione el archivo .p12.");
+      return;
+    }
+    if (!certificatePassword.trim()) {
       Alert.alert("Clave requerida", "Ingrese la contrasena del certificado .p12.");
       return;
     }
     let uploaded = false;
     try {
       setUploadingAsset(true);
-      const file = await pickWebFile(".p12,application/x-pkcs12");
-      if (!file) return;
-      const base64 = await readWebFileBase64(file);
-      await uploadCompanyCertificate(backendUrl, { fileName: file.name, password: certificatePassword, base64 }, backendToken);
+      await uploadCompanyCertificate(backendUrl, { fileName: pendingCertificateFile.fileName, password: certificatePassword, base64: pendingCertificateFile.base64 }, backendToken);
       uploaded = true;
+      setPendingCertificateFile(null);
       setCertificatePassword("");
+      setCertificateUploadModalVisible(false);
       setAssetStatus("Certificado cargado y validado.");
       setAssetStatusTone("success");
       Alert.alert("Certificado listo", "El servidor valido el .p12. Las proximas emisiones usaran el certificado de esta empresa.");
@@ -3280,11 +3050,16 @@ function SriView({ data, user, backendToken, getBackendToken, persist, onRefresh
           assetStatus={assetStatus}
           assetStatusTone={assetStatusTone}
           uploading={uploadingAsset}
+          checkingStatus={checkingAssetStatus}
           certificatePassword={certificatePassword}
+          certificateModalVisible={certificateUploadModalVisible}
+          pendingCertificateName={pendingCertificateFile?.fileName || ""}
           onCertificatePasswordChange={setCertificatePassword}
           onUploadLogo={uploadLogoFromWeb}
           onRefreshStatus={() => { void refreshAssetsStatus(true); }}
           onUploadCertificate={uploadCertificateFromWeb}
+          onConfirmCertificateUpload={() => { void confirmCertificateUpload(); }}
+          onCancelCertificateUpload={cancelCertificateUpload}
         />
       </Section>
       <Section title="Estado de configuracion">
@@ -3510,129 +3285,6 @@ const styles = StyleSheet.create({
     color: "#64748b",
     fontSize: 12,
     fontWeight: "700"
-  },
-  header: {
-    paddingHorizontal: 16,
-    paddingBottom: 7,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#ffffff",
-    borderBottomWidth: 1,
-    borderColor: "#e2e7f0"
-  },
-  brand: {
-    fontSize: 21,
-    lineHeight: 25,
-    fontWeight: "800",
-    color: "#1a2a3a"
-  },
-  brandRow: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8
-  },
-  headerBrand: {
-    fontSize: 16,
-    lineHeight: 19,
-    fontWeight: "900",
-    color: "#1a2a3a"
-  },
-  headerMetaRow: {
-    marginTop: 2,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6
-  },
-  headerUser: {
-    flexShrink: 1,
-    color: "#5d6979",
-    fontSize: 11,
-    fontWeight: "800",
-    lineHeight: 14
-  },
-  subtitle: {
-    marginTop: 1,
-    color: "#5d6979",
-    fontSize: 12,
-    lineHeight: 16
-  },
-  syncStatus: {
-    marginTop: 2,
-    color: "#c2410c",
-    fontSize: 10,
-    fontWeight: "800",
-    lineHeight: 13
-  },
-  scopeStatus: {
-    marginTop: 2,
-    color: "#0f766e",
-    fontSize: 10,
-    fontWeight: "900",
-    lineHeight: 13
-  },
-  syncStatusError: {
-    color: "#b91c1c"
-  },
-  licensePill: {
-    flexShrink: 0,
-    maxWidth: 116,
-    borderRadius: 999,
-    overflow: "hidden",
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    color: "#047857",
-    backgroundColor: "#dcfce7",
-    fontSize: 10,
-    fontWeight: "900",
-    lineHeight: 13
-  },
-  licensePillError: {
-    color: "#b91c1c",
-    backgroundColor: "#fee2e2"
-  },
-  headerMenuButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#f8fafc"
-  },
-  tabs: {
-    backgroundColor: "#ffffff",
-    borderBottomWidth: 1,
-    borderColor: "#e2e7f0",
-    minHeight: 50,
-    flexGrow: 0
-  },
-  tabsContent: {
-    paddingHorizontal: 4,
-    alignItems: "center",
-    flexDirection: "row",
-    minHeight: 50
-  },
-  tab: {
-    minWidth: 82,
-    paddingHorizontal: 8,
-    minHeight: 50,
-    alignItems: "center",
-    justifyContent: "center",
-    borderBottomWidth: 3,
-    borderBottomColor: "transparent"
-  },
-  tabActive: {
-    borderBottomColor: "#0f766e"
-  },
-  tabText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#6b7280",
-    lineHeight: 14
-  },
-  tabTextActive: {
-    color: "#0f766e"
   },
   content: {
     padding: 12,

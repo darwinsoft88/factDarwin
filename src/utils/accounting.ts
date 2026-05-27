@@ -1,5 +1,6 @@
 import { money } from "../services/sri";
 import { Product, Sale } from "../types";
+import { isTicketOffline } from "./invoiceStatus";
 import { isCreditNoteSale } from "./sales";
 
 export function productMinStock(product: Product) {
@@ -11,12 +12,12 @@ export function productCost(product: Product | undefined) {
 }
 
 export function accountingMoney(sale: Sale, value: number) {
-  if (!(sale.status === "AUTORIZADA" || sale.status === "INTERNA")) return "0.00";
+  if (!(sale.status === "AUTORIZADA" || isTicketOffline(sale.status))) return "0.00";
   return `${isCreditNoteSale(sale) ? "-" : ""}${money(value)}`;
 }
 
 export function accountingValue(sale: Sale, value: number) {
-  if (!(sale.status === "AUTORIZADA" || sale.status === "INTERNA")) return 0;
+  if (!(sale.status === "AUTORIZADA" || isTicketOffline(sale.status))) return 0;
   return isCreditNoteSale(sale) ? -value : value;
 }
 
