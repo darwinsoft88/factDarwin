@@ -111,7 +111,7 @@ export function AuthScreen({
             <>
               <View style={styles.authCard}>
                 <Text style={styles.authTitle}>INICIAR SESION</Text>
-                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" />
+                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" autoCorrect={false} autoComplete="url" keyboardType="url" textContentType="URL" />
                 <Input label="Correo o RUC" value={email} onChangeText={setEmail} autoCapitalize="none" />
                 <Input
                   label="Clave"
@@ -147,7 +147,7 @@ export function AuthScreen({
               <View style={styles.authCard}>
                 <Text style={styles.authTitle}>CREAR CUENTA</Text>
                 <Text style={styles.authSubtitle}>Registre su propia empresa con RUC activo en el SRI</Text>
-                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" />
+                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" autoCorrect={false} autoComplete="url" keyboardType="url" textContentType="URL" />
                 <Input label="RUC" value={registerForm.ruc} onChangeText={(ruc) => setRegisterForm({ ...registerForm, ruc: sanitizeIntegerInput(ruc).slice(0, 13) })} keyboardType="number-pad" />
                 <Input label="Razon social o nombre del negocio" value={registerForm.businessName} onChangeText={(businessName) => setRegisterForm({ ...registerForm, businessName })} placeholder="Ej. Comercial Andina" />
                 <Input label="Nombre comercial (opcional)" value={registerForm.tradeName} onChangeText={(tradeName) => setRegisterForm({ ...registerForm, tradeName })} placeholder="Ej. Market Andina" />
@@ -171,7 +171,7 @@ export function AuthScreen({
               <View style={styles.authCard}>
                 <Text style={styles.authTitle}>RECUPERAR CONTRASENA</Text>
                 <Text style={styles.authSubtitle}>Recibira una clave temporal en el correo registrado</Text>
-                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" />
+                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" autoCorrect={false} autoComplete="url" keyboardType="url" textContentType="URL" />
                 <Input label="Correo o RUC" value={recoveryIdentifier} onChangeText={setRecoveryIdentifier} autoCapitalize="none" />
                 <PrimaryButton label={recoveringPassword ? "Enviando..." : "Enviar clave temporal"} onPress={recoverPassword} />
                 {recoverStatus ? <Text style={[styles.authFeedback, recoverStatus.tone === "error" && styles.authFeedbackError, recoverStatus.tone === "success" && styles.authFeedbackSuccess]}>{recoverStatus.message}</Text> : null}

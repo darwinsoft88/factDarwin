@@ -12,23 +12,17 @@ export function Section({ title, children }: { title: string; children: React.Re
 
 export function Input(props: React.ComponentProps<typeof TextInput> & { label: string; rightElement?: React.ReactNode }) {
   const { label, rightElement, style, onChange, onChangeText, ...rest } = props;
-  const handleChange = (event: Parameters<NonNullable<React.ComponentProps<typeof TextInput>["onChange"]>>[0]) => {
-    onChange?.(event);
-    const targetValue = (event.target as unknown as { value?: string })?.value;
-    const text = event.nativeEvent?.text ?? targetValue;
-    if (typeof text === "string") onChangeText?.(text);
-  };
 
   return (
     <View style={styles.inputGroup}>
       <Text style={styles.label}>{label}</Text>
       {rightElement ? (
         <View style={styles.inputShell}>
-          <TextInput style={[styles.input, styles.inputWithRightElement, style]} placeholderTextColor="#7d8796" onChange={handleChange} onChangeText={onChangeText} {...rest} />
+          <TextInput style={[styles.input, styles.inputWithRightElement, style]} placeholderTextColor="#7d8796" onChange={onChange} onChangeText={onChangeText} {...rest} />
           <View style={styles.inputRightElement}>{rightElement}</View>
         </View>
       ) : (
-        <TextInput style={[styles.input, style]} placeholderTextColor="#7d8796" onChange={handleChange} onChangeText={onChangeText} {...rest} />
+        <TextInput style={[styles.input, style]} placeholderTextColor="#7d8796" onChange={onChange} onChangeText={onChangeText} {...rest} />
       )}
     </View>
   );
