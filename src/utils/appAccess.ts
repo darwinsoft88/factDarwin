@@ -1,23 +1,25 @@
 import { licensePlanOptions, roleOptions } from "../constants/options";
 import { BackendLicenseStatus } from "../services/backend";
-import { AppLicense, UserRole } from "../types";
+import { AppLicense, User, UserRole } from "../types";
 import { parseInputDate } from "./format";
 import { normalizeLicensePlanValue } from "./license";
 
-export type AppTab = "dashboard" | "ventas" | "clientes" | "productos" | "inventario" | "caja" | "guias" | "usuarios" | "reportes" | "sri";
+export type AppTab = "dashboard" | "ventas" | "documentos" | "clientes" | "productos" | "inventario" | "caja" | "creditos" | "guias" | "usuarios" | "reportes" | "sri";
 
 export function tabLabel(tab: AppTab) {
   const labels: Record<AppTab, string> = {
     dashboard: "INICIO",
     ventas: "VENTAS",
+    documentos: "DOCUMENTOS",
     clientes: "CLIENTES",
     productos: "PRODUCTOS",
     inventario: "INVENTARIO",
     caja: "CAJA",
+    creditos: "CREDITOS",
     guias: "GUIAS",
     usuarios: "USUARIOS",
     reportes: "REPORTES",
-    sri: "SRI"
+    sri: "CONFIGURACION"
   };
 
   return labels[tab];
@@ -55,10 +57,10 @@ export function compactLicenseStatusLabel(license?: AppLicense | BackendLicenseS
 }
 
 export function tabsForRole(role: UserRole): AppTab[] {
-  if (role === "admin") return ["dashboard", "ventas", "clientes", "productos", "inventario", "caja", "guias", "reportes", "usuarios", "sri"];
-  if (role === "cajero") return ["dashboard", "ventas", "clientes", "caja", "reportes"];
-  if (role === "contador") return ["dashboard", "caja", "reportes"];
-  return ["dashboard", "ventas", "clientes", "productos", "inventario", "caja", "guias", "reportes"];
+  if (role === "admin") return ["dashboard", "ventas", "documentos", "clientes", "productos", "inventario", "caja", "creditos", "guias", "reportes", "usuarios", "sri"];
+  if (role === "cajero") return ["dashboard", "ventas", "documentos", "clientes", "caja", "creditos", "reportes"];
+  if (role === "contador") return ["dashboard", "documentos", "caja", "creditos", "reportes"];
+  return ["dashboard", "ventas", "documentos", "clientes", "productos", "inventario", "caja", "creditos", "guias", "reportes"];
 }
 
 export function filterTabsByLicense(tabs: AppTab[], license: AppLicense | undefined, role: UserRole) {
@@ -68,6 +70,7 @@ export function filterTabsByLicense(tabs: AppTab[], license: AppLicense | undefi
   const features = license?.features;
   return tabs.filter((tab) => {
     if (tab === "ventas" && features?.sales === false) return false;
+    if (tab === "documentos" && features?.sales === false) return false;
     if (tab === "guias" && (features?.sales === false || features?.sri === false)) return false;
     if (tab === "inventario" && features?.inventory === false) return false;
     if (tab === "reportes" && features?.reports === false) return false;
@@ -81,6 +84,10 @@ export function canDeleteCatalog(role: UserRole) {
 
 export function canAccessSensitiveSupport(role: UserRole) {
   return role === "admin" || role === "contador";
+}
+
+export function canAccessDeveloperTools(user: Pick<User, "role" | "supportAccess">) {
+  return Boolean(user.supportAccess);
 }
 
 export function canManageFiscalAdjustments(role: UserRole) {

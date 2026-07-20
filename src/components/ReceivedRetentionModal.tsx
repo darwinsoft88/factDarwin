@@ -1,7 +1,8 @@
 import React from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { retentionTaxOptions } from "../constants/options";
-import { money } from "../services/sri";
+import { money } from "../sri";
 import { Issuer, RetentionTaxType, Sale } from "../types";
 import { documentNumber } from "../utils/documents";
 import { parseDecimal, sanitizeDecimalInput, sanitizeIntegerInput } from "../utils/numbers";
@@ -68,51 +69,58 @@ export function ReceivedRetentionModal({
 
   return (
     <Modal visible={Boolean(sale)} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.creditModalBackdrop}>
-        <View style={styles.creditModal}>
-          <View style={styles.creditModalHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.creditModalTitle}>Retencion recibida</Text>
-              <Text style={styles.creditModalMeta}>{sale ? `Factura ${documentNumber(sale, issuer)} | ${clientName || "Cliente"}` : ""}</Text>
+      <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+        <View style={styles.creditModalBackdrop}>
+          <View style={styles.creditModal}>
+            <View style={styles.creditModalHeader}>
+              <View style={styles.flex}>
+                <Text style={styles.creditModalTitle}>Retencion recibida</Text>
+                <Text style={styles.creditModalMeta}>{sale ? `Factura ${documentNumber(sale, issuer)} | ${clientName || "Cliente"}` : ""}</Text>
+              </View>
+              <Pressable style={styles.smallButton} onPress={onClose}>
+                <Text style={styles.smallButtonText}>Cerrar</Text>
+              </Pressable>
             </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
-            </Pressable>
+            <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+              <Select label="Impuesto retenido" value={taxType} onChange={(value) => onTaxTypeChange(value as RetentionTaxType)} options={retentionTaxOptions} />
+              <Input label="No. comprobante recibido" value={documentNumberText} onChangeText={onDocumentNumberChange} placeholder="Ej: 001-001-000000123" />
+              <Input label="Autorizacion" value={authorizationNumber} onChangeText={(value) => onAuthorizationNumberChange(sanitizeIntegerInput(value))} placeholder="Opcional" keyboardType="number-pad" />
+              <CalendarDateInputComponent label="Fecha recepcion" value={receivedAt} onChange={onReceivedAtChange} />
+              <View style={styles.row}>
+                <View style={styles.flex}>
+                  <Input label="Base" value={base} onChangeText={(value) => onBaseChange(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
+                </View>
+                <View style={styles.flex}>
+                  <Input label="Porcentaje" value={percentage} onChangeText={(value) => onPercentageChange(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
+                </View>
+              </View>
+              <Input label="Valor retenido" value={amount} onChangeText={(value) => onAmountChange(sanitizeDecimalInput(value))} placeholder="Se calcula si lo deja vacio" keyboardType="decimal-pad" />
+              <Input label="Notas" value={notes} onChangeText={onNotesChange} placeholder="Opcional" />
+              <View style={styles.creditTotalsBox}>
+                <Text style={styles.totalLine}>Base: ${money(baseValue)}</Text>
+                <Text style={styles.totalLine}>Porcentaje: {money(percentageValue)}%</Text>
+                <Text style={styles.totalStrong}>Valor estimado: ${money(baseValue * (percentageValue / 100))}</Text>
+              </View>
+              <PrimaryButton label="Guardar retencion" onPress={onSave} />
+            </ScrollView>
           </View>
-          <ScrollView contentContainerStyle={styles.creditModalContent}>
-            <Select label="Impuesto retenido" value={taxType} onChange={(value) => onTaxTypeChange(value as RetentionTaxType)} options={retentionTaxOptions} />
-            <Input label="No. comprobante recibido" value={documentNumberText} onChangeText={onDocumentNumberChange} placeholder="Ej: 001-001-000000123" />
-            <Input label="Autorizacion" value={authorizationNumber} onChangeText={(value) => onAuthorizationNumberChange(sanitizeIntegerInput(value))} placeholder="Opcional" keyboardType="number-pad" />
-            <CalendarDateInputComponent label="Fecha recepcion" value={receivedAt} onChange={onReceivedAtChange} />
-            <View style={styles.row}>
-              <View style={styles.flex}>
-                <Input label="Base" value={base} onChangeText={(value) => onBaseChange(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
-              </View>
-              <View style={styles.flex}>
-                <Input label="Porcentaje" value={percentage} onChangeText={(value) => onPercentageChange(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
-              </View>
-            </View>
-            <Input label="Valor retenido" value={amount} onChangeText={(value) => onAmountChange(sanitizeDecimalInput(value))} placeholder="Se calcula si lo deja vacio" keyboardType="decimal-pad" />
-            <Input label="Notas" value={notes} onChangeText={onNotesChange} placeholder="Opcional" />
-            <View style={styles.creditTotalsBox}>
-              <Text style={styles.totalLine}>Base: ${money(baseValue)}</Text>
-              <Text style={styles.totalLine}>Porcentaje: {money(percentageValue)}%</Text>
-              <Text style={styles.totalStrong}>Valor estimado: ${money(baseValue * (percentageValue / 100))}</Text>
-            </View>
-            <PrimaryButton label="Guardar retencion" onPress={onSave} />
-          </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoiding: {
+    flex: 1
+  },
   creditModalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.4)",
     justifyContent: "flex-end",
-    padding: 12
+    paddingHorizontal: MODAL_EDGE_PADDING,
+    paddingTop: MODAL_EDGE_PADDING,
+    paddingBottom: MODAL_SAFE_BOTTOM_PADDING
   },
   creditModal: {
     maxHeight: "92%",
@@ -158,6 +166,7 @@ const styles = StyleSheet.create({
   },
   creditModalContent: {
     padding: 14,
+    paddingBottom: MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING,
     gap: 10
   },
   row: {

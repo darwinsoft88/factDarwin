@@ -3,10 +3,11 @@ const config = require("./config");
 
 async function sendInvoiceEmail({ to, subject, html, xml, pdfBase64 = "", documentType, documentNumber, senderName = "", replyTo = "" }) {
   const transporter = createTransporter();
+  assertValidRecipient(to);
   const fileLabel = documentType === "nota_credito" ? "nota-credito" : "factura";
   const fileSuffix = documentNumber ? `-${sanitizeFilename(documentNumber)}` : "";
 
-  await transporter.sendMail({
+  const result = await sendAndValidate(transporter, {
     from: formatFrom(senderName),
     replyTo: validEmail(replyTo) ? replyTo : undefined,
     to,
@@ -22,12 +23,13 @@ async function sendInvoiceEmail({ to, subject, html, xml, pdfBase64 = "", docume
     ].filter(Boolean)
   });
 
-  return { ok: true };
+  return result;
 }
 
 async function sendTestEmail({ to, senderName = "", replyTo = "" }) {
   const transporter = createTransporter();
-  await transporter.sendMail({
+  assertValidRecipient(to);
+  const result = await sendAndValidate(transporter, {
     from: formatFrom(senderName),
     replyTo: validEmail(replyTo) ? replyTo : undefined,
     to,
@@ -39,12 +41,13 @@ async function sendTestEmail({ to, senderName = "", replyTo = "" }) {
     ].join("")
   });
 
-  return { ok: true };
+  return result;
 }
 
 async function sendPasswordResetEmail({ to, name = "", temporaryPassword = "", companyName = "" }) {
   const transporter = createTransporter();
-  await transporter.sendMail({
+  assertValidRecipient(to);
+  const result = await sendAndValidate(transporter, {
     from: formatFrom(companyName || "FactuDarwin"),
     to,
     subject: "Recuperacion de contrasena - FactuDarwin",
@@ -57,7 +60,7 @@ async function sendPasswordResetEmail({ to, name = "", temporaryPassword = "", c
     ].join("")
   });
 
-  return { ok: true };
+  return result;
 }
 
 function createTransporter() {
@@ -76,6 +79,27 @@ function createTransporter() {
       pass: config.smtp.pass
     }
   });
+}
+
+async function sendAndValidate(transporter, message) {
+  const info = await transporter.sendMail(message);
+  const accepted = normalizeAddressList(info.accepted);
+  const rejected = normalizeAddressList(info.rejected);
+
+  if (!accepted.length) {
+    const error = new Error(rejected.length ? `El proveedor de correo rechazo el destinatario: ${rejected.join(", ")}` : "El proveedor de correo no confirmo destinatarios aceptados.");
+    error.statusCode = 502;
+    error.smtp = summarizeSmtpInfo(info);
+    throw error;
+  }
+
+  return {
+    ok: true,
+    messageId: info.messageId || "",
+    accepted,
+    rejected,
+    response: String(info.response || "").slice(0, 300)
+  };
 }
 
 function sanitizeFilename(value) {
@@ -113,6 +137,27 @@ function extractEmail(value) {
 
 function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function assertValidRecipient(value) {
+  if (!validEmail(value)) {
+    const error = new Error("El correo del destinatario no es valido.");
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+function normalizeAddressList(value) {
+  return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
+}
+
+function summarizeSmtpInfo(info = {}) {
+  return {
+    messageId: info.messageId || "",
+    accepted: normalizeAddressList(info.accepted),
+    rejected: normalizeAddressList(info.rejected),
+    response: String(info.response || "").slice(0, 300)
+  };
 }
 
 function sanitizeHeader(value) {

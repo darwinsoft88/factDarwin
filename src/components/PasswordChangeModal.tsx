@@ -1,5 +1,6 @@
 import React from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { KEYBOARD_AVOIDING_BEHAVIOR } from "../constants/layout";
 import { Input } from "./common";
 import { PasswordVisibilityButton } from "./inputActions";
 
@@ -35,38 +36,43 @@ export function PasswordChangeModal({
 }: PasswordChangeModalProps) {
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => undefined}>
-      <View style={styles.smallNoticeBackdrop}>
-        <View style={styles.smallNoticeModal}>
-          <Text style={styles.smallNoticeTitle}>Crear nueva contrasena</Text>
-          <Text style={styles.smallNoticeText}>Ingresaste con una clave temporal. Para continuar, define una contrasena propia.</Text>
-          <Input
-            label="Nueva contrasena"
-            value={password}
-            onChangeText={onPasswordChange}
-            secureTextEntry={!passwordVisible}
-            autoCapitalize="none"
-            autoComplete="new-password"
-            rightElement={<PasswordVisibilityButton visible={passwordVisible} onPress={onToggleVisible} />}
-          />
-          <Input
-            label="Confirmar contrasena"
-            value={confirm}
-            onChangeText={onConfirmChange}
-            secureTextEntry={!passwordVisible}
-            autoCapitalize="none"
-            autoComplete="new-password"
-          />
-          {status ? <Text style={[styles.authFeedback, status.tone === "error" && styles.authFeedbackError, status.tone === "success" && styles.authFeedbackSuccess]}>{status.message}</Text> : null}
-          <Pressable style={styles.primaryButton} onPress={onSubmit} disabled={saving}>
-            <Text style={styles.primaryButtonText}>{saving ? "Guardando..." : "Guardar nueva contrasena"}</Text>
-          </Pressable>
+      <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+        <View style={styles.smallNoticeBackdrop}>
+          <View style={styles.smallNoticeModal}>
+            <Text style={styles.smallNoticeTitle}>Crear nueva contrasena</Text>
+            <Text style={styles.smallNoticeText}>Ingresaste con una clave temporal. Para continuar, define una contrasena propia.</Text>
+            <Input
+              label="Nueva contrasena"
+              value={password}
+              onChangeText={onPasswordChange}
+              secureTextEntry={!passwordVisible}
+              autoCapitalize="none"
+              autoComplete="new-password"
+              rightElement={<PasswordVisibilityButton visible={passwordVisible} onPress={onToggleVisible} />}
+            />
+            <Input
+              label="Confirmar contrasena"
+              value={confirm}
+              onChangeText={onConfirmChange}
+              secureTextEntry={!passwordVisible}
+              autoCapitalize="none"
+              autoComplete="new-password"
+            />
+            {status ? <Text style={[styles.authFeedback, status.tone === "error" && styles.authFeedbackError, status.tone === "success" && styles.authFeedbackSuccess]}>{status.message}</Text> : null}
+            <Pressable style={styles.primaryButton} onPress={onSubmit} disabled={saving}>
+              <Text style={styles.primaryButtonText}>{saving ? "Guardando..." : "Guardar nueva contrasena"}</Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoiding: {
+    flex: 1
+  },
   smallNoticeBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.35)",

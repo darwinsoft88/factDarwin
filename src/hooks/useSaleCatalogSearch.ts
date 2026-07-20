@@ -154,6 +154,7 @@ export function useSaleCatalogSearch({
     filteredClientCount,
     filteredClientsForSale,
     filteredProductCount,
+    filteredProductsForSale,
     selectedClient,
     selectedProduct,
     visibleClientsForSale,

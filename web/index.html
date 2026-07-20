@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <meta name="theme-color" content="#0b6f68" />
+    <meta name="description" content="FactuDarwin applicacion de facturacion electronica para iOS y clientes rapidos." />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="apple-touch-icon" href="assets/icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="FactuDarwin" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <style id="factudarwin-pwa-ios-fixes">
+      html,
+      body,
+      #root {
+        width: 100%;
+        max-width: 100%;
+        min-height: 100%;
+        margin: 0;
+        overflow-x: hidden;
+        overscroll-behavior-x: none;
+        -webkit-text-size-adjust: 100%;
+        touch-action: manipulation;
+        background: #f5f7fb;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      input,
+      textarea,
+      select,
+      [contenteditable="true"] {
+        font-size: 16px !important;
+      }
+
+      #root > div {
+        width: 100%;
+        max-width: 100vw;
+        overflow-x: hidden;
+      }
+    </style>
+    <title>FactuDarwin</title>
+  </head>
+  <body>
+    <noscript>Se necesita JavaScript para ejecutar esta aplicación.</noscript>
+    <div id="root"></div>
+  </body>
+</html>

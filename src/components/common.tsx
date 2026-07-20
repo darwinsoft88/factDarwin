@@ -1,11 +1,31 @@
-import React from "react";
+import React, { useRef } from "react";
+import { useState } from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+
+type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.section}>
       <Text style={styles.title}>{title}</Text>
       {children}
+    </View>
+  );
+}
+
+export function CollapsibleSection({ title, children, defaultOpen = false, embedded = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean; embedded?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  return (
+    <View style={embedded ? styles.collapsibleEmbedded : styles.section}>
+      <Pressable accessibilityRole="button" accessibilityLabel={`${open ? "Cerrar" : "Abrir"} ${title}`} style={styles.collapsibleHeader} onPress={() => setOpen((value) => !value)}>
+        <Text style={styles.title}>{title}</Text>
+        <View style={styles.collapsibleIcon}>
+          <MaterialCommunityIcons name={open ? "chevron-up" : "chevron-down"} size={20} color="#0f766e" />
+        </View>
+      </Pressable>
+      {open ? children : null}
     </View>
   );
 }
@@ -45,17 +65,44 @@ export function Select({ label, value, options, onChange }: { label: string; val
   );
 }
 
-export function PrimaryButton({ label, onPress }: { label: string; onPress: () => void }) {
+export function PrimaryButton({ disabled = false, label, onPress, icon }: { disabled?: boolean; label: string; onPress: () => void | Promise<void>; icon?: MaterialIconName }) {
+  const pressLockedRef = useRef(false);
+  const resolvedIcon = icon || primaryButtonIcon(label);
+
+  const handlePress = () => {
+    if (disabled || pressLockedRef.current) return;
+    pressLockedRef.current = true;
+    const unlock = () => {
+      setTimeout(() => {
+        pressLockedRef.current = false;
+      }, 700);
+    };
+
+    try {
+      const result = onPress();
+      if (result && typeof result.finally === "function") {
+        result.finally(unlock);
+      } else {
+        unlock();
+      }
+    } catch (error) {
+      unlock();
+      throw error;
+    }
+  };
+
   return (
-    <Pressable style={styles.primaryButton} onPress={onPress}>
+    <Pressable style={[styles.primaryButton, disabled && styles.primaryButtonDisabled]} onPress={handlePress} disabled={disabled}>
+      {resolvedIcon ? <MaterialCommunityIcons name={resolvedIcon} size={19} color="#ffffff" /> : null}
       <Text style={styles.primaryButtonText}>{label}</Text>
     </Pressable>
   );
 }
 
-export function LoadMoreButton({ label, onPress }: { label: string; onPress: () => void }) {
+export function LoadMoreButton({ label, onPress, icon = "chevron-down" }: { label: string; onPress: () => void; icon?: MaterialIconName }) {
   return (
     <Pressable style={styles.smallButton} onPress={onPress}>
+      <MaterialCommunityIcons name={icon} size={17} color="#0f5f59" />
       <Text style={styles.smallButtonText}>{label}</Text>
     </Pressable>
   );
@@ -63,6 +110,22 @@ export function LoadMoreButton({ label, onPress }: { label: string; onPress: () 
 
 export function Empty({ text }: { text: string }) {
   return <Text style={styles.hint}>{text}</Text>;
+}
+
+function primaryButtonIcon(label: string): MaterialIconName | undefined {
+  const value = label.toLowerCase();
+  if (value.includes("guardar")) return "content-save-outline";
+  if (value.includes("emitir")) return "file-send-outline";
+  if (value.includes("agregar")) return "plus-circle-outline";
+  if (value.includes("crear")) return "account-plus-outline";
+  if (value.includes("subir")) return "cloud-upload-outline";
+  if (value.includes("probar") || value.includes("conexion")) return "connection";
+  if (value.includes("escanear")) return "barcode-scan";
+  if (value.includes("actualizar")) return "refresh";
+  if (value.includes("sincronizar")) return "sync";
+  if (value.includes("correo")) return "email-outline";
+  if (value.includes("cerrar")) return "close";
+  return undefined;
 }
 
 const styles = StyleSheet.create({
@@ -79,10 +142,34 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 1
   },
+  collapsibleEmbedded: {
+    borderWidth: 1,
+    borderColor: "#e2e7f0",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 9,
+    backgroundColor: "#fbfdff"
+  },
   title: {
     fontSize: 17,
     fontWeight: "800",
     color: "#1f2937"
+  },
+  collapsibleHeader: {
+    minHeight: 42,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  collapsibleIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "#ecfdf5",
+    alignItems: "center",
+    justifyContent: "center"
   },
   inputGroup: {
     gap: 6
@@ -144,7 +231,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#0f766e",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 16
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    gap: 8
+  },
+  primaryButtonDisabled: {
+    opacity: 0.62
   },
   primaryButtonText: {
     color: "#ffffff",
@@ -156,7 +248,11 @@ const styles = StyleSheet.create({
     borderColor: "#0f766e",
     backgroundColor: "#e6fffb",
     paddingHorizontal: 12,
-    paddingVertical: 8
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6
   },
   smallButtonText: {
     color: "#0f5f59",

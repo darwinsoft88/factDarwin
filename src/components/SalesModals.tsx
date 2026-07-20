@@ -1,18 +1,21 @@
 import React from "react";
-import { money } from "../services/sri";
-import { AppData, Client, RetentionTaxType, Sale, SaleItem } from "../types";
+import { money } from "../sri";
+import { AdditionalInfoField, AppData, Client, RetentionTaxType, Sale, SaleItem } from "../types";
 import { LineEditForm } from "../hooks/useSaleLineEditor";
 import { BarcodeScannerModal } from "./BarcodeScannerModal";
 import { CalendarDateInput } from "./CalendarDateInput";
 import { CreditNoteModal } from "./CreditNoteModal";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import { QuickClientEditor } from "./QuickClientEditor";
-import { QuickClientForm } from "../hooks/useQuickSaleClientEditor";
+import { QuickClientForm, QuickClientMode } from "../hooks/useQuickSaleClientEditor";
 import { ReceivedRetentionModal } from "./ReceivedRetentionModal";
+import { SaleAdditionalInfoModal } from "./SaleAdditionalInfoModal";
 import { SaleLineEditor } from "./SaleLineEditor";
 
 type SalesModalsProps = {
-  addScannedCodeToSale: (code: string) => void;
+  additionalInfo: AdditionalInfoField[];
+  additionalInfoVisible: boolean;
+  addScannedCodeToSale: (code: string) => boolean | void;
   closeCreditNoteForm: () => void;
   closeLineEditor: () => void;
   closeRetentionForm: () => void;
@@ -27,8 +30,11 @@ type SalesModalsProps = {
   issuingCreditNote: boolean;
   items: SaleItem[];
   lineEditForm: LineEditForm;
+  lookingUpQuickClient: boolean;
+  lookupQuickClientIdentification: () => void;
   processingMessage: string;
   quickClientForm: QuickClientForm;
+  quickClientMode: QuickClientMode;
   quickClientVisible: boolean;
   retentionAmount: string;
   retentionAuthorizationNumber: string;
@@ -46,6 +52,8 @@ type SalesModalsProps = {
   saveReceivedRetention: () => void;
   setCreditNoteQuantities: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setCreditNoteReason: React.Dispatch<React.SetStateAction<string>>;
+  setAdditionalInfo: React.Dispatch<React.SetStateAction<AdditionalInfoField[]>>;
+  setAdditionalInfoVisible: React.Dispatch<React.SetStateAction<boolean>>;
   setLineEditForm: React.Dispatch<React.SetStateAction<LineEditForm>>;
   setProductSearch: React.Dispatch<React.SetStateAction<string>>;
   setQuickClientForm: React.Dispatch<React.SetStateAction<QuickClientForm>>;
@@ -62,6 +70,8 @@ type SalesModalsProps = {
 };
 
 export function SalesModals({
+  additionalInfo,
+  additionalInfoVisible,
   addScannedCodeToSale,
   closeCreditNoteForm,
   closeLineEditor,
@@ -77,8 +87,11 @@ export function SalesModals({
   issuingCreditNote,
   items,
   lineEditForm,
+  lookingUpQuickClient,
+  lookupQuickClientIdentification,
   processingMessage,
   quickClientForm,
+  quickClientMode,
   quickClientVisible,
   retentionAmount,
   retentionAuthorizationNumber,
@@ -96,6 +109,8 @@ export function SalesModals({
   saveReceivedRetention,
   setCreditNoteQuantities,
   setCreditNoteReason,
+  setAdditionalInfo,
+  setAdditionalInfoVisible,
   setLineEditForm,
   setProductSearch,
   setQuickClientForm,
@@ -112,6 +127,13 @@ export function SalesModals({
 }: SalesModalsProps) {
   return (
     <>
+      <SaleAdditionalInfoModal
+        visible={additionalInfoVisible}
+        fields={additionalInfo}
+        onChange={setAdditionalInfo}
+        onClose={() => setAdditionalInfoVisible(false)}
+      />
+
       <CreditNoteModal
         source={creditNoteSource}
         issuer={data.issuer}
@@ -156,8 +178,11 @@ export function SalesModals({
       />
       <QuickClientEditor
         visible={quickClientVisible}
+        mode={quickClientMode}
         form={quickClientForm}
+        lookingUpClient={lookingUpQuickClient}
         onChange={setQuickClientForm}
+        onLookupIdentification={lookupQuickClientIdentification}
         onSave={saveQuickClient}
         onClose={() => setQuickClientVisible(false)}
       />
@@ -172,9 +197,9 @@ export function SalesModals({
       <BarcodeScannerModal
         visible={saleScannerVisible}
         title="Escanear producto"
+        continuous
         onClose={() => setSaleScannerVisible(false)}
         onScan={(code) => {
-          setSaleScannerVisible(false);
           setProductSearch(code);
           addScannedCodeToSale(code);
         }}

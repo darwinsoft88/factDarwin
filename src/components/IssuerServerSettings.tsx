@@ -10,6 +10,7 @@ type IssuerServerSettingsProps = {
   checkingConnection: boolean;
   testingEmail: boolean;
   connectionResult: string;
+  showAdvancedServerSettings?: boolean;
   onBackendUrlChange: (value: string) => void;
   onAutoBackupChange: (value: boolean) => void;
   onSave: () => void;
@@ -23,6 +24,7 @@ export function IssuerServerSettings({
   checkingConnection,
   testingEmail,
   connectionResult,
+  showAdvancedServerSettings = false,
   onBackendUrlChange,
   onAutoBackupChange,
   onSave,
@@ -31,8 +33,12 @@ export function IssuerServerSettings({
 }: IssuerServerSettingsProps) {
   return (
     <>
-      <Input label="URL del servidor" value={backendUrl} onChangeText={onBackendUrlChange} autoCapitalize="none" />
-      <AutoBackupToggle enabled={autoBackupEnabled} onChange={onAutoBackupChange} />
+      {showAdvancedServerSettings ? (
+        <>
+          <Input label="URL del servidor" value={backendUrl} onChangeText={onBackendUrlChange} autoCapitalize="none" />
+          <AutoBackupToggle enabled={autoBackupEnabled} onChange={onAutoBackupChange} />
+        </>
+      ) : null}
       <IssuerActionButtons
         checkingConnection={checkingConnection}
         testingEmail={testingEmail}

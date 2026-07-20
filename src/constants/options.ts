@@ -29,7 +29,9 @@ export const licensePlanOptions = [
   { label: "Basico mensual", value: "basico_mensual" },
   { label: "Basico anual", value: "basico_anual" },
   { label: "Pro mensual", value: "pro_mensual" },
-  { label: "Pro anual", value: "pro_anual" }
+  { label: "Pro anual", value: "pro_anual" },
+  { label: "Premium mensual", value: "premium_mensual" },
+  { label: "Premium anual", value: "premium_anual" }
 ];
 
 export const retentionTaxOptions = [

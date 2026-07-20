@@ -1,11 +1,13 @@
-import { initialData } from "../storage";
-import { AppData, Issuer, IssuerEstablishment } from "../types";
+import { initialData } from "../database";
+import { AppData, CreditPayment, Issuer, IssuerEstablishment, Sale } from "../types";
 import { sanitizeAppData } from "../validation";
+import { isInventoryProduct } from "./catalogItems";
+import { reconcileCreditBalancesFromPayments } from "./credit";
 import { normalizedEstablishments } from "./establishments";
 
 export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): AppData {
   const sameSequenceScope = sameIssuerSequenceScope(remoteData.issuer, localData.issuer);
-  return sanitizeAppData(reconcileProductStockFromMovements({
+  const merged = {
     ...remoteData,
     ...localData,
     issuer: {
@@ -21,6 +23,7 @@ export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): 
     clients: mergeByLatestUpdatedAt(remoteData.clients || [], localData.clients || []),
     products: mergeByLatestUpdatedAt(remoteData.products || [], localData.products || []),
     sales: prependUniqueById(remoteData.sales || [], localData.sales || []),
+    creditPayments: mergeCreditPaymentsWithinBalances(remoteData.sales || [], localData.sales || [], remoteData.creditPayments || [], localData.creditPayments || []),
     guides: prependUniqueById(remoteData.guides || [], localData.guides || []),
     receivedRetentions: prependUniqueById(remoteData.receivedRetentions || [], localData.receivedRetentions || []),
     cashClosings: prependUniqueById(remoteData.cashClosings || [], localData.cashClosings || []),
@@ -33,7 +36,8 @@ export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): 
     pendingSync: localData.pendingSync || [],
     deletedIds: mergeDeletedIds(remoteData.deletedIds, localData.deletedIds),
     historyPolicy: remoteData.historyPolicy || localData.historyPolicy
-  }));
+  };
+  return sanitizeAppData(reconcileProductStockFromMovements(reconcileCreditBalancesFromPayments(merged)));
 }
 
 export function addedEstablishmentIds(previousIssuer: Issuer, nextIssuer: Issuer) {
@@ -47,7 +51,8 @@ function mergeDeletedIds(remoteDeleted?: AppData["deletedIds"], localDeleted?: A
   return {
     clients: Array.from(new Set([...(remoteDeleted?.clients || []), ...(localDeleted?.clients || [])])),
     products: Array.from(new Set([...(remoteDeleted?.products || []), ...(localDeleted?.products || [])])),
-    users: Array.from(new Set([...(remoteDeleted?.users || []), ...(localDeleted?.users || [])]))
+    users: Array.from(new Set([...(remoteDeleted?.users || []), ...(localDeleted?.users || [])])),
+    inventoryMovements: Array.from(new Set([...(remoteDeleted?.inventoryMovements || []), ...(localDeleted?.inventoryMovements || [])]))
   };
 }
 
@@ -127,6 +132,54 @@ function prependUniqueById<T extends { id: string }>(remoteItems: T[], localItem
   return result;
 }
 
+function mergeCreditPaymentsWithinBalances(
+  remoteSales: Sale[],
+  localSales: Sale[],
+  remotePayments: CreditPayment[],
+  localPayments: CreditPayment[]
+) {
+  const salesById = new Map<string, Sale>();
+  [...localSales, ...remoteSales].forEach((sale) => {
+    if (sale?.id) salesById.set(sale.id, sale);
+  });
+
+  const seen = new Set<string>();
+  const paidBySale = new Map<string, number>();
+  const result: CreditPayment[] = [];
+  const candidates = [...remotePayments, ...localPayments].sort((a, b) => {
+    const remoteA = remotePayments.some((item) => item.id === a.id) ? 0 : 1;
+    const remoteB = remotePayments.some((item) => item.id === b.id) ? 0 : 1;
+    if (remoteA !== remoteB) return remoteA - remoteB;
+    return timestampOf(a.createdAt) - timestampOf(b.createdAt);
+  });
+
+  candidates.forEach((payment) => {
+    if (!payment?.id || seen.has(payment.id)) return;
+    seen.add(payment.id);
+
+    if (payment.voidedAt) {
+      result.push(payment);
+      return;
+    }
+
+    const sale = salesById.get(payment.saleId);
+    if (!sale || sale.paymentCondition !== "credito") {
+      result.push(payment);
+      return;
+    }
+
+    const total = roundMoney(sale.total);
+    const paid = paidBySale.get(payment.saleId) || 0;
+    const amount = roundMoney(payment.amount);
+    if (paid + amount > total + 0.009) return;
+
+    paidBySale.set(payment.saleId, roundMoney(paid + amount));
+    result.push(payment);
+  });
+
+  return result.sort((a, b) => timestampOf(b.createdAt) - timestampOf(a.createdAt));
+}
+
 function reconcileProductStockFromMovements(data: AppData): AppData {
   const movementsByProduct = new Map<string, AppData["inventoryMovements"]>();
   (data.inventoryMovements || []).forEach((movement) => {
@@ -137,6 +190,9 @@ function reconcileProductStockFromMovements(data: AppData): AppData {
   });
 
   const products = (data.products || []).map((product) => {
+    if (!isInventoryProduct(product)) {
+      return { ...product, stock: 0, minStock: 0 };
+    }
     const movements = movementsByProduct.get(product.id);
     if (!movements?.length) return product;
 
@@ -162,6 +218,12 @@ function reconcileProductStockFromMovements(data: AppData): AppData {
 function finiteNumber(value: unknown, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function roundMoney(value: unknown) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.round((number + Number.EPSILON) * 100) / 100;
 }
 
 function timestampOf(value?: string) {

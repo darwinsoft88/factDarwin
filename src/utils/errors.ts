@@ -22,5 +22,10 @@ export function loginErrorMessage(error: unknown) {
 
 export function isBackendConnectionError(error: unknown) {
   const message = error instanceof Error ? error.message : "";
-  return message.includes("No hay conexion");
+  const normalized = message.toLowerCase();
+  return normalized.includes("no hay conexion") ||
+    normalized.includes("network request failed") ||
+    normalized.includes("failed to fetch") ||
+    normalized.includes("networkerror") ||
+    normalized.includes("load failed");
 }

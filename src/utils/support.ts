@@ -22,9 +22,9 @@ export function formatBackendHealth(health: BackendHealthResponse, backendUrl: s
     `URL: ${backendUrl.replace(/\/$/, "")}`,
     `Servicio: ${health.service || "desconocido"}`,
     `Backend responde: ${health.ok ? "SI" : "NO"}`,
-    `Ambiente backend: ${health.sriEnv || "desconocido"}`,
-    `Ambiente app esperado: ${expectedEnv}`,
-    `Ambientes coinciden: ${envMatches ? "SI" : "NO"}`,
+    `Ambiente backend por defecto: ${health.sriEnv || "desconocido"}`,
+    `Ambiente emisor/app: ${expectedEnv}`,
+    `Compatibilidad ambiente: ${envMatches ? "coincide con el valor por defecto" : "se usara el ambiente del comprobante"}`,
     `Base de datos: ${health.database?.engine || "desconocida"}`,
     `Ruta/host DB: ${health.database?.path || "desconocido"}`,
     `Autenticacion JWT: ${health.authRequired === false ? "INACTIVA" : "ACTIVA"}`,
@@ -37,7 +37,7 @@ export function formatBackendHealth(health: BackendHealthResponse, backendUrl: s
     "",
     envMatches
       ? "Listo para firmar/enviar con esta configuracion."
-      : "El ambiente de la app no coincide con el backend. Ajuste Ambiente en la app o SRI_ENV en backend/.env."
+      : "El backend acepta el ambiente indicado por cada comprobante. Verifique que el emisor este configurado en Pruebas o Produccion segun corresponda."
   ].join("\n");
 }
 

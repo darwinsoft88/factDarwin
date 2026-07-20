@@ -64,6 +64,7 @@ function summarizeSnapshot(data) {
     guides: data.guides?.length || 0,
     establishments: data.issuer?.establishments?.length || 0,
     documentScopes: scopeCounts,
+    creditPayments: data.creditPayments?.length || 0,
     receivedRetentions: data.receivedRetentions?.length || 0,
     inventoryMovements: data.inventoryMovements?.length || 0,
     auditLogs: data.auditLogs?.length || 0,
@@ -92,6 +93,7 @@ function compactSnapshotForStorage(data, options = {}) {
     inventoryMovements: newestItems(data.inventoryMovements || [], movementLimit),
     auditLogs: newestItems(data.auditLogs || [], auditLimit),
     cashClosings: compactDocuments(data.cashClosings || [], cashClosingDays, cashClosingLimit, now),
+    creditPayments: compactDocuments(data.creditPayments || [], cashClosingDays, cashClosingLimit, now),
     historyPolicy: {
       mode: "compact-local-snapshot",
       salesDays,
@@ -141,8 +143,8 @@ function assertEmissionPointLimit(data) {
 }
 
 function maxEmissionPointsForLicense(license = {}) {
-  if (license?.plan === "trial" || String(license?.plan || "").startsWith("pro_") || license?.plan === "pro") {
-    return Math.max(999, Number(license?.maxEmissionPoints || 999));
+  if (license?.plan === "trial" || String(license?.plan || "").startsWith("pro_") || String(license?.plan || "").startsWith("premium_") || license?.plan === "pro") {
+    return Math.max(1, Number(license?.maxEmissionPoints || (license?.plan === "trial" ? 3 : 999)));
   }
   return 1;
 }
@@ -188,7 +190,15 @@ function applySnapshotPatch(currentData, patch = {}) {
     };
   }
 
-  for (const field of ["users", "sales", "guides", "receivedRetentions", "cashClosings"]) {
+  if (Array.isArray(patch.creditPayments) && patch.creditPayments.length > 0) {
+    assertNoCreditOverpayments({
+      ...data,
+      sales: mergeById(data.sales || [], patch.sales || []),
+      creditPayments: mergeById(data.creditPayments || [], patch.creditPayments || [])
+    });
+  }
+
+  for (const field of ["users", "sales", "guides", "receivedRetentions", "cashClosings", "creditPayments"]) {
     data[field] = mergeById(data[field] || [], patch[field] || []);
   }
   data.clients = mergeByLatestUpdatedAt(data.clients || [], patch.clients || []);
@@ -230,7 +240,8 @@ function mergeDeletedIds(current = {}, incoming = {}, deletions = {}) {
   return {
     clients: mergeIdLists(current.clients, incoming.clients, deletions.clients),
     products: mergeIdLists(current.products, incoming.products, deletions.products),
-    users: mergeIdLists(current.users, incoming.users, deletions.users)
+    users: mergeIdLists(current.users, incoming.users, deletions.users),
+    inventoryMovements: mergeIdLists(current.inventoryMovements, incoming.inventoryMovements, deletions.inventoryMovements)
   };
 }
 
@@ -244,7 +255,7 @@ function mergeIdLists(...lists) {
 
 function applyDeletedIdFilters(data) {
   const deleted = data.deletedIds || {};
-  for (const field of ["clients", "products", "users"]) {
+  for (const field of ["clients", "products", "users", "inventoryMovements"]) {
     if (!Array.isArray(data[field])) continue;
     const ids = new Set(deleted[field] || []);
     data[field] = data[field].filter((item) => !ids.has(item?.id));
@@ -262,7 +273,46 @@ function normalizeDocumentScopes(data) {
   };
 
   applyDeletedIdFilters(normalized);
-  return normalized;
+  return reconcileCreditBalancesFromPayments(normalized);
+}
+
+function reconcileCreditBalancesFromPayments(data) {
+  if (!data || typeof data !== "object") return data;
+  const paidBySale = new Map();
+  for (const payment of Array.isArray(data.creditPayments) ? data.creditPayments : []) {
+    if (!payment?.saleId || payment.voidedAt) continue;
+    paidBySale.set(payment.saleId, roundMoney((paidBySale.get(payment.saleId) || 0) + Number(payment.amount || 0)));
+  }
+
+  const sales = (Array.isArray(data.sales) ? data.sales : []).map((sale) => {
+    if (sale?.paymentCondition !== "credito") return sale;
+    const paidAmount = paidBySale.get(sale.id) || 0;
+    const nextBalance = Math.max(0, roundMoney(Number(sale.total || 0) - paidAmount));
+    return {
+      ...sale,
+      creditBalance: nextBalance,
+      creditStatus: nextBalance <= 0 ? "pagado" : "pendiente"
+    };
+  });
+
+  return { ...data, sales };
+}
+
+function assertNoCreditOverpayments(data) {
+  const paidBySale = new Map();
+  for (const payment of Array.isArray(data.creditPayments) ? data.creditPayments : []) {
+    if (!payment?.saleId || payment.voidedAt) continue;
+    paidBySale.set(payment.saleId, roundMoney((paidBySale.get(payment.saleId) || 0) + Number(payment.amount || 0)));
+  }
+
+  for (const sale of Array.isArray(data.sales) ? data.sales : []) {
+    if (sale?.paymentCondition !== "credito") continue;
+    const total = roundMoney(Number(sale.total || 0));
+    const paid = paidBySale.get(sale.id) || 0;
+    if (paid > total + 0.009) {
+      throwBadSnapshot(`El abono supera el saldo real de ${sale.sequence || "la factura"}. Sincronice datos antes de cobrar nuevamente.`);
+    }
+  }
 }
 
 function normalizeScopedItems(items, issuer) {
@@ -381,6 +431,11 @@ function timestampOf(value) {
   return Number.isFinite(time) ? time : 0;
 }
 
+function roundMoney(value) {
+  const number = Number(value);
+  return Math.round((Number.isFinite(number) ? number : 0) * 100) / 100;
+}
+
 function prependUniqueById(currentItems, incomingItems) {
   const seen = new Set();
   const result = [];
@@ -406,6 +461,7 @@ module.exports = {
   normalizeClientIdentification,
   normalizeDocumentScopes,
   normalizeProductCode,
+  reconcileCreditBalancesFromPayments,
   normalizeTenantKey,
   normalizeUserEmail,
   scopeFromDocument,

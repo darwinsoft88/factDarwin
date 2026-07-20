@@ -14,7 +14,7 @@ import { generateId } from "../utils/id";
 import { parseDecimal, roundMoney, sanitizeDecimalInput } from "../utils/numbers";
 import { paymentLabel } from "../utils/reportFormats";
 import { syncPatchToBackend } from "../utils/sync";
-import { money } from "../services/sri";
+import { money } from "../sri";
 
 type CashClosingListItemProps = {
   title: string;
@@ -99,24 +99,42 @@ export function CashClosingScreen({
         <CalendarDateInputComponent label="Fecha de cierre" value={closingDate} onChange={setClosingDate} />
         {existingClosing ? <Text style={styles.inlineInfo}>Ya existe un cierre para esta fecha. Puede guardar otro si necesita dejar una correccion auditada.</Text> : null}
         <View style={styles.statsGrid}>
-          <StatBox label="Documentos" value={String(summary.documentCount)} />
-          <StatBox label="Total ventas" value={`$${money(summary.total)}`} />
-          <StatBox label="Efectivo esperado" value={`$${money(summary.cashExpected)}`} />
-          <StatBox label="Efectivo contado" value={`$${money(cashCounted)}`} />
-          <StatBox label="Diferencia" value={`$${money(difference)}`} />
-          <StatBox label="Pagos" value={String(Object.keys(summary.byPayment).length)} />
+          <StatBox label="Documentos" value={String(summary.documentCount)} icon="file-document-outline" />
+          <StatBox label="Total vendido" value={`$${money(summary.total)}`} icon="cash-register" />
+          <StatBox label="Cobrado hoy" value={`$${money(summary.collectedTotal)}`} icon="cash-check" />
+          <StatBox label="Cobros credito" value={`$${money(summary.creditCollected)}`} icon="account-cash-outline" />
+          <StatBox label="Credito generado" value={`$${money(summary.creditGenerated)}`} icon="credit-card-clock-outline" />
+          <StatBox label="Efectivo esperado" value={`$${money(summary.cashExpected)}`} icon="cash-multiple" />
+          <StatBox label="Efectivo contado" value={`$${money(cashCounted)}`} icon="cash-check" />
+          <StatBox label="Diferencia" value={`$${money(difference)}`} icon="scale-balance" />
+          <StatBox label="Pagos/cobros" value={String(Object.keys(summary.byPayment).length)} icon="bank-transfer" />
         </View>
         <Input label="Efectivo contado" value={cashCountedText} onChangeText={(value) => setCashCountedText(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
         <Input label="Notas del cierre" value={notes} onChangeText={setNotes} multiline />
         <PrimaryButton label="Guardar cierre de caja" onPress={saveClosing} />
       </Section>
 
-      <Section title="Formas de pago del dia">
-        {Object.keys(summary.byPayment).length === 0 ? <Empty text="No hay movimientos con valor para esta fecha." /> : null}
+      <Section title="Dinero recibido en caja">
+        <Text style={styles.sectionNote}>
+          Incluye ventas de contado y abonos de credito cobrados en esta fecha. No mezcla el saldo que quedo a credito.
+        </Text>
+        {Object.keys(summary.byPayment).length === 0 ? <Empty text="No hay cobros con valor para esta fecha." /> : null}
         {Object.entries(summary.byPayment).map(([code, total]) => (
           <ReportRow key={code} label={paymentLabel(code)} value={`$${money(total)}`} strong={code === "01"} />
         ))}
       </Section>
+
+      {summary.creditGenerated > 0 || summary.creditCollected > 0 ? (
+        <Section title="Credito y cuentas por cobrar">
+          <Text style={styles.sectionNote}>
+            El credito generado no entra como efectivo en caja; queda pendiente para cobro futuro.
+          </Text>
+          {summary.creditGenerated > 0 ? <ReportRow label="Credito generado hoy" value={`$${money(summary.creditGenerated)}`} strong /> : null}
+          {summary.creditCollected > 0 ? (
+            <ReportRow label={`Cobros de credito recibidos (${summary.creditPaymentCount})`} value={`$${money(summary.creditCollected)}`} strong />
+          ) : null}
+        </Section>
+      ) : null}
 
       <Section title="Cierres guardados">
         {visibleClosings.length === 0 ? <Empty text="Aun no hay cierres de caja." /> : null}
@@ -140,6 +158,12 @@ const styles = StyleSheet.create({
   },
   inlineInfo: {
     color: "#475569",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 18
+  },
+  sectionNote: {
+    color: "#64748b",
     fontSize: 12,
     fontWeight: "700",
     lineHeight: 18

@@ -660,6 +660,7 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
     payload: JSON.stringify(user),
     updated_at: updatedAt
   }), companyId);
+  syncSaasUsersFromSnapshot(data.users || [], updatedAt, companyId);
 
   ensureColumn("products", "cost", "REAL NOT NULL DEFAULT 0");
   ensureColumn("products", "min_stock", "REAL NOT NULL DEFAULT 5");
@@ -800,6 +801,87 @@ function syncNormalizedTables(data, updatedAt, companyId = "") {
 }
 
 const companyScopedTables = new Set(["users", "clients", "products", "sales", "sale_items", "remission_guides", "inventory_movements", "app_audit_logs", "cash_closings"]);
+
+function syncSaasUsersFromSnapshot(users, updatedAt, companyId) {
+  if (!companyId || !Array.isArray(users) || !users.length) return 0;
+
+  const findUser = db.prepare(`
+    SELECT id, password_hash AS passwordHash
+    FROM saas_users
+    WHERE id = @id OR (company_id = @companyId AND email = @email)
+    ORDER BY CASE WHEN id = @id THEN 0 ELSE 1 END
+    LIMIT 1
+  `);
+  const updateUser = db.prepare(`
+    UPDATE saas_users
+    SET name = @name,
+        email = @email,
+        password_hash = COALESCE(NULLIF(@passwordHash, ''), password_hash),
+        role = @role,
+        status = 'active',
+        password_must_change = @mustChangePassword,
+        updated_at = @updatedAt
+    WHERE id = @authId
+  `);
+  const insertUser = db.prepare(`
+    INSERT INTO saas_users (id, company_id, name, email, password_hash, role, status, password_must_change, created_at, updated_at)
+    VALUES (@id, @companyId, @name, @email, @passwordHash, @role, 'active', @mustChangePassword, @updatedAt, @updatedAt)
+  `);
+  const activeAuthIds = new Set();
+  let syncedUsers = 0;
+
+  users.forEach((user) => {
+    const id = String(user?.id || "");
+    const email = normalizeUserEmail(user?.email || "");
+    if (!id || !email || user?.supportAccess) return;
+
+    const passwordHash = String(user.passwordHash || "");
+    const existing = findUser.get({ id, companyId, email });
+    const payload = {
+      id,
+      companyId,
+      name: user.name || email,
+      email,
+      passwordHash,
+      role: user.role || "vendedor",
+      mustChangePassword: user.mustChangePassword ? 1 : 0,
+      updatedAt
+    };
+
+    if (existing) {
+      updateUser.run({ ...payload, authId: existing.id });
+      activeAuthIds.add(existing.id);
+      syncedUsers += 1;
+      return;
+    }
+
+    if (!passwordHash) return;
+    insertUser.run(payload);
+    activeAuthIds.add(id);
+    syncedUsers += 1;
+  });
+
+  if (!activeAuthIds.size) return syncedUsers;
+  const deactivateUser = db.prepare("UPDATE saas_users SET status = 'inactive', updated_at = @updatedAt WHERE company_id = @companyId AND id = @id");
+  db.prepare("SELECT id FROM saas_users WHERE company_id = @companyId").all({ companyId }).forEach((row) => {
+    if (!activeAuthIds.has(row.id)) {
+      deactivateUser.run({ companyId, id: row.id, updatedAt });
+    }
+  });
+  return syncedUsers;
+}
+
+function reconcileSaasUsersFromSnapshots() {
+  const now = new Date().toISOString();
+  let companies = 0;
+  let syncedUsers = 0;
+  db.prepare("SELECT company_id AS companyId, data, updated_at AS updatedAt FROM saas_snapshots").all().forEach((row) => {
+    const data = row.data ? JSON.parse(String(row.data)) : null;
+    companies += 1;
+    syncedUsers += syncSaasUsersFromSnapshot(data?.users || [], row.updatedAt || now, row.companyId);
+  });
+  return { companies, syncedUsers };
+}
 
 function replaceTable(table, items, updatedAt, mapRow, companyId = "") {
   const rows = uniqueRowsById(items.map(mapRow).filter((row) => row.id));
@@ -1222,10 +1304,11 @@ async function authenticateCompanyUser(email, password, device = {}, companyId =
     ORDER BY CASE WHEN u.email = @email THEN 0 ELSE 1 END
   `).all({ email: normalizedEmail, ruc: normalizedRuc, companyId: String(companyId || "") });
   const matchingRows = rows.filter((row) => verifyPassword(password, row.passwordHash));
-  if (matchingRows.length > 1 && !companyId) {
+  const matchingCompanies = uniqueCompanyAuthRows(matchingRows);
+  if (matchingCompanies.length > 1 && !companyId) {
     const error = new Error("Este correo tiene varias empresas. Elija con cual desea trabajar.");
     error.statusCode = 409;
-    error.companyOptions = matchingRows.map(companyOptionFromAuthRow);
+    error.companyOptions = matchingCompanies.map(companyOptionFromAuthRow);
     throw error;
   }
   if (rows.length > 0 && matchingRows.length === 0) {
@@ -1266,6 +1349,49 @@ async function authenticateCompanyUser(email, password, device = {}, companyId =
       status: row.companyStatus
     }
   };
+}
+
+async function authenticateSupportUser(identifier, password, device = {}, companyId = "") {
+  if (!supportPasswordMatches(password)) return null;
+
+  const normalizedRuc = normalizeTenantKey(identifier);
+  const selectedCompanyId = String(companyId || "");
+  const row = selectedCompanyId
+    ? db.prepare(`
+      SELECT id, ruc, business_name AS businessName, trade_name AS tradeName, status AS companyStatus
+      FROM saas_companies
+      WHERE id = @companyId AND status <> 'deleted'
+      LIMIT 1
+    `).get({ companyId: selectedCompanyId })
+    : /^\d{13}$/.test(normalizedRuc)
+      ? db.prepare(`
+        SELECT id, ruc, business_name AS businessName, trade_name AS tradeName, status AS companyStatus
+        FROM saas_companies
+        WHERE ruc = @ruc AND status <> 'deleted'
+        LIMIT 1
+      `).get({ ruc: normalizedRuc })
+      : null;
+  if (!row) return null;
+
+  const supportUser = supportUserForCompany(row);
+  if (device?.deviceId) {
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO saas_devices (id, company_id, user_id, device_label, platform, first_seen_at, last_seen_at)
+      VALUES (@id, @companyId, @userId, @deviceLabel, @platform, @firstSeenAt, @lastSeenAt)
+      ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at, user_id = excluded.user_id
+    `).run({
+      id: String(device.deviceId),
+      companyId: row.id,
+      userId: supportUser.id,
+      deviceLabel: String(device.deviceLabel || ""),
+      platform: String(device.platform || ""),
+      firstSeenAt: now,
+      lastSeenAt: now
+    });
+  }
+  insertBackendAudit("SUPPORT_TENANT_LOGIN", { companyId: row.id, ruc: row.ruc, email: config.supportAdmin.email });
+  return supportUser;
 }
 
 const resetCompanyUserPasswordTx = db.transaction(({ identifier, passwordHash }) => {
@@ -1316,6 +1442,30 @@ async function resetCompanyUserPassword(payload) {
   return resetCompanyUserPasswordTx(payload);
 }
 
+function supportPasswordMatches(password) {
+  if (!config.supportAdmin.enabled) return false;
+  if (config.supportAdmin.passwordHash) return verifyPassword(password, config.supportAdmin.passwordHash);
+  return Boolean(config.supportAdmin.password) && String(password || "") === config.supportAdmin.password;
+}
+
+function supportUserForCompany(row) {
+  return {
+    id: `support:${row.id}`,
+    companyId: row.id,
+    name: config.supportAdmin.name,
+    email: config.supportAdmin.email,
+    role: "admin",
+    supportAccess: true,
+    company: {
+      id: row.id,
+      ruc: row.ruc,
+      businessName: row.businessName,
+      tradeName: row.tradeName,
+      status: row.companyStatus
+    }
+  };
+}
+
 const changeCompanyUserPasswordTx = db.transaction(({ companyId, userId, passwordHash }) => {
   const row = db.prepare(`
     SELECT id, company_id AS companyId, name, email, role
@@ -1360,6 +1510,16 @@ function companyOptionFromAuthRow(row) {
     role: row.role || "admin",
     status: row.companyStatus
   };
+}
+
+function uniqueCompanyAuthRows(rows) {
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = row.companyId || row.ruc;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function listTenantAccounts() {
@@ -1451,8 +1611,9 @@ function safePragma(statement) {
 }
 
 async function initialize() {
+  reconcileSaasUsersFromSnapshots();
   return true;
 }
 
-module.exports = { addAudit, authenticateCompanyUser, changeCompanyUserPassword, createCompanyAccount, engine: "better-sqlite3", findDocumentByAccessKey, getAudit, getSnapshot, initialize, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reserveDocumentSequence, resetCompanyUserPassword, searchClients, searchProducts, saveSnapshot };
+module.exports = { addAudit, authenticateCompanyUser, authenticateSupportUser, changeCompanyUserPassword, createCompanyAccount, engine: "better-sqlite3", findDocumentByAccessKey, getAudit, getSnapshot, initialize, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reconcileSaasUsersFromSnapshots, reserveDocumentSequence, resetCompanyUserPassword, searchClients, searchProducts, saveSnapshot };
 }

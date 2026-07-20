@@ -5,6 +5,7 @@ import { Input, PrimaryButton } from "./common";
 type CompanyAssetsSectionProps = {
   assetStatus: string;
   assetStatusTone: "info" | "success" | "error";
+  logoUrl: string;
   uploading: boolean;
   checkingStatus: boolean;
   certificatePassword: string;
@@ -21,6 +22,7 @@ type CompanyAssetsSectionProps = {
 export function CompanyAssetsSection({
   assetStatus,
   assetStatusTone,
+  logoUrl,
   uploading,
   checkingStatus,
   certificatePassword,
@@ -37,6 +39,12 @@ export function CompanyAssetsSection({
     <>
       <Text style={styles.paragraph}>Estos archivos se guardan por empresa en el servidor. El certificado .p12 no se guarda en la app y queda cifrado.</Text>
       {assetStatus ? <Text style={[styles.inlineInfo, assetStatusTone === "success" && styles.successText, assetStatusTone === "error" && styles.errorText]}>{assetStatus}</Text> : null}
+      {logoUrl ? (
+        <View style={styles.assetInfoBox}>
+          <Text style={styles.assetInfoLabel}>URL logo RIDE</Text>
+          <Text style={styles.assetInfoValue} selectable>{logoUrl}</Text>
+        </View>
+      ) : null}
       <View style={styles.row}>
         <View style={styles.flex}>
           <PrimaryButton label={uploading ? "Procesando..." : "Subir logo"} onPress={uploading ? () => undefined : onUploadLogo} />
@@ -89,6 +97,24 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: "#b91c1c"
+  },
+  assetInfoBox: {
+    borderWidth: 1,
+    borderColor: "#dbe4f0",
+    borderRadius: 8,
+    backgroundColor: "#f8fafc",
+    padding: 10,
+    gap: 4
+  },
+  assetInfoLabel: {
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "900"
+  },
+  assetInfoValue: {
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: "700"
   },
   row: {
     flexDirection: "row",

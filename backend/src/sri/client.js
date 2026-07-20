@@ -10,7 +10,12 @@ const sriDispatcher = config.sriAllowInsecureTls
     })
   : undefined;
 
-async function sendToReception(signedXml) {
+function normalizeSriEnv(sriEnv) {
+  return sriEnv === "production" ? "production" : "test";
+}
+
+async function sendToReception(signedXml, sriEnv = config.sriEnv) {
+  const env = normalizeSriEnv(sriEnv);
   const xmlBase64 = Buffer.from(signedXml, "utf8").toString("base64");
   const envelope = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.recepcion">
@@ -22,10 +27,11 @@ async function sendToReception(signedXml) {
   </soapenv:Body>
 </soapenv:Envelope>`;
 
-  return postSoap(endpoints[config.sriEnv].reception, envelope);
+  return postSoap(endpoints[env].reception, envelope);
 }
 
-async function askAuthorization(accessKey) {
+async function askAuthorization(accessKey, sriEnv = config.sriEnv) {
+  const env = normalizeSriEnv(sriEnv);
   const envelope = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ec="http://ec.gob.sri.ws.autorizacion">
   <soapenv:Header/>
@@ -36,7 +42,7 @@ async function askAuthorization(accessKey) {
   </soapenv:Body>
 </soapenv:Envelope>`;
 
-  return postSoap(endpoints[config.sriEnv].authorization, envelope);
+  return postSoap(endpoints[env].authorization, envelope);
 }
 
 async function postSoap(url, envelope) {

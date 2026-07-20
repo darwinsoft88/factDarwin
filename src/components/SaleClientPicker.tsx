@@ -1,9 +1,10 @@
 import React from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { Client } from "../types";
 import { Empty, Input, LoadMoreButton } from "./common";
 import { SelectedClientCard } from "./SelectedClientCard";
-
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 type SaleClientPickerProps = {
   search: string;
   selectedClientId: string;
@@ -14,6 +15,7 @@ type SaleClientPickerProps = {
   onSearchChange: (value: string) => void;
   onClientChange: (value: string, client?: Client) => void;
   onLoadMore: () => void;
+  onCreateClient: () => void;
   onEditClient: () => void;
 };
 
@@ -27,6 +29,7 @@ export function SaleClientPicker({
   onSearchChange,
   onClientChange,
   onLoadMore,
+  onCreateClient,
   onEditClient
 }: SaleClientPickerProps) {
   const [pickerVisible, setPickerVisible] = React.useState(false);
@@ -39,60 +42,101 @@ export function SaleClientPicker({
     <>
       <View style={styles.compactHeader}>
         <Text style={styles.compactTitle}>Cliente</Text>
-        <Pressable style={styles.actionButton} onPress={() => setPickerVisible(true)}>
-          <Text style={styles.actionButtonText}>Cambiar cliente</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.actionButton} onPress={() => setPickerVisible(true)}>
+            <MaterialCommunityIcons
+              name="account-switch"
+              size={18}
+              color="#0f766e"
+            />
+            <Text style={styles.actionButtonText}>Cambiar cliente</Text>
+          </Pressable>
+          <Pressable style={styles.secondaryActionButton} onPress={onCreateClient}>
+            <MaterialCommunityIcons name="account-plus-outline" size={17} color="#0f766e" />
+            <Text style={styles.secondaryActionText}>Agregar</Text>
+          </Pressable>
+          
+        </View>
       </View>
       <SelectedClientCard client={selectedClient} onEdit={onEditClient} />
       <Modal visible={pickerVisible} transparent animationType="fade" onRequestClose={() => setPickerVisible(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setPickerVisible(false)}>
-          <Pressable style={styles.modalSheet}>
-            <View style={styles.modalHeader}>
-              <View style={styles.flex}>
-                <Text style={styles.modalTitle}>Buscar cliente</Text>
-                <Text style={styles.modalMeta}>Se muestran por bloques para trabajar rapido con bases grandes.</Text>
+        <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setPickerVisible(false)}>
+            <Pressable style={styles.modalSheet}>
+              <View style={styles.modalHeader}>
+                <View style={styles.flex}>
+                  <Text style={styles.modalTitle}>Buscar cliente</Text>
+                </View>
+                <Pressable style={styles.closeButton} onPress={() => setPickerVisible(false)}>
+                  <Text style={styles.closeButtonText}>Cerrar</Text>
+                </Pressable>
               </View>
-              <Pressable style={styles.closeButton} onPress={() => setPickerVisible(false)}>
-                <Text style={styles.closeButtonText}>Cerrar</Text>
-              </Pressable>
-            </View>
-            <Input label="Buscar cliente" value={search} onChangeText={onSearchChange} placeholder="Nombre, cedula o RUC" autoCapitalize="none" />
-            <View style={styles.resultHeader}>
-              <Text style={styles.resultLabel}>Clientes encontrados</Text>
-              <Text style={styles.resultCount}>{visibleClients.length}/{filteredClientCount}</Text>
-            </View>
-            <ScrollView style={styles.resultsBox} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-              {visibleClients.map((client) => {
-                const selected = client.id === selectedClientId;
-                return (
-                  <Pressable key={client.id} style={[styles.clientRow, selected && styles.clientRowSelected]} onPress={() => selectClient(client)}>
-                    <View style={styles.clientTextBlock}>
-                      <Text style={[styles.clientName, selected && styles.clientNameSelected]} numberOfLines={1}>{client.name}</Text>
-                      <Text style={styles.clientMeta} numberOfLines={2}>{client.identification}{client.email ? ` | ${client.email}` : ""}{client.phone ? ` | ${client.phone}` : ""}</Text>
-                    </View>
-                    {selected ? <Text style={styles.selectedPill}>Activo</Text> : null}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-            {filteredClientCount === 0 ? <Empty text="No hay clientes con esa busqueda." /> : null}
-            {canLoadMore ? <LoadMoreButton label="Cargar mas clientes" onPress={onLoadMore} /> : null}
+              <Input label="" value={search} onChangeText={onSearchChange} placeholder="Nombre, cedula o RUC" autoCapitalize="none" />
+              <View style={styles.resultHeader}>
+                <Text style={styles.resultLabel}>Clientes encontrados</Text>
+                <Text style={styles.resultCount}>{visibleClients.length}/{filteredClientCount}</Text>
+              </View>
+              <ScrollView style={styles.resultsBox} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                {visibleClients.map((client) => {
+                  const selected = client.id === selectedClientId;
+                  return (
+                    <Pressable key={client.id} style={[styles.clientRow, selected && styles.clientRowSelected]} onPress={() => selectClient(client)}>
+                      <View style={styles.clientTextBlock}>
+                        <Text style={[styles.clientName, selected && styles.clientNameSelected]} numberOfLines={1}>{client.name}</Text>
+                        <Text style={styles.clientMeta} numberOfLines={2}>{client.identification}{client.email ? ` | ${client.email}` : ""}{client.phone ? ` | ${client.phone}` : ""}</Text>
+                      </View>
+                      {selected ? <Text style={styles.selectedPill}>Activo</Text> : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              {filteredClientCount === 0 ? <Empty text="No hay clientes con esa busqueda." /> : null}
+              {canLoadMore ? <LoadMoreButton label="Cargar mas clientes" onPress={onLoadMore} /> : null}
+            </Pressable>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoiding: {
+    flex: 1
+  },
   compactHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 10
+    gap: 8
   },
   compactTitle: {
     color: "#111827",
+    fontWeight: "900",
+    flexShrink: 0
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 6,
+    flexShrink: 1
+  },
+  secondaryActionButton: {
+    minHeight: 38,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#0f766e",
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    gap: 5
+  },
+  secondaryActionText: {
+    color: "#0f5f59",
+    fontSize: 12,
     fontWeight: "900"
   },
   actionButton: {
@@ -103,17 +147,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#e6fffb",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 12
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    gap: 6,
+    flexShrink: 1
   },
   actionButtonText: {
     color: "#0f5f59",
+    fontSize: 12,
     fontWeight: "900"
   },
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.38)",
     justifyContent: "flex-end",
-    padding: 12
+    paddingHorizontal: MODAL_EDGE_PADDING,
+    paddingTop: MODAL_EDGE_PADDING,
+    paddingBottom: MODAL_SAFE_BOTTOM_PADDING
   },
   modalSheet: {
     maxHeight: "86%",
@@ -121,7 +171,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderWidth: 1,
     borderColor: "#e5e7eb",
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 12,
     gap: 10
   },
   modalHeader: {

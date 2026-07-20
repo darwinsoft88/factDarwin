@@ -1,0 +1,18 @@
+{
+  "accessKey": "2906202601172377209900110020100000001831234567815",
+  "status": "AUTORIZADO",
+  "authorizationNumber": "2906202601172377209900110020100000001831234567815",
+  "authorizationDate": "2026-06-29T09:47:33-05:00",
+  "hasXml": true,
+  "summary": {
+    "claveAcceso": "2906202601172377209900110020100000001831234567815",
+    "estab": "002",
+    "ptoEmi": "010",
+    "secuencial": "000000183",
+    "fechaEmision": "29/06/2026",
+    "razonSocialComprador": "CHACAN TAMAME JOSE DARWIN",
+    "identificacionComprador": "1723772099001",
+    "totalSinImpuestos": "65.22",
+    "importeTotal": "75.00"
+  }
+}

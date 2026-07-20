@@ -1,5 +1,5 @@
-import { initialData } from "../../storage";
-import { InventoryMovement, Product, Sale } from "../../types";
+import { initialData } from "../../database";
+import { CreditPayment, InventoryMovement, Product, Sale } from "../../types";
 import { mergeAppDataSnapshots } from "../dataMerge";
 import { normalizedEstablishments } from "../establishments";
 
@@ -43,6 +43,20 @@ function movement(id: string, quantity: number, createdAt: string): InventoryMov
     stockAfter: 10 - quantity,
     reason: "Venta facturada",
     userId: "user-1",
+    createdAt
+  };
+}
+
+function creditPayment(id: string, saleId: string, amount: number, createdAt: string): CreditPayment {
+  return {
+    id,
+    saleId,
+    clientId: "client-1",
+    userId: "user-1",
+    userName: "Vendedor",
+    amount,
+    paymentMethod: "01",
+    note: "",
     createdAt
   };
 }
@@ -206,5 +220,56 @@ describe("dataMerge", () => {
 
     expect(merged.products.find((item) => item.id === "prod-1")?.stock).toBe(8);
     expect(merged.inventoryMovements).toHaveLength(2);
+  });
+
+  it("rebuilds credit balance from payments when another device collected money", () => {
+    const creditSale = {
+      ...sale("sale-credit", "000000010", "2026-05-01T00:00:00.000Z"),
+      paymentCondition: "credito" as const,
+      total: 100,
+      creditBalance: 100,
+      creditStatus: "pendiente" as const
+    };
+    const remote = {
+      ...initialData,
+      sales: [{ ...creditSale, creditBalance: 50 }],
+      creditPayments: [creditPayment("remote-payment", "sale-credit", 50, "2026-05-01T00:00:01.000Z")]
+    };
+    const local = {
+      ...initialData,
+      sales: [creditSale],
+      creditPayments: []
+    };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.sales.find((item) => item.id === "sale-credit")?.creditBalance).toBe(50);
+    expect(merged.sales.find((item) => item.id === "sale-credit")?.creditStatus).toBe("pendiente");
+  });
+
+  it("drops local credit payments that would exceed the remote sale balance", () => {
+    const creditSale = {
+      ...sale("sale-credit", "000000164", "2026-05-01T00:00:00.000Z"),
+      paymentCondition: "credito" as const,
+      total: 100,
+      creditBalance: 100,
+      creditStatus: "pendiente" as const
+    };
+    const remote = {
+      ...initialData,
+      sales: [{ ...creditSale, creditBalance: 0, creditStatus: "pagado" as const }],
+      creditPayments: [creditPayment("remote-payment", "sale-credit", 100, "2026-05-01T00:00:01.000Z")]
+    };
+    const local = {
+      ...initialData,
+      sales: [creditSale],
+      creditPayments: [creditPayment("local-duplicate", "sale-credit", 25, "2026-05-01T00:00:02.000Z")]
+    };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.creditPayments.map((payment) => payment.id)).toEqual(["remote-payment"]);
+    expect(merged.sales.find((item) => item.id === "sale-credit")?.creditBalance).toBe(0);
+    expect(merged.sales.find((item) => item.id === "sale-credit")?.creditStatus).toBe("pagado");
   });
 });

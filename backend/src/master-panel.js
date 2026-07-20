@@ -77,6 +77,19 @@ function renderMasterPanel() {
     </section>
 
     <section>
+      <h2>Respaldo por empresa</h2>
+      <p>Exporta o restaura solo la empresa seleccionada. Antes de restaurar se genera automaticamente un backup completo de PostgreSQL.</p>
+      <div class="actions">
+        <button onclick="exportTenant()">Exportar empresa</button>
+        <button class="secondary" onclick="restoreTenant()">Restaurar empresa</button>
+      </div>
+      <p></p>
+      <label>Backup JSON para restaurar
+        <textarea id="tenantBackupJson" placeholder="Pegue aqui el JSON exportado de una empresa"></textarea>
+      </label>
+    </section>
+
+    <section>
       <h2 id="licenseTitle">Licencia legacy</h2>
       <div class="grid">
         <label>Estado
@@ -94,6 +107,8 @@ function renderMasterPanel() {
             <option value="basico_anual">Basico anual</option>
             <option value="pro_mensual">Pro mensual</option>
             <option value="pro_anual">Pro anual</option>
+            <option value="premium_mensual">Premium mensual</option>
+            <option value="premium_anual">Premium anual</option>
           </select>
         </label>
         <label>Inicio
@@ -131,6 +146,7 @@ function renderMasterPanel() {
         <button onclick="saveLicense()">Guardar licencia</button>
         <button class="secondary" onclick="activateBasic()">Activar Basico</button>
         <button class="secondary" onclick="activatePro()">Activar Pro</button>
+        <button class="secondary" onclick="activatePremium()">Activar Premium</button>
         <button class="secondary" onclick="renew(1)">Renovar 1 mes</button>
         <button class="secondary" onclick="renew(12)">Renovar 1 ano</button>
         <button class="secondary" onclick="suspendLicense()">Suspender</button>
@@ -178,13 +194,13 @@ function renderMasterPanel() {
       $("expiresAt").value = license.expiresAt || "";
       $("maxUsers").value = license.maxUsers || 3;
       $("maxDevices").value = license.maxDevices || 3;
-      $("maxEmissionPoints").value = license.maxEmissionPoints || (isProPlan(license.plan) || license.plan === "trial" ? 999 : 1);
+      $("maxEmissionPoints").value = license.maxEmissionPoints || (license.plan === "trial" ? 3 : isAdvancedPlan(license.plan) ? 999 : 1);
       $("featureSales").checked = license.features?.sales !== false;
       $("featureSri").checked = license.features?.sri !== false;
       $("featureInventory").checked = license.features?.inventory !== false;
       $("featureReports").checked = license.features?.reports !== false;
       $("featureMultiDevice").checked = license.features?.multiDevice !== false;
-      $("featureMultiEmissionPoint").checked = license.features?.multiEmissionPoint === true || isProPlan(license.plan) || license.plan === "trial";
+      $("featureMultiEmissionPoint").checked = license.features?.multiEmissionPoint === true || isAdvancedPlan(license.plan) || license.plan === "trial";
       $("notes").value = license.notes || "";
     }
 
@@ -192,11 +208,16 @@ function renderMasterPanel() {
       if (plan === "mensual") return "basico_mensual";
       if (plan === "anual") return "basico_anual";
       if (plan === "pro") return "pro_anual";
-      return ["trial", "basico_mensual", "basico_anual", "pro_mensual", "pro_anual"].includes(plan) ? plan : "trial";
+      return ["trial", "basico_mensual", "basico_anual", "pro_mensual", "pro_anual", "premium_mensual", "premium_anual"].includes(plan) ? plan : "trial";
     }
 
     function isProPlan(plan) {
       return String(normalizePlan(plan)).startsWith("pro_");
+    }
+
+    function isAdvancedPlan(plan) {
+      const normalized = String(normalizePlan(plan));
+      return normalized.startsWith("pro_") || normalized.startsWith("premium_");
     }
 
     function renderTenants() {
@@ -246,6 +267,75 @@ function renderMasterPanel() {
       selectedCompanyId = companyId;
       renderTenants();
       await loadLicense();
+    }
+
+    function selectedTenant() {
+      return tenants.find((item) => item.id === selectedCompanyId) || null;
+    }
+
+    function requireSelectedTenant() {
+      const tenant = selectedTenant();
+      if (!tenant) throw new Error("Seleccione una empresa primero.");
+      return tenant;
+    }
+
+    async function exportTenant() {
+      try {
+        const tenant = requireSelectedTenant();
+        setStatus("Exportando " + currentTenantName() + "...");
+        const response = await fetch("/api/master/tenants/" + encodeURIComponent(tenant.id) + "/export", { headers: headers() });
+        const data = await response.json();
+        show(data);
+        if (!response.ok) throw new Error(data.error || "No se pudo exportar la empresa.");
+        const text = JSON.stringify(data.backup, null, 2);
+        $("tenantBackupJson").value = text;
+        downloadJson("factudarwin-" + (tenant.ruc || tenant.id) + "-" + new Date().toISOString().slice(0, 10) + ".json", text);
+        setStatus("Empresa exportada correctamente.");
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+
+    async function restoreTenant() {
+      try {
+        const tenant = requireSelectedTenant();
+        const raw = $("tenantBackupJson").value.trim();
+        if (!raw) throw new Error("Pegue el backup JSON antes de restaurar.");
+        const backup = JSON.parse(raw);
+        const backupRuc = String(backup?.company?.ruc || "");
+        const expected = prompt("Confirme el RUC destino para restaurar " + currentTenantName() + ":", tenant.ruc || backupRuc);
+        if (!expected) return;
+        if (String(expected).trim() !== String(tenant.ruc || "").trim()) {
+          throw new Error("RUC de confirmacion no coincide con la empresa seleccionada.");
+        }
+        if (!confirm("Restaurar SOLO la empresa " + currentTenantName() + "? Se creara un backup completo antes de aplicar cambios.")) return;
+        setStatus("Restaurando empresa...");
+        const response = await fetch("/api/master/tenants/" + encodeURIComponent(tenant.id) + "/restore", {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({ backup, confirmRuc: expected })
+        });
+        const data = await response.json();
+        show(data);
+        if (!response.ok) throw new Error(data.error || "No se pudo restaurar la empresa.");
+        await loadTenants();
+        await loadLicense();
+        setStatus("Empresa restaurada correctamente.");
+      } catch (error) {
+        setStatus(error.message, true);
+      }
+    }
+
+    function downloadJson(filename, text) {
+      const blob = new Blob([text], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     }
 
     function readForm() {
@@ -336,6 +426,24 @@ function renderMasterPanel() {
       $("featureMultiDevice").checked = true;
       $("featureMultiEmissionPoint").checked = true;
       $("notes").value = "Licencia Pro activada desde panel maestro";
+      saveLicense();
+    }
+
+    function activatePremium() {
+      if (!confirm("Activar plan Premium para " + currentTenantName() + "?")) return;
+      const base = new Date();
+      base.setFullYear(base.getFullYear() + 1);
+      $("statusField").value = "active";
+      $("plan").value = "premium_anual";
+      $("expiresAt").value = base.toISOString().slice(0, 10);
+      $("maxEmissionPoints").value = 999;
+      $("featureSales").checked = true;
+      $("featureSri").checked = true;
+      $("featureInventory").checked = true;
+      $("featureReports").checked = true;
+      $("featureMultiDevice").checked = true;
+      $("featureMultiEmissionPoint").checked = true;
+      $("notes").value = "Licencia Premium activada desde panel maestro";
       saveLicense();
     }
 

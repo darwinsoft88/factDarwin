@@ -1,5 +1,5 @@
 import React from "react";
-import { money } from "../services/sri";
+import { money } from "../sri";
 import { Client, Issuer, ReceivedRetention, Sale } from "../types";
 import { formatShortDate } from "../utils/format";
 import { formatReceivedRetentionDetail } from "../utils/documentDetails";

@@ -1,4 +1,4 @@
-import { buildRemissionGuideXml, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal, money } from "../services/sri";
+import { buildRemissionGuideXml, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal, calculateTotalDiscount, money } from "../sri";
 import { Client, Issuer, RemissionGuide, Sale } from "../types";
 import { documentNumber } from "./documents";
 import { escapeHtml, formatGuideDate, formatShortDate } from "./format";
@@ -7,15 +7,18 @@ import { issuerTaxRegimeLabel } from "./taxRegime";
 
 export function buildInternalTicketHtml(sale: Sale, client: Client, issuer: Issuer, pageHeightMm = estimateTicketPageHeightMm(sale)) {
   const taxRegimeLegend = issuerTaxRegimeLabel(issuer);
+  const additionalInfo = formatSaleAdditionalInfoHtml(sale);
   const rows = sale.items
     .map(
       (item) => `
-        <tr>
-          <td>${escapeHtml(item.name)}</td>
-          <td class="right">${money(item.quantity)}</td>
-          <td class="right">${money(calculateLineTotal(item) / item.quantity)}</td>
-          <td class="right">${money(calculateLineTotal(item))}</td>
-        </tr>`
+        <div class="item">
+          <div class="item-main">
+            <strong>${escapeHtml(item.name)}</strong>
+            <strong>$${money(calculateLineTotal(item))}</strong>
+          </div>
+          <div class="muted">${escapeHtml(item.code)} | Cant. ${money(item.quantity)} x $${money(calculateLineTotal(item) / item.quantity)}</div>
+          ${calculateLineDiscount(item) > 0 ? `<div class="muted">Desc. $${money(calculateLineDiscount(item))}</div>` : ""}
+        </div>`
     )
     .join("");
 
@@ -26,26 +29,34 @@ export function buildInternalTicketHtml(sale: Sale, client: Client, issuer: Issu
   <style>
     @page { size: 80mm ${pageHeightMm}mm; margin: 0; }
     * { box-sizing: border-box; }
-    html, body { width: 80mm; min-height: ${pageHeightMm}mm; }
-    body { font-family: Arial, sans-serif; color: #111827; font-size: 11px; margin: 0; padding: 3mm; background: #e5e7eb; }
-    .ticket { width: 74mm; margin: 0 auto; padding: 4mm 3mm; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; }
-    h1 { font-size: 15px; text-align: center; margin: 0 0 4px; }
+    html, body { margin: 0; padding: 0; width: 80mm; min-height: ${pageHeightMm}mm; background: #fff; }
+    body { font-family: Arial, sans-serif; color: #111827; font-size: 11px; line-height: 1.3; }
+    .ticket { width: 80mm; padding: 4mm 4mm 5mm; background: #ffffff; }
+    h1 { font-size: 14px; text-align: center; margin: 0 0 2px; text-transform: uppercase; color: #0f172a; }
     .center { text-align: center; }
-    .muted { color: #64748b; font-size: 10px; }
-    .line { border-top: 1px dashed #94a3b8; margin: 8px 0; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td { padding: 4px 0; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
-    th { text-align: left; font-size: 10px; }
-    th:nth-child(2), th:nth-child(3), th:nth-child(4) { width: 17mm; }
-    td { overflow-wrap: anywhere; }
+    .muted { color: #475569; font-size: 10px; overflow-wrap: anywhere; }
+    .title { margin-top: 7px; padding: 6px 0; border-top: 1px dashed #94a3b8; border-bottom: 1px dashed #94a3b8; text-align: center; }
+    .title h2 { margin: 0 0 3px; font-size: 13px; color: #0f766e; }
+    .number { font-size: 10px; font-weight: 800; color: #111827; overflow-wrap: anywhere; }
+    .section { padding: 7px 0; border-bottom: 1px dashed #cbd5e1; }
+    .label { color: #334155; font-size: 9px; font-weight: 800; text-transform: uppercase; }
+    .value { margin-top: 2px; font-size: 11px; font-weight: 800; overflow-wrap: anywhere; }
+    .row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+    .row span:first-child { color: #475569; }
+    .row strong, .row span:last-child { text-align: right; }
+    .item { padding: 5px 0; border-top: 1px solid #e5e7eb; }
+    .item:first-child { border-top: 0; }
+    .item-main { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+    .item-main strong:first-child { max-width: 48mm; overflow-wrap: anywhere; }
+    .item-main strong:last-child { white-space: nowrap; text-align: right; }
     .right { text-align: right; }
-    .total { font-size: 15px; font-weight: 800; }
+    .total { color: #0f766e; font-size: 16px; font-weight: 900; }
     .meta { line-height: 1.35; overflow-wrap: anywhere; }
-    @media screen { .ticket { box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12); } }
+    .footer { padding-top: 8px; color: #64748b; font-size: 9px; text-align: center; }
+    @media screen { body { background: #f8fafc; padding: 10px; width: auto; } .ticket { margin: 0 auto; border: 1px solid #d8e1ec; box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08); } }
     @media print {
-      html, body { width: 80mm; min-height: ${pageHeightMm}mm; }
-      body { padding: 0; background: #ffffff; }
-      .ticket { width: 74mm; margin: 0 auto; padding: 3mm; border: 0; border-radius: 0; box-shadow: none; }
+      body { padding: 0; background: #ffffff; width: 80mm; }
+      .ticket { margin: 0; border: 0; box-shadow: none; }
     }
   </style>
 </head>
@@ -56,25 +67,33 @@ export function buildInternalTicketHtml(sale: Sale, client: Client, issuer: Issu
     <div class="center muted">RUC ${escapeHtml(issuer.ruc)}</div>
     ${taxRegimeLegend ? `<div class="center muted">${escapeHtml(taxRegimeLegend)}</div>` : ""}
     <div class="center muted">${escapeHtml(issuer.address)}</div>
-    <div class="line"></div>
-    <div class="meta"><strong>TICKET OFFLINE</strong></div>
-    <div class="meta">No. ${escapeHtml(documentNumber(sale, issuer))}</div>
-    <div class="meta">Fecha: ${escapeHtml(formatShortDate(sale.createdAt))}</div>
-    <div class="meta">Cliente: ${escapeHtml(client.name)}</div>
-    <div class="meta">Identificacion: ${escapeHtml(client.identification)}</div>
-    <div class="line"></div>
-    <table>
-      <thead><tr><th>Producto</th><th class="right">Cant.</th><th class="right">P.Unit</th><th class="right">Total</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="line"></div>
-    <table>
-      <tr><td>Subtotal</td><td class="right">${money(sale.subtotal)}</td></tr>
-      <tr><td>IVA ref.</td><td class="right">${money(sale.tax)}</td></tr>
-      <tr><td class="total">TOTAL</td><td class="right total">${money(sale.total)}</td></tr>
-    </table>
-    <div class="line"></div>
-    <div class="center muted">Documento interno no tributario</div>
+    <div class="title">
+      <h2>${sale.status === "TICKET_OFFLINE" ? "TICKET OFFLINE" : "NOTA DE VENTA"}</h2>
+      <div class="number">${escapeHtml(documentNumber(sale, issuer))}</div>
+      <div class="muted">Fecha: ${escapeHtml(formatShortDate(sale.createdAt))}</div>
+    </div>
+
+    <div class="section">
+      <div class="label">Cliente</div>
+      <div class="value">${escapeHtml(client.name)}</div>
+      <div class="muted">${escapeHtml(client.identification)}${client.email ? ` | ${escapeHtml(client.email)}` : ""}</div>
+      <div class="muted">${escapeHtml(client.address || "")}</div>
+    </div>
+
+    <div class="section">
+      <div class="label">Detalle</div>
+      ${rows}
+    </div>
+
+    <div class="section">
+      <div class="row"><span>Subtotal</span><strong>$${money(sale.subtotal)}</strong></div>
+      ${calculateTotalDiscount(sale.items) > 0 ? `<div class="row"><span>Descuento</span><strong>$${money(calculateTotalDiscount(sale.items))}</strong></div>` : ""}
+      <div class="row"><span>IVA ref.</span><strong>$${money(sale.tax)}</strong></div>
+      <div class="row"><span class="total">TOTAL</span><strong class="total">$${money(sale.total)}</strong></div>
+    </div>
+
+    ${additionalInfo ? `<div class="section"><div class="label">Informacion adicional</div><div class="meta">${additionalInfo}</div></div>` : ""}
+    <div class="footer">Documento interno no tributario. No reemplaza un comprobante autorizado por el SRI.</div>
   </div>
 </body>
 </html>`;
@@ -82,6 +101,7 @@ export function buildInternalTicketHtml(sale: Sale, client: Client, issuer: Issu
 
 export function buildProformaHtml(sale: Sale, client: Client, issuer: Issuer) {
   const taxRegimeLegend = issuerTaxRegimeLabel(issuer);
+  const additionalInfo = formatSaleAdditionalInfoHtml(sale);
   const rows = sale.items
     .map(
       (item) => `
@@ -174,6 +194,7 @@ export function buildProformaHtml(sale: Sale, client: Client, issuer: Issuer) {
     </thead>
     <tbody>${rows}</tbody>
   </table>
+  ${additionalInfo ? `<div class="box"><strong>Informacion adicional</strong><br/>${additionalInfo}</div>` : ""}
   <div class="note">Documento comercial no tributario. No descuenta inventario y no reemplaza factura autorizada.</div>
   </div>
 </body>
@@ -340,6 +361,8 @@ export function buildGuideRideHtml(guide: RemissionGuide, client: Client, issuer
   const environment = guide.sriEnvironment || (issuer.environment === "1" ? "PRUEBAS" : "PRODUCCION");
   const authorization = guide.authorizationNumber || guide.accessKey;
   const sourceNumber = source ? documentNumber(source, issuer) : "Sin sustento";
+  const logoUrl = String(issuer.logoUrl || "").trim();
+  const logo = logoUrl ? `<img class="logo-img" src="${escapeHtml(logoUrl)}" />` : "NO TIENE LOGO";
   const rows = guide.items
     .map(
       (item) => `
@@ -391,7 +414,7 @@ export function buildGuideRideHtml(guide: RemissionGuide, client: Client, issuer
   <div class="sheet">
     <div class="top">
       <div class="left-head">
-        <div class="logo">${issuer.logoUrl ? `<img class="logo-img" src="${escapeHtml(issuer.logoUrl)}" />` : "NO TIENE LOGO"}</div>
+        <div class="logo">${logo}</div>
         <div class="box issuer">
         <div class="issuer-info">
           <div class="company">${escapeHtml(issuer.businessName)}</div>
@@ -467,4 +490,15 @@ export function buildGuideRideHtml(guide: RemissionGuide, client: Client, issuer
   </div>
 </body>
 </html>`;
+}
+
+function formatSaleAdditionalInfoHtml(sale: Sale) {
+  return (sale.additionalInfo || [])
+    .map((field) => {
+      const name = String(field.name || "").trim();
+      const value = String(field.value || "").trim();
+      return name && value ? `<strong>${escapeHtml(name)}:</strong> ${escapeHtml(value)}<br/>` : "";
+    })
+    .filter(Boolean)
+    .join("");
 }

@@ -2,9 +2,22 @@ export function pickWebFile(accept: string): Promise<File | null> {
   if (typeof document === "undefined") return Promise.resolve(null);
   return new Promise((resolve) => {
     const input = document.createElement("input");
+    let resolved = false;
+    const finish = (file: File | null) => {
+      if (resolved) return;
+      resolved = true;
+      window.removeEventListener("focus", handleFocus);
+      resolve(file);
+    };
+    const handleFocus = () => {
+      window.setTimeout(() => {
+        finish(input.files?.[0] || null);
+      }, 300);
+    };
     input.type = "file";
     input.accept = accept;
-    input.onchange = () => resolve(input.files?.[0] || null);
+    input.onchange = () => finish(input.files?.[0] || null);
+    window.addEventListener("focus", handleFocus);
     input.click();
   });
 }

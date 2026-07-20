@@ -3,7 +3,7 @@ import * as Sharing from "expo-sharing";
 import React, { useCallback, useMemo, useState } from "react";
 import { checkBackendHealth, getTechnicalLogs, TechnicalLog } from "../services/backend";
 import { AppData, User } from "../types";
-import { canAccessSensitiveSupport } from "../utils/appAccess";
+import { canAccessDeveloperTools } from "../utils/appAccess";
 import { showMessage } from "../utils/dialogs";
 import { buildSupportDiagnostic, SyncState } from "../utils/support";
 
@@ -31,7 +31,7 @@ export function useSupportDiagnostics({ backendTokenRef, dataRef, sessionRef, sy
     try {
       const health = current.backendUrl ? await checkBackendHealth(current.backendUrl) : undefined;
       let logs: TechnicalLog[] = [];
-      if (sessionRef.current && canAccessSensitiveSupport(sessionRef.current.role) && backendTokenRef.current) {
+      if (sessionRef.current && canAccessDeveloperTools(sessionRef.current) && backendTokenRef.current) {
         try {
           logs = await getTechnicalLogs(current.backendUrl, backendTokenRef.current, 8);
         } catch {

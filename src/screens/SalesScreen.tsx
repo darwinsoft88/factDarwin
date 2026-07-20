@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { StyleSheet, View } from "react-native";
 import { ReceivedRetentionsSection } from "../components/ReceivedRetentionsSection";
 import { SaleFormSection } from "../components/SaleFormSection";
@@ -13,63 +13,135 @@ import { useSaleDocumentActions } from "../hooks/useSaleDocumentActions";
 import { useSaleDocumentWorkflowActions } from "../hooks/useSaleDocumentWorkflowActions";
 import { useSaleIssueFlow } from "../hooks/useSaleIssueFlow";
 import { useSaleLineEditor } from "../hooks/useSaleLineEditor";
+import { useSaleFormState } from "../hooks/useSaleFormState";
 import { useSalesDocumentList } from "../hooks/useSalesDocumentList";
+import { useSalesDocumentFilters, useSalesDocumentPagination } from "../hooks/useSalesDocumentFilters";
 import { useQuickSaleClientEditor } from "../hooks/useQuickSaleClientEditor";
+import { useCreditNoteFormState } from "../hooks/useCreditNoteFormState";
 import { useReceivedRetentionActions } from "../hooks/useReceivedRetentionActions";
-import { money } from "../services/sri";
-import { AppData, Client, DocumentType, PaymentMethod, Product, RetentionTaxType, SaleItem, User } from "../types";
-import { toInputDate } from "../utils/format";
+import { useReceivedRetentionFormState } from "../hooks/useReceivedRetentionFormState";
+import { money, nextSequence } from "../sri";
+import { activeEstablishment } from "../utils/establishments";
+import { nextInternalSequence, nextProformaSequence } from "../utils/sales";
+import { AppData, DocumentType, Sale, User } from "../types";
 
-export function SalesScreen({ data, user, backendToken, persist, onXml }: { data: AppData; user: User; backendToken: string; persist: (data: AppData) => Promise<void>; onXml: (xml: string) => void }) {
-  const [clientId, setClientId] = useState(data.clients[0]?.id ?? "");
-  const [productId, setProductId] = useState(data.products[0]?.id ?? "");
-  const [quantity, setQuantity] = useState("1");
-  const [unitGrossPrice, setUnitGrossPrice] = useState(data.products[0] ? money(data.products[0].price) : "");
-  const [grossDiscount, setGrossDiscount] = useState("0");
-  const [discountMode, setDiscountMode] = useState<"amount" | "percent">("amount");
-  const [documentType, setDocumentType] = useState<DocumentType>("factura");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("01");
-  const [items, setItems] = useState<SaleItem[]>([]);
-  const [editingSaleId, setEditingSaleId] = useState("");
-  const [sourceTicketId, setSourceTicketId] = useState("");
-  const [sourceProformaId, setSourceProformaId] = useState("");
-  const [issuing, setIssuing] = useState(false);
-  const [retryingSaleId, setRetryingSaleId] = useState("");
-  const [notice, setNotice] = useState("");
-  const [issueNotice, setIssueNotice] = useState("");
-  const [clientSearch, setClientSearch] = useState("");
-  const [productSearch, setProductSearch] = useState("");
-  const [saleScannerVisible, setSaleScannerVisible] = useState(false);
-  const [invoiceSearch, setInvoiceSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("TODAS");
-  const [saleStartDate, setSaleStartDate] = useState("");
-  const [saleEndDate, setSaleEndDate] = useState("");
-  const [visibleClientCount, setVisibleClientCount] = useState(LIST_BATCH_SIZE);
-  const [visibleProductCount, setVisibleProductCount] = useState(LIST_BATCH_SIZE);
-  const [visibleSaleCount, setVisibleSaleCount] = useState(LIST_BATCH_SIZE);
-  const [remoteClientResults, setRemoteClientResults] = useState<{ items: Client[]; total: number } | null>(null);
-  const [remoteProductResults, setRemoteProductResults] = useState<{ items: Product[]; total: number } | null>(null);
-  const [selectedRemoteClient, setSelectedRemoteClient] = useState<Client | null>(null);
-  const [creditNoteSourceId, setCreditNoteSourceId] = useState("");
-  const [creditNoteReason, setCreditNoteReason] = useState("Devolucion parcial");
-  const [creditNoteQuantities, setCreditNoteQuantities] = useState<Record<string, string>>({});
-  const [issuingCreditNote, setIssuingCreditNote] = useState(false);
-  const [processingMessage, setProcessingMessage] = useState("");
-  const [retentionSaleId, setRetentionSaleId] = useState("");
-  const [retentionTaxType, setRetentionTaxType] = useState<RetentionTaxType>("IVA");
-  const [retentionBase, setRetentionBase] = useState("");
-  const [retentionPercentage, setRetentionPercentage] = useState("");
-  const [retentionAmount, setRetentionAmount] = useState("");
-  const [retentionDocumentNumber, setRetentionDocumentNumber] = useState("");
-  const [retentionAuthorizationNumber, setRetentionAuthorizationNumber] = useState("");
-  const [retentionReceivedAt, setRetentionReceivedAt] = useState(toInputDate(new Date()));
-  const [retentionNotes, setRetentionNotes] = useState("");
+type SalesScreenMode = "sale" | "documents";
+
+export function SalesScreen({
+  data,
+  user,
+  backendToken,
+  persist,
+  onXml,
+  mode = "sale"
+}: {
+  data: AppData;
+  user: User;
+  backendToken: string;
+  persist: (data: AppData) => Promise<void>;
+  onXml: (xml: string) => void;
+  mode?: SalesScreenMode;
+}) {
+  const {
+    clientId,
+    clientSearch,
+    discountMode,
+    documentType,
+    editingSaleId,
+    grossDiscount,
+    issueNotice,
+    issuing,
+    items,
+    notice,
+    paymentMethod,
+    salePayments,
+    paymentCondition,
+    creditDueDate,
+    processingMessage,
+    productId,
+    productSearch,
+    quantity,
+    remoteClientResults,
+    remoteProductResults,
+    resetSaleInputs,
+    retryingSaleId,
+    saleScannerVisible,
+    selectedRemoteClient,
+    sourceProformaId,
+    sourceTicketId,
+    unitGrossPrice,
+    visibleClientCount,
+    visibleProductCount,
+    setClientId,
+    setClientSearch,
+    setDiscountMode,
+    setDocumentType,
+    setEditingSaleId,
+    setGrossDiscount,
+    additionalInfo,
+    additionalInfoVisible,
+    setIssueNotice,
+    setIssuing,
+    setItems,
+    setAdditionalInfo,
+    setAdditionalInfoVisible,
+    setNotice,
+    setPaymentMethod,
+    setSalePayments,
+    setPaymentCondition,
+    setCreditDueDate,
+    setProcessingMessage,
+    setProductId,
+    setProductSearch,
+    setQuantity,
+    setRemoteClientResults,
+    setRemoteProductResults,
+    setRetryingSaleId,
+    setSaleScannerVisible,
+    setSelectedRemoteClient,
+    setSourceProformaId,
+    setSourceTicketId,
+    setUnitGrossPrice,
+    setVisibleClientCount,
+    setVisibleProductCount
+  } = useSaleFormState(data);
+  const {
+    creditNoteQuantities,
+    creditNoteReason,
+    creditNoteSourceId,
+    issuingCreditNote,
+    setCreditNoteQuantities,
+    setCreditNoteReason,
+    setCreditNoteSourceId,
+    setIssuingCreditNote
+  } = useCreditNoteFormState();
+  const {
+    retentionAmount,
+    retentionAuthorizationNumber,
+    retentionBase,
+    retentionDocumentNumber,
+    retentionNotes,
+    retentionPercentage,
+    retentionReceivedAt,
+    retentionSaleId,
+    retentionTaxType,
+    setRetentionAmount,
+    setRetentionAuthorizationNumber,
+    setRetentionBase,
+    setRetentionDocumentNumber,
+    setRetentionNotes,
+    setRetentionPercentage,
+    setRetentionReceivedAt,
+    setRetentionSaleId,
+    setRetentionTaxType
+  } = useReceivedRetentionFormState();
 
   const {
     clientsForSale,
     filteredClientCount,
     filteredClientsForSale,
     filteredProductCount,
+    filteredProductsForSale,
     selectedClient,
     selectedProduct,
     visibleClientsForSale,
@@ -137,12 +209,17 @@ export function SalesScreen({ data, user, backendToken, persist, onXml }: { data
     setIssueNotice,
     setItems,
     sourceProforma,
-    sourceTicket
+    sourceTicket,
+    userRole: user.role
   });
 
   const {
+    lookingUpQuickClient,
+    lookupQuickClientIdentification,
+    openQuickClientCreator,
     openQuickClientEditor,
     quickClientForm,
+    quickClientMode,
     quickClientVisible,
     saveQuickClient,
     setQuickClientForm,
@@ -163,10 +240,10 @@ export function SalesScreen({ data, user, backendToken, persist, onXml }: { data
     setUnitGrossPrice(selectedProduct ? money(selectedProduct.price) : "");
     setGrossDiscount("0");
     setDiscountMode("amount");
-  }, [productId, selectedProduct]);
+  }, [productId, selectedProduct, setDiscountMode, setGrossDiscount, setUnitGrossPrice]);
 
   const {
-    addItem,
+    addProductById,
     addProductSearchSubmit,
     addScannedCodeToSale,
     selectClientForSale,
@@ -196,39 +273,46 @@ export function SalesScreen({ data, user, backendToken, persist, onXml }: { data
     setUnitGrossPrice,
     sourceProforma,
     sourceTicket,
-    unitGrossPrice
+    unitGrossPrice,
+    userRole: user.role
   });
+  const nextDocumentLabel = saleNextDocumentLabel(data, documentType, editingSale, sourceTicket, sourceProforma);
+
+  const {
+    clearSalesDateRange,
+    invoiceSearch,
+    saleEndDate,
+    saleStartDate,
+    setInvoiceSearch,
+    setSaleEndDate,
+    setSalesDateRangeMonth,
+    setSalesDateRangeToday,
+    setSaleStartDate,
+    setStatusFilter,
+    statusFilter
+  } = useSalesDocumentFilters();
 
   const {
     filteredSales,
-    invoiceStats,
-    visibleSales
+    invoiceStats
   } = useSalesDocumentList({
     data,
     invoiceSearch,
     saleEndDate,
     saleStartDate,
-    setVisibleSaleCount,
-    statusFilter,
-    visibleSaleCount
+    statusFilter
   });
-
-  const setSalesDateRangeToday = () => {
-    const today = toInputDate(new Date());
-    setSaleStartDate(today);
-    setSaleEndDate(today);
-  };
-
-  const setSalesDateRangeMonth = () => {
-    const now = new Date();
-    setSaleStartDate(toInputDate(new Date(now.getFullYear(), now.getMonth(), 1)));
-    setSaleEndDate(toInputDate(now));
-  };
-
-  const clearSalesDateRange = () => {
-    setSaleStartDate("");
-    setSaleEndDate("");
-  };
+  const {
+    salePagination,
+    setSalePage,
+    visibleSales
+  } = useSalesDocumentPagination({
+    filteredSales,
+    invoiceSearch,
+    saleEndDate,
+    saleStartDate,
+    statusFilter
+  });
 
   const { issue } = useSaleIssueFlow({
     backendToken,
@@ -237,14 +321,20 @@ export function SalesScreen({ data, user, backendToken, persist, onXml }: { data
     documentType,
     editingSale,
     items,
+    additionalInfo,
     paymentMethod,
+    salePayments,
+    paymentCondition,
+    creditDueDate,
     persist,
+    resetSaleInputs,
     selectedClient,
     setDocumentType,
     setEditingSaleId,
     setIssueNotice,
     setIssuing,
     setItems,
+    setAdditionalInfo,
     setProcessingMessage,
     setSourceProformaId,
     setSourceTicketId,
@@ -340,8 +430,12 @@ export function SalesScreen({ data, user, backendToken, persist, onXml }: { data
     setEditingSaleId,
     setIssueNotice,
     setItems,
+    setAdditionalInfo,
     setNotice,
     setPaymentMethod,
+    setSalePayments,
+    setPaymentCondition,
+    setCreditDueDate,
     setProcessingMessage,
     setRetryingSaleId,
     setSourceProformaId,
@@ -350,88 +444,107 @@ export function SalesScreen({ data, user, backendToken, persist, onXml }: { data
   });
   return (
     <View style={styles.stack}>
-      <SaleFormSection
-        addItem={addItem}
-        addProductSearchSubmit={addProductSearchSubmit}
-        adjustSaleLineQuantity={adjustSaleLineQuantity}
-        cancelEdit={cancelEdit}
-        clientId={clientId}
-        clientSearch={clientSearch}
-        documentType={documentType}
-        editingSale={editingSale}
-        filteredClientCount={filteredClientCount}
-        filteredProductCount={filteredProductCount}
-        issue={issue}
-        issueNotice={issueNotice}
-        issuing={issuing}
-        items={items}
-        onOpenScanner={() => setSaleScannerVisible(true)}
-        openLineEditor={openLineEditor}
-        openQuickClientEditor={openQuickClientEditor}
-        paymentMethod={paymentMethod}
-        productId={productId}
-        productSearch={productSearch}
-        projectedStock={selectedProductProjectedStock}
-        saleSummaryTotals={saleSummaryTotals}
-        selectClientForSale={selectClientForSale}
-        selectProductForSale={selectProductForSale}
-        selectedClient={selectedClient}
-        selectedProduct={selectedProduct}
-        selectedProductLowStock={selectedProductLowStock}
-        setClientSearch={setClientSearch}
-        setDocumentType={setDocumentType}
-        setIssueNotice={setIssueNotice}
-        setItems={setItems}
-        setPaymentMethod={setPaymentMethod}
-        setProductSearch={setProductSearch}
-        setVisibleClientCount={setVisibleClientCount}
-        setVisibleProductCount={setVisibleProductCount}
-        sourceProforma={sourceProforma}
-        sourceTicket={sourceTicket}
-        visibleClientsForSale={visibleClientsForSale}
-        visibleProductsForSale={visibleProductsForSale}
-      />
+      {mode === "sale" ? (
+        <SaleFormSection
+          addProductById={addProductById}
+          addProductSearchSubmit={addProductSearchSubmit}
+          additionalInfo={additionalInfo}
+          adjustSaleLineQuantity={adjustSaleLineQuantity}
+          cancelEdit={cancelEdit}
+          clientId={clientId}
+          clientSearch={clientSearch}
+          documentType={documentType}
+          editingSale={editingSale}
+          filteredClientCount={filteredClientCount}
+          filteredProductCount={filteredProductCount}
+          filteredProductsForSale={filteredProductsForSale}
+          issue={issue}
+          issueNotice={issueNotice}
+          issuing={issuing}
+          items={items}
+          onOpenScanner={() => setSaleScannerVisible(true)}
+          openLineEditor={openLineEditor}
+          openQuickClientCreator={openQuickClientCreator}
+          openQuickClientEditor={openQuickClientEditor}
+          nextDocumentLabel={nextDocumentLabel}
+          paymentCondition={paymentCondition}
+          creditDueDate={creditDueDate}
+          paymentMethod={paymentMethod}
+          salePayments={salePayments}
+          productId={productId}
+          productSearch={productSearch}
+          projectedStock={selectedProductProjectedStock}
+          saleSummaryTotals={saleSummaryTotals}
+          selectClientForSale={selectClientForSale}
+          selectProductForSale={selectProductForSale}
+          selectedClient={selectedClient}
+          selectedProduct={selectedProduct}
+          selectedProductLowStock={selectedProductLowStock}
+          setClientSearch={setClientSearch}
+          setDocumentType={setDocumentType}
+          setIssueNotice={setIssueNotice}
+          setItems={setItems}
+          setAdditionalInfoVisible={setAdditionalInfoVisible}
+          setPaymentCondition={setPaymentCondition}
+          setCreditDueDate={setCreditDueDate}
+          setPaymentMethod={setPaymentMethod}
+          setSalePayments={setSalePayments}
+          setProductSearch={setProductSearch}
+          setVisibleClientCount={setVisibleClientCount}
+          setVisibleProductCount={setVisibleProductCount}
+          sourceProforma={sourceProforma}
+          sourceTicket={sourceTicket}
+          visibleClientsForSale={visibleClientsForSale}
+          visibleProductsForSale={visibleProductsForSale}
+        />
+      ) : (
+        <>
+          <SalesDocumentsSection
+            cancelDocument={voidSale}
+            convertProforma={convertProforma}
+            createCreditNoteRide={createCreditNoteRide}
+            createProforma={createProforma}
+            createRide={createRide}
+            createTicket={createTicket}
+            data={data}
+            editSale={editSale}
+            emailSale={emailSale}
+            endDate={saleEndDate}
+            filteredSales={filteredSales}
+            invoiceFromTicket={invoiceFromTicket}
+            invoiceSearch={invoiceSearch}
+            invoiceStats={invoiceStats}
+            notice={notice}
+            onClearDates={clearSalesDateRange}
+            onMonth={setSalesDateRangeMonth}
+            onToday={setSalesDateRangeToday}
+            onXml={onXml}
+            openCreditNoteForm={openCreditNoteForm}
+            openRetentionForm={openRetentionForm}
+            retrySale={retrySale}
+            retryingSaleId={retryingSaleId}
+            setEndDate={setSaleEndDate}
+            setInvoiceSearch={setInvoiceSearch}
+            setNotice={setNotice}
+            setStartDate={setSaleStartDate}
+            setStatusFilter={setStatusFilter}
+            startDate={saleStartDate}
+            statusFilter={statusFilter}
+            user={user}
+            salePage={salePagination.currentPage}
+            salePageSize={LIST_BATCH_SIZE}
+            setSalePage={setSalePage}
+            visibleSales={visibleSales}
+            whatsappSale={whatsappSale}
+          />
 
-      <SalesDocumentsSection
-        cancelDocument={voidSale}
-        convertProforma={convertProforma}
-        createCreditNoteRide={createCreditNoteRide}
-        createProforma={createProforma}
-        createRide={createRide}
-        createTicket={createTicket}
-        data={data}
-        editSale={editSale}
-        emailSale={emailSale}
-        endDate={saleEndDate}
-        filteredSales={filteredSales}
-        invoiceFromTicket={invoiceFromTicket}
-        invoiceSearch={invoiceSearch}
-        invoiceStats={invoiceStats}
-        notice={notice}
-        onClearDates={clearSalesDateRange}
-        onMonth={setSalesDateRangeMonth}
-        onToday={setSalesDateRangeToday}
-        onXml={onXml}
-        openCreditNoteForm={openCreditNoteForm}
-        openRetentionForm={openRetentionForm}
-        retrySale={retrySale}
-        retryingSaleId={retryingSaleId}
-        setEndDate={setSaleEndDate}
-        setInvoiceSearch={setInvoiceSearch}
-        setNotice={setNotice}
-        setStartDate={setSaleStartDate}
-        setStatusFilter={setStatusFilter}
-        setVisibleSaleCount={setVisibleSaleCount}
-        startDate={saleStartDate}
-        statusFilter={statusFilter}
-        user={user}
-        visibleSales={visibleSales}
-        whatsappSale={whatsappSale}
-      />
-
-      <ReceivedRetentionsSection data={data} user={user} onXml={onXml} />
+          <ReceivedRetentionsSection data={data} user={user} onXml={onXml} />
+        </>
+      )}
 
       <SalesModals
+        additionalInfo={additionalInfo}
+        additionalInfoVisible={additionalInfoVisible}
         addScannedCodeToSale={addScannedCodeToSale}
         closeCreditNoteForm={closeCreditNoteForm}
         closeLineEditor={closeLineEditor}
@@ -447,8 +560,11 @@ export function SalesScreen({ data, user, backendToken, persist, onXml }: { data
         issuingCreditNote={issuingCreditNote}
         items={items}
         lineEditForm={lineEditForm}
+        lookingUpQuickClient={lookingUpQuickClient}
+        lookupQuickClientIdentification={() => { void lookupQuickClientIdentification(); }}
         processingMessage={processingMessage}
         quickClientForm={quickClientForm}
+        quickClientMode={quickClientMode}
         quickClientVisible={quickClientVisible}
         retentionAmount={retentionAmount}
         retentionAuthorizationNumber={retentionAuthorizationNumber}
@@ -466,6 +582,8 @@ export function SalesScreen({ data, user, backendToken, persist, onXml }: { data
         saveReceivedRetention={saveReceivedRetention}
         setCreditNoteQuantities={setCreditNoteQuantities}
         setCreditNoteReason={setCreditNoteReason}
+        setAdditionalInfo={setAdditionalInfo}
+        setAdditionalInfoVisible={setAdditionalInfoVisible}
         setLineEditForm={setLineEditForm}
         setProductSearch={setProductSearch}
         setQuickClientForm={setQuickClientForm}
@@ -482,6 +600,38 @@ export function SalesScreen({ data, user, backendToken, persist, onXml }: { data
       />
     </View>
   );
+}
+
+function saleNextDocumentLabel(data: AppData, documentType: DocumentType, editingSale?: Sale, sourceTicket?: Sale, sourceProforma?: Sale) {
+  if (editingSale) return saleDisplayNumber(editingSale, data);
+
+  const establishment = activeEstablishment(data.issuer);
+  const scopeId = establishment.id;
+  const legacyScopeId = `${data.issuer.establishment || "001"}-${data.issuer.emissionPoint || "001"}`;
+  const effectiveType = sourceTicket ? "factura" : sourceProforma ? documentType : documentType;
+
+  if (effectiveType === "nota_venta") {
+    return nextInternalSequence(data.sales || [], scopeId, legacyScopeId);
+  }
+
+  if (effectiveType === "proforma") {
+    return nextProformaSequence(data.sales || [], scopeId, legacyScopeId);
+  }
+
+  const sequence = effectiveType === "nota_credito"
+    ? nextSequence(establishment.creditNoteSequential || data.issuer.creditNoteSequential || 1)
+    : nextSequence(establishment.sequential || data.issuer.sequential || 1);
+
+  return `${establishment.establishment}-${establishment.emissionPoint}-${sequence}`;
+}
+
+function saleDisplayNumber(sale: Sale, data: AppData) {
+  const establishment = sale.establishment || data.issuer.establishment;
+  const emissionPoint = sale.emissionPoint || data.issuer.emissionPoint;
+  if (sale.documentType === "factura" || sale.documentType === "nota_credito") {
+    return `${establishment}-${emissionPoint}-${sale.sequence}`;
+  }
+  return sale.sequence;
 }
 
 const styles = StyleSheet.create({

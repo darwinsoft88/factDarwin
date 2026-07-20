@@ -1,10 +1,9 @@
-import { useEffect, useMemo } from "react";
-import { LIST_BATCH_SIZE } from "../constants/app";
+import { useMemo } from "react";
 import { AppData } from "../types";
 import { compareSalesNewestFirst, saleInActiveScope } from "../utils/documents";
 import { parseInputDate } from "../utils/format";
-import { isSriRejected } from "../utils/invoiceStatus";
-import { documentTypeLabel, isCreditNoteSale, isInvoiceSale } from "../utils/sales";
+import { isSriRejected, isTicketOffline } from "../utils/invoiceStatus";
+import { documentTypeLabel, isConvertedSale, isCreditNoteSale, isInvoiceSale } from "../utils/sales";
 
 type UseSalesDocumentListParams = {
   data: AppData;
@@ -12,8 +11,6 @@ type UseSalesDocumentListParams = {
   saleEndDate: string;
   saleStartDate: string;
   statusFilter: string;
-  visibleSaleCount: number;
-  setVisibleSaleCount: React.Dispatch<React.SetStateAction<number>>;
 };
 
 export function useSalesDocumentList({
@@ -21,9 +18,7 @@ export function useSalesDocumentList({
   invoiceSearch,
   saleEndDate,
   saleStartDate,
-  statusFilter,
-  visibleSaleCount,
-  setVisibleSaleCount
+  statusFilter
 }: UseSalesDocumentListParams) {
   const scopedSales = useMemo(() => data.sales.filter((sale) => saleInActiveScope(sale, data)), [data]);
   const filteredSales = useMemo(() => {
@@ -33,10 +28,10 @@ export function useSalesDocumentList({
 
     return scopedSales.filter((sale) => {
       const client = data.clients.find((item) => item.id === sale.clientId);
-      const convertedDocument = sale.status === "ANULADA" && Boolean(sale.voidReason?.toLowerCase().includes("convertida a"));
       const matchesStatus =
         statusFilter === "TODAS" ||
         sale.status === statusFilter ||
+        (statusFilter === "CONVERTIDA" && isConvertedSale(sale)) ||
         (statusFilter === "FIRMADA" && sale.status === "PENDIENTE_SRI") ||
         (statusFilter === "ENVIADA" && sale.status === "ENVIADA_SRI") ||
         (statusFilter === "NOTA_CREDITO" && isCreditNoteSale(sale));
@@ -53,20 +48,14 @@ export function useSalesDocumentList({
         client?.name.toLowerCase().includes(search) ||
         client?.identification.toLowerCase().includes(search);
 
-      const hiddenConvertedInNormalView = statusFilter === "TODAS" && !search && convertedDocument;
+      const hiddenConvertedInNormalView = statusFilter === "TODAS" && !search && isConvertedSale(sale);
       return !hiddenConvertedInNormalView && matchesStatus && matchesStartDate && matchesEndDate && matchesSearch;
     }).sort(compareSalesNewestFirst);
   }, [data.clients, invoiceSearch, saleEndDate, saleStartDate, scopedSales, statusFilter]);
-  const visibleSales = filteredSales.slice(0, visibleSaleCount);
-
-  useEffect(() => {
-    setVisibleSaleCount(LIST_BATCH_SIZE);
-  }, [invoiceSearch, saleEndDate, saleStartDate, setVisibleSaleCount, statusFilter]);
-
   const invoiceStats = useMemo(() => {
     const authorized = scopedSales.filter((sale) => isInvoiceSale(sale) && sale.status === "AUTORIZADA");
     const rejected = scopedSales.filter((sale) => isSriRejected(sale.status));
-    const internal = scopedSales.filter((sale) => sale.documentType === "nota_venta");
+    const internal = scopedSales.filter((sale) => sale.documentType === "nota_venta" && isTicketOffline(sale.status));
     const creditNotes = scopedSales.filter((sale) => sale.documentType === "nota_credito" && sale.status === "AUTORIZADA");
     const proformas = scopedSales.filter((sale) => sale.documentType === "proforma" && sale.status === "PROFORMA");
     const totalAuthorized = authorized.reduce((sum, sale) => sum + sale.total, 0) - creditNotes.reduce((sum, sale) => sum + sale.total, 0);
@@ -86,7 +75,6 @@ export function useSalesDocumentList({
 
   return {
     filteredSales,
-    invoiceStats,
-    visibleSales
+    invoiceStats
   };
 }

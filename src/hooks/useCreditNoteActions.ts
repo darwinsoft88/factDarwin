@@ -1,9 +1,10 @@
 import React from "react";
 import { Alert } from "react-native";
 import { authorizeInvoice, reserveDocumentSequence } from "../services/backend";
-import { buildCreditNoteXml, calculateTotals, createCreditNoteAccessKey, nextSequence } from "../services/sri";
+import { buildCreditNoteXml, calculateTotals, createCreditNoteAccessKey, nextSequence } from "../sri";
 import { AppData, Client, InventoryMovement, Sale, User } from "../types";
 import { appendAudit } from "../utils/audit";
+import { isInventoryProduct } from "../utils/catalogItems";
 import { isAccessKeyUsed, resolveInvoiceStatus } from "../utils/documents";
 import { showMessage } from "../utils/dialogs";
 import { activeEstablishment, issuerForSale, updateIssuerEstablishmentSequence } from "../utils/establishments";
@@ -220,7 +221,8 @@ export function useCreditNoteActions({
       const stockMovements: InventoryMovement[] = [];
       const nextProducts = finalCreditNote.status === "AUTORIZADA"
         ? data.products.map((product) => {
-            const returnedQuantity = finalCreditNote.items.filter((item) => item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
+            if (!isInventoryProduct(product)) return product;
+            const returnedQuantity = finalCreditNote.items.filter((item) => isInventoryProduct(item) && item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
             if (returnedQuantity <= 0) return product;
             const stockAfter = product.stock + returnedQuantity;
             stockMovements.push({
@@ -271,13 +273,22 @@ export function useCreditNoteActions({
         setCreditNoteReason("Devolucion parcial");
         setCreditNoteQuantities({});
       }
-      Alert.alert(explainSriResult(sriResult).title, finalCreditNote.status === "AUTORIZADA" ? `Nota de credito autorizada, stock devuelto${creditNoteEmailSent ? " y enviada al correo del cliente" : ""}.` : sriUserMessage(sriResult));
+      const stockText = stockMovements.length > 0 ? ", stock devuelto" : "";
+      Alert.alert(explainSriResult(sriResult).title, finalCreditNote.status === "AUTORIZADA" ? `Nota de credito autorizada${stockText}${creditNoteEmailSent ? " y enviada al correo del cliente" : ""}.` : sriUserMessage(sriResult));
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo emitir la nota de credito.";
-      await persist(appendAudit({
+      const failedCreditNote: Sale = { ...creditNote, status: "ERROR_SRI", sriMessage: message, signedXml: xml };
+      const failedData = appendAudit({
         ...draftData,
-        sales: draftData.sales.map((sale) => (sale.id === creditNote.id ? { ...creditNote, status: "ERROR_SRI", sriMessage: message, signedXml: xml } : sale))
-      }, user, "CREDIT_NOTE_FAILED", "sale", creditNote.id, `Nota de credito ${creditNote.sequence} rechazada`, { error: message }));
+        sales: draftData.sales.map((sale) => (sale.id === creditNote.id ? failedCreditNote : sale))
+      }, user, "CREDIT_NOTE_FAILED", "sale", creditNote.id, `Nota de credito ${creditNote.sequence} rechazada`, { error: message });
+      await persist(failedData);
+      await syncSalePatchToBackend(data.backendUrl, backendToken, {
+        baseData: data,
+        issuer: failedData.issuer,
+        sales: [failedCreditNote],
+        auditLogs: failedData.auditLogs.slice(0, 1)
+      }, failedData, persist);
       Alert.alert("Nota de credito rechazada", message);
     } finally {
       setRetryingSaleId("");

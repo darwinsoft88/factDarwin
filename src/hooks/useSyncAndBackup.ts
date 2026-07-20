@@ -9,16 +9,31 @@ import {
 } from "../constants/app";
 import { backupAppData, checkBackendHealth, loginBackend, mergeBackendData, restoreAppData } from "../services/backend";
 import { hashPassword } from "../services/security";
-import { loadSession, saveData, saveSession } from "../storage";
+import { loadSession, saveData, saveSession } from "../database";
 import { AppData, PendingSyncItem, User } from "../types";
+import { autoRetrySriDocuments } from "../utils/autoRetrySriDocuments";
+import { autoInvoiceOfflineTickets } from "../utils/autoInvoiceTickets";
 import { mergeAppDataSnapshots } from "../utils/dataMerge";
 import { showMessage } from "../utils/dialogs";
 import { shortText } from "../utils/format";
+import { applyPendingSyncResult, clearPendingSyncItems, markPendingSyncAttempt } from "../utils/pendingSync";
+import { isSessionTokenExpired } from "../utils/sessionToken";
+import { sriPendingSendSummary } from "../utils/sriRetryPolicy";
+import {
+  canLoadRemoteSnapshot,
+  hasLocalSyncWork,
+  isNetworkReachableState,
+  shouldAutoEnableBackup
+} from "../utils/syncDecisions";
 import { formatAuditDate, formatSyncStatus, SyncState } from "../utils/support";
 import { sanitizeAppData } from "../validation";
 
 type RefreshReason = "login" | "active" | "manual";
 type ConnectivityReason = "network" | "active" | "pending";
+type PersistOptions = {
+  skipAutoBackup?: boolean;
+  syncState?: SyncState;
+};
 
 type UseSyncAndBackupParams = {
   backendTokenRef: React.MutableRefObject<string>;
@@ -70,9 +85,13 @@ export function useSyncAndBackup({
   const syncAfterConnectivityRestoredRef = useRef<(reason: ConnectivityReason) => Promise<void>>(async () => undefined);
 
   const ensureBackendToken = useCallback(async (backendUrl: string) => {
-    if (backendTokenRef.current) return backendTokenRef.current;
+    if (backendTokenRef.current) {
+      if (!isSessionTokenExpired(backendTokenRef.current)) return backendTokenRef.current;
+      backendTokenRef.current = "";
+      setBackendToken("");
+    }
     const storedSession = await loadSession();
-    if (storedSession?.token) {
+    if (storedSession?.token && !isSessionTokenExpired(storedSession.token)) {
       backendTokenRef.current = storedSession.token;
       setBackendToken(storedSession.token);
       return storedSession.token;
@@ -101,13 +120,15 @@ export function useSyncAndBackup({
     }, AUTO_BACKUP_DEBOUNCE_MS);
   }, [ready]);
 
-  const persist = useCallback(async (next: AppData) => {
+  const persist = useCallback(async (next: AppData, options: PersistOptions = {}) => {
     const sanitized = sanitizeAppData(next);
     setData(sanitized);
     dataRef.current = sanitized;
-    setSyncState(sanitized.autoBackupEnabled === false ? "synced" : "pending");
+    setSyncState(options.syncState || (sanitized.autoBackupEnabled === false ? "synced" : "pending"));
     await saveData(sanitized);
-    scheduleAutoBackupRef.current(sanitized);
+    if (!options.skipAutoBackup) {
+      scheduleAutoBackupRef.current(sanitized);
+    }
   }, [dataRef, setData, setSyncState]);
 
   const flushPendingSyncQueue = useCallback(async (backendUrl: string, token: string, snapshot: AppData) => {
@@ -120,19 +141,11 @@ export function useSyncAndBackup({
         await mergeBackendData(backendUrl, item.patch, token);
       } catch (error) {
         const message = error instanceof Error ? error.message : "No se pudo enviar pendiente.";
-        remaining.push({
-          ...item,
-          attempts: item.attempts + 1,
-          lastError: shortText(message, 180)
-        });
+        remaining.push(markPendingSyncAttempt(item, message));
       }
     }
 
-    const updated = {
-      ...snapshot,
-      pendingSync: remaining,
-      autoBackupLastError: remaining.length ? `${remaining.length} cambio(s) pendiente(s) por sincronizar.` : ""
-    };
+    const updated = applyPendingSyncResult(snapshot, remaining);
     setData((current) => {
       const merged = { ...current, pendingSync: remaining, autoBackupLastError: updated.autoBackupLastError };
       dataRef.current = merged;
@@ -157,21 +170,30 @@ export function useSyncAndBackup({
       const token = await ensureBackendToken(snapshot.backendUrl);
       const flushed = await flushPendingSyncQueue(snapshot.backendUrl, token, snapshot);
       snapshot = flushed;
-      let uploadSnapshot = snapshot;
+      const pendingCoveredByFullBackup = (snapshot.pendingSync || []).map((item) => item.id);
+      const fullBackupSnapshot = pendingCoveredByFullBackup.length
+        ? clearPendingSyncItems(snapshot, pendingCoveredByFullBackup)
+        : snapshot;
+      let uploadSnapshot = fullBackupSnapshot;
       try {
-        const remote = await restoreAppData<AppData>(snapshot.backendUrl, token);
+        const remote = await restoreAppData<AppData>(fullBackupSnapshot.backendUrl, token);
         if (remote?.data) {
-          uploadSnapshot = mergeAppDataSnapshots(remote.data, snapshot);
+          uploadSnapshot = mergeAppDataSnapshots(remote.data, fullBackupSnapshot);
         }
       } catch {
-        uploadSnapshot = snapshot;
+        uploadSnapshot = fullBackupSnapshot;
       }
-      const backupResult = await backupAppData(snapshot.backendUrl, uploadSnapshot, token);
-      const updated = { ...snapshot, autoBackupLastAt: backupResult.updatedAt || new Date().toISOString(), autoBackupLastError: "" };
+      const backupResult = await backupAppData(fullBackupSnapshot.backendUrl, uploadSnapshot, token);
+      const updated = { ...fullBackupSnapshot, autoBackupLastAt: backupResult.updatedAt || new Date().toISOString(), autoBackupLastError: "" };
       setData((current) => {
         const merged = mergeAppDataSnapshots(uploadSnapshot, current);
+        if (pendingCoveredByFullBackup.length) {
+          const withClearedPending = clearPendingSyncItems(merged, pendingCoveredByFullBackup);
+          merged.pendingSync = withClearedPending.pendingSync;
+          merged.autoBackupLastError = withClearedPending.autoBackupLastError;
+        }
         merged.autoBackupLastAt = updated.autoBackupLastAt;
-        merged.autoBackupLastError = "";
+        if (!merged.pendingSync?.length) merged.autoBackupLastError = "";
         dataRef.current = merged;
         void saveData(merged);
         return merged;
@@ -212,7 +234,7 @@ export function useSyncAndBackup({
     await runAutoBackup(snapshot);
   }, [runAutoBackup]);
 
-  const applyRemoteSnapshot = useCallback(async (snapshot: { data: AppData; updatedAt: string }, reason: string) => {
+  const applyRemoteSnapshot = useCallback(async (snapshot: { data: AppData; updatedAt: string }, options?: { notify?: boolean }) => {
     const current = dataRef.current;
     const mergedSnapshot = mergeAppDataSnapshots(snapshot.data, current);
     const restored = sanitizeAppData({
@@ -226,7 +248,7 @@ export function useSyncAndBackup({
     dataRef.current = restored;
     setSyncState("synced");
     await saveData(restored);
-    if (reason !== "login") {
+    if (options?.notify) {
       showMessage("Datos actualizados", `Se cargaron cambios del servidor (${formatAuditDate(snapshot.updatedAt)}).`);
     }
   }, [dataRef, setData, setSyncState]);
@@ -234,7 +256,7 @@ export function useSyncAndBackup({
   const refreshFromBackend = useCallback(async (reason: RefreshReason = "manual") => {
     const current = dataRef.current;
     if (!sessionRef.current || current.autoBackupEnabled === false || !current.backendUrl) return;
-    if ((current.pendingSync || []).length > 0 || pendingAutoBackupRef.current || autoBackupRunningRef.current) {
+    if (!canLoadRemoteSnapshot(current, Boolean(pendingAutoBackupRef.current), autoBackupRunningRef.current)) {
       if (reason === "manual") showMessage("Sincronizacion pendiente", "Primero se debe terminar de subir el cambio local antes de cargar datos del servidor.");
       return;
     }
@@ -257,7 +279,7 @@ export function useSyncAndBackup({
         return;
       }
 
-      await applyRemoteSnapshot({ data: snapshot.data, updatedAt: snapshot.updatedAt }, reason);
+      await applyRemoteSnapshot({ data: snapshot.data, updatedAt: snapshot.updatedAt }, { notify: reason === "manual" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo actualizar desde el servidor.";
       setData((latest) => {
@@ -282,19 +304,17 @@ export function useSyncAndBackup({
     }
     await flushAutoBackup();
     const current = dataRef.current;
-    if (current.autoBackupEnabled !== false && current.backendUrl && ((current.pendingSync || []).length > 0 || syncStateRef.current !== "synced" || Boolean(current.autoBackupLastError))) {
+    if (current.autoBackupEnabled !== false && current.backendUrl && hasLocalSyncWork(current, syncStateRef.current)) {
       await runAutoBackup(current);
     }
     await refreshFromBackend("manual");
   }, [dataRef, flushAutoBackup, refreshFromBackend, runAutoBackup, setAppMenuVisible, setData, syncStateRef]);
 
-  const hasReachableInternet = useCallback((networkState: Network.NetworkState) =>
-    networkState.isInternetReachable === true || (networkState.isInternetReachable !== false && networkState.isConnected === true), []);
-
   const syncAfterConnectivityRestored = useCallback(async (reason: ConnectivityReason) => {
     const current = dataRef.current;
     if (!sessionRef.current || !current.backendUrl || current.autoBackupEnabled === false) return;
-    if ((current.pendingSync || []).length === 0 && !pendingAutoBackupRef.current && syncStateRef.current === "synced" && !current.autoBackupLastError) {
+    const hasSriPendingWork = sriPendingSendSummary(current).pendingCount > 0;
+    if (!hasLocalSyncWork(current, syncStateRef.current) && !pendingAutoBackupRef.current && !hasSriPendingWork) {
       if (reason === "active") await refreshFromBackend("active");
       return;
     }
@@ -303,7 +323,7 @@ export function useSyncAndBackup({
 
     try {
       const networkState = await Network.getNetworkStateAsync();
-      if (!hasReachableInternet(networkState)) return;
+      if (!isNetworkReachableState(networkState)) return;
     } catch {
       return;
     }
@@ -313,8 +333,39 @@ export function useSyncAndBackup({
     try {
       await flushAutoBackup();
       const latest = dataRef.current;
-      if (latest.backendUrl && latest.autoBackupEnabled !== false && ((latest.pendingSync || []).length > 0 || syncStateRef.current !== "synced" || Boolean(latest.autoBackupLastError))) {
+      if (latest.backendUrl && latest.autoBackupEnabled !== false && hasLocalSyncWork(latest, syncStateRef.current)) {
         await runAutoBackup(latest);
+      }
+      const activeUser = sessionRef.current;
+      const current = dataRef.current;
+      if (activeUser && current.backendUrl && current.autoBackupEnabled !== false) {
+        const token = await ensureBackendToken(current.backendUrl);
+        const autoInvoiceResult = await autoInvoiceOfflineTickets({ backendToken: token, data: current, user: activeUser });
+        if (autoInvoiceResult.processed > 0) {
+          const sanitized = sanitizeAppData(autoInvoiceResult.data);
+          setData(sanitized);
+          dataRef.current = sanitized;
+          await saveData(sanitized);
+          await runAutoBackup(sanitized);
+          if (autoInvoiceResult.authorized > 0) {
+            showMessage("Tickets facturados", `${autoInvoiceResult.authorized} ticket(s) offline fueron facturados automaticamente.`);
+          }
+        }
+        const retryBaseData = dataRef.current;
+        const autoRetryResult = await autoRetrySriDocuments({ backendToken: token, data: retryBaseData, user: activeUser });
+        if (autoRetryResult.processed > 0 || autoRetryResult.expired > 0) {
+          const sanitized = sanitizeAppData(autoRetryResult.data);
+          setData(sanitized);
+          dataRef.current = sanitized;
+          await saveData(sanitized);
+          await runAutoBackup(sanitized);
+          if (autoRetryResult.expired > 0) {
+            showMessage("SRI fuera de fecha", `${autoRetryResult.expired} documento(s) se marcaron como anulados por estar fuera del dia permitido.`);
+          }
+          if (autoRetryResult.authorized > 0) {
+            showMessage("SRI actualizado", `${autoRetryResult.authorized} documento(s) fueron autorizados en reintento automatico.`);
+          }
+        }
       }
       if ((dataRef.current.pendingSync || []).length === 0) {
         await refreshFromBackend("active");
@@ -322,7 +373,7 @@ export function useSyncAndBackup({
     } finally {
       connectivitySyncRunningRef.current = false;
     }
-  }, [dataRef, flushAutoBackup, hasReachableInternet, refreshFromBackend, runAutoBackup, sessionRef, syncStateRef]);
+  }, [dataRef, ensureBackendToken, flushAutoBackup, refreshFromBackend, runAutoBackup, sessionRef, setData, syncStateRef]);
 
   const openSyncCenter = useCallback(() => {
     setAppMenuVisible(false);
@@ -333,11 +384,12 @@ export function useSyncAndBackup({
     setSyncActionLoading(true);
     try {
       await runManualSync();
+      await syncAfterConnectivityRestored("pending");
       showMessage("Sincronizacion", formatSyncStatus(syncState, dataRef.current));
     } finally {
       setSyncActionLoading(false);
     }
-  }, [dataRef, runManualSync, setSyncActionLoading, syncState]);
+  }, [dataRef, runManualSync, setSyncActionLoading, syncAfterConnectivityRestored, syncState]);
 
   const testSyncServer = useCallback(async () => {
     setSyncActionLoading(true);
@@ -406,7 +458,20 @@ export function useSyncAndBackup({
   }, []);
 
   useEffect(() => {
-    if (!ready || !session || data.autoBackupEnabled !== false || !data.backendUrl) return;
+    if (Platform.OS !== "web" || typeof window === "undefined") return undefined;
+
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!hasLocalSyncWork(dataRef.current, syncStateRef.current) && !pendingAutoBackupRef.current) return;
+      event.preventDefault();
+      event.returnValue = "Tiene documentos pendientes de sincronizar. Espere a que se suban antes de cerrar.";
+    };
+
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [dataRef, syncStateRef]);
+
+  useEffect(() => {
+    if (!shouldAutoEnableBackup({ data, hasSession: Boolean(session), ready })) return;
     const enabled = sanitizeAppData({ ...data, autoBackupEnabled: true, autoBackupLastError: "" });
     setData(enabled);
     dataRef.current = enabled;
@@ -418,14 +483,14 @@ export function useSyncAndBackup({
   useEffect(() => {
     if (!ready || !session) return undefined;
     const subscription = Network.addNetworkStateListener((networkState) => {
-      if (hasReachableInternet(networkState)) {
+      if (isNetworkReachableState(networkState)) {
         void syncAfterConnectivityRestoredRef.current("network");
       }
     });
 
     void syncAfterConnectivityRestoredRef.current("pending");
     return () => subscription.remove();
-  }, [hasReachableInternet, ready, session, session?.id]);
+  }, [ready, session, session?.id]);
 
   return {
     ensureBackendToken,

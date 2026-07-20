@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Alert } from "react-native";
-import { grossToNetUnitPrice, money } from "../services/sri";
+import { grossToNetUnitPrice, money } from "../sri";
 import { AppData, DocumentType, Sale, SaleItem } from "../types";
+import { isInventoryProduct } from "../utils/catalogItems";
 import { getAvailableStockForSale } from "../utils/inventory";
+import { canOverrideLoss, checkSaleItemLoss, confirmLossOverride } from "../utils/lossProtection";
 import { parseDecimal, roundMoney } from "../utils/numbers";
 import { calculateGrossUnitPrice, calculateLineGrossDiscount, formatQuantity } from "../utils/sales";
 
@@ -22,6 +24,7 @@ type UseSaleLineEditorParams = {
   sourceTicket?: Sale;
   setIssueNotice: React.Dispatch<React.SetStateAction<string>>;
   setItems: React.Dispatch<React.SetStateAction<SaleItem[]>>;
+  userRole: AppData["users"][number]["role"];
 };
 
 const defaultLineEditForm: LineEditForm = {
@@ -39,7 +42,8 @@ export function useSaleLineEditor({
   setIssueNotice,
   setItems,
   sourceProforma,
-  sourceTicket
+  sourceTicket,
+  userRole
 }: UseSaleLineEditorParams) {
   const [editingLineIndex, setEditingLineIndex] = useState<number | null>(null);
   const [lineEditForm, setLineEditForm] = useState<LineEditForm>(defaultLineEditForm);
@@ -61,7 +65,7 @@ export function useSaleLineEditor({
     });
   };
 
-  const saveLineEdit = (draft = lineEditForm) => {
+  const saveLineEdit = (draft = lineEditForm, options?: { forceLoss?: boolean }) => {
     if (editingLineIndex === null) return;
     const currentItem = items[editingLineIndex];
     if (!currentItem) return;
@@ -78,7 +82,7 @@ export function useSaleLineEditor({
       return;
     }
     const activeDocumentType = sourceTicket || sourceProforma ? documentType : editingSale?.documentType || documentType;
-    if (activeDocumentType !== "proforma") {
+    if (activeDocumentType !== "proforma" && isInventoryProduct(product)) {
       const quantityInOtherLines = items.reduce((sum, item, index) => index !== editingLineIndex && item.productId === product.id ? sum + item.quantity : sum, 0);
       const availableStock = getAvailableStockForSale(product, editingSale || sourceTicket);
       if (availableStock < quantityInOtherLines + qty) {
@@ -93,7 +97,18 @@ export function useSaleLineEditor({
       Alert.alert("Descuento invalido", "El descuento no puede ser mayor al valor del producto.");
       return;
     }
-    setItems((current) => current.map((item, index) => index === editingLineIndex ? { ...item, quantity: qty, unitPrice, discount } : item));
+    const nextItem = { ...currentItem, quantity: qty, unitPrice, discount };
+    const loss = checkSaleItemLoss(nextItem);
+    if (loss.hasLoss && !options?.forceLoss) {
+      confirmLossOverride({
+        canOverride: canOverrideLoss(userRole),
+        loss,
+        onChangePrice: () => undefined,
+        onContinue: () => saveLineEdit(draft, { forceLoss: true })
+      });
+      return;
+    }
+    setItems((current) => current.map((item, index) => index === editingLineIndex ? nextItem : item));
     closeLineEditor();
     setIssueNotice("Detalle actualizado.");
   };
@@ -107,11 +122,13 @@ export function useSaleLineEditor({
     const activeDocumentType = sourceTicket || sourceProforma ? documentType : editingSale?.documentType || documentType;
     if (amount > 0 && activeDocumentType !== "proforma") {
       const product = data.products.find((productItem) => productItem.id === item.productId);
-      const quantityInOtherLines = items.reduce((sum, currentItem, itemIndex) => itemIndex !== index && currentItem.productId === item.productId ? sum + currentItem.quantity : sum, 0);
-      const availableStock = product ? getAvailableStockForSale(product, editingSale || sourceTicket) : 0;
-      if (availableStock < quantityInOtherLines + nextQuantity) {
-        Alert.alert("Stock insuficiente", `Disponible: ${availableStock}. En otras lineas ya tiene ${quantityInOtherLines}.`);
-        return;
+      if (product && isInventoryProduct(product)) {
+        const quantityInOtherLines = items.reduce((sum, currentItem, itemIndex) => itemIndex !== index && currentItem.productId === item.productId ? sum + currentItem.quantity : sum, 0);
+        const availableStock = getAvailableStockForSale(product, editingSale || sourceTicket);
+        if (availableStock < quantityInOtherLines + nextQuantity) {
+          Alert.alert("Stock insuficiente", `Disponible: ${availableStock}. En otras lineas ya tiene ${quantityInOtherLines}.`);
+          return;
+        }
       }
     }
 

@@ -9,7 +9,7 @@ const DEFAULT_FEATURES = {
 
 function defaultLicense() {
   const now = new Date();
-  const expires = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const expires = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
   return {
     status: "trial",
     plan: "trial",
@@ -17,9 +17,9 @@ function defaultLicense() {
     expiresAt: expires.toISOString().slice(0, 10),
     maxUsers: 3,
     maxDevices: 3,
-    maxEmissionPoints: 999,
+    maxEmissionPoints: 3,
     features: { ...DEFAULT_FEATURES, multiEmissionPoint: true },
-    notes: "Licencia de prueba inicial"
+    notes: "Prueba gratuita tipo Pro por 3 meses"
   };
 }
 
@@ -40,14 +40,15 @@ function normalizeLicense(license) {
   normalized.maxDevices = safePositiveInteger(normalized.maxDevices, fallback.maxDevices);
   const openAllModules = normalized.plan === "trial";
   const proPlan = isProPlan(normalized.plan);
+  const premiumPlan = isPremiumPlan(normalized.plan);
   normalized.features.sales = openAllModules || normalized.features.sales !== false;
   normalized.features.sri = openAllModules || normalized.features.sri !== false;
   normalized.features.inventory = openAllModules || normalized.features.inventory !== false;
   normalized.features.reports = openAllModules || normalized.features.reports !== false;
   normalized.features.multiDevice = openAllModules || normalized.features.multiDevice !== false;
-  normalized.features.multiEmissionPoint = openAllModules || proPlan;
+  normalized.features.multiEmissionPoint = openAllModules || proPlan || premiumPlan;
   normalized.maxEmissionPoints = normalized.features.multiEmissionPoint
-    ? Math.max(999, safePositiveInteger(normalized.maxEmissionPoints, 999))
+    ? safePositiveInteger(normalized.maxEmissionPoints, openAllModules ? 3 : 999)
     : 1;
   normalized.startsAt = normalizeDate(normalized.startsAt) || fallback.startsAt;
   normalized.expiresAt = normalizeDate(normalized.expiresAt) || fallback.expiresAt;
@@ -59,11 +60,15 @@ function normalizePlan(value) {
   if (value === "mensual") return "basico_mensual";
   if (value === "anual") return "basico_anual";
   if (value === "pro") return "pro_anual";
-  return ["trial", "basico_mensual", "basico_anual", "pro_mensual", "pro_anual"].includes(value) ? value : "trial";
+  return ["trial", "basico_mensual", "basico_anual", "pro_mensual", "pro_anual", "premium_mensual", "premium_anual"].includes(value) ? value : "trial";
 }
 
 function isProPlan(plan) {
   return String(plan || "").startsWith("pro_");
+}
+
+function isPremiumPlan(plan) {
+  return String(plan || "").startsWith("premium_");
 }
 
 function licenseStatus(data) {

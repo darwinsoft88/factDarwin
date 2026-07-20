@@ -7,7 +7,7 @@ import { parseInputDate, toInputDate } from "../utils/format";
 import { generateId } from "../utils/id";
 import { parseDecimal, roundMoney } from "../utils/numbers";
 import { isInvoiceSale } from "../utils/sales";
-import { money } from "../services/sri";
+import { money } from "../sri";
 import { syncPatchToBackend } from "../utils/sync";
 
 const uid = generateId;

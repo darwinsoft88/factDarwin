@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { calculateLineSubtotal, calculateLineTax, calculateLineTotal, grossToNetUnitPrice, money } from "../services/sri";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { calculateLineSubtotal, calculateLineTax, calculateLineTotal, grossToNetUnitPrice, money } from "../sri";
 import { Product } from "../types";
 import { productCost } from "../utils/accounting";
 import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
@@ -68,42 +69,44 @@ export function ProductPriceOptionsModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.creditModalBackdrop}>
-        <View style={styles.quickClientModal}>
-          <View style={styles.creditModalHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.creditModalTitle}>Precio y descuento</Text>
-              <Text style={styles.creditModalMeta}>{product ? `${product.code} - ${product.name}` : "Seleccione producto"}</Text>
-            </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled">
-            <DraftNumberInput label="Cantidad" value={draft.quantity} onChange={(value) => setDraft((current) => ({ ...current, quantity: value }))} />
-            <DraftNumberInput label="Precio publico" value={draft.unitGrossPrice} onChange={(value) => setDraft((current) => ({ ...current, unitGrossPrice: value }))} />
-            <Select
-              label="Tipo de descuento"
-              value={draft.discountMode}
-              onChange={(value) => setDraft((current) => ({ ...current, discountMode: value as "amount" | "percent" }))}
-              options={[
-                { label: "Valor $", value: "amount" },
-                { label: "Porcentaje %", value: "percent" }
-              ]}
-            />
-            <DraftNumberInput label={draft.discountMode === "percent" ? "Descuento %" : "Descuento publico"} value={draft.grossDiscount} onChange={(value) => setDraft((current) => ({ ...current, grossDiscount: value }))} />
-            {previewItem ? (
-              <View style={styles.creditTotalsBox}>
-                <Text style={styles.totalLine}>Base: ${money(calculateLineSubtotal(previewItem))}</Text>
-                <Text style={styles.totalLine}>Descuento: ${money(grossDiscountValue)}</Text>
-                <Text style={styles.totalLine}>IVA: ${money(calculateLineTax(previewItem))}</Text>
-                <Text style={styles.totalStrong}>Total linea: ${money(calculateLineTotal(previewItem))}</Text>
+      <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+        <View style={styles.creditModalBackdrop}>
+          <View style={styles.quickClientModal}>
+            <View style={styles.creditModalHeader}>
+              <View style={styles.flex}>
+                <Text style={styles.creditModalTitle}>Precio y descuento</Text>
+                <Text style={styles.creditModalMeta}>{product ? `${product.code} - ${product.name}` : "Seleccione producto"}</Text>
               </View>
-            ) : null}
-            <PrimaryButton label="Agregar producto" onPress={() => onAdd(draft)} />
-          </ScrollView>
+              <Pressable style={styles.smallButton} onPress={onClose}>
+                <Text style={styles.smallButtonText}>Cerrar</Text>
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+              <DraftNumberInput label="Cantidad" value={draft.quantity} onChange={(value) => setDraft((current) => ({ ...current, quantity: value }))} />
+              <DraftNumberInput label="Precio publico" value={draft.unitGrossPrice} onChange={(value) => setDraft((current) => ({ ...current, unitGrossPrice: value }))} />
+              <Select
+                label="Tipo de descuento"
+                value={draft.discountMode}
+                onChange={(value) => setDraft((current) => ({ ...current, discountMode: value as "amount" | "percent" }))}
+                options={[
+                  { label: "Valor $", value: "amount" },
+                  { label: "Porcentaje %", value: "percent" }
+                ]}
+              />
+              <DraftNumberInput label={draft.discountMode === "percent" ? "Descuento %" : "Descuento publico"} value={draft.grossDiscount} onChange={(value) => setDraft((current) => ({ ...current, grossDiscount: value }))} />
+              {previewItem ? (
+                <View style={styles.creditTotalsBox}>
+                  <Text style={styles.totalLine}>Base: ${money(calculateLineSubtotal(previewItem))}</Text>
+                  <Text style={styles.totalLine}>Descuento: ${money(grossDiscountValue)}</Text>
+                  <Text style={styles.totalLine}>IVA: ${money(calculateLineTax(previewItem))}</Text>
+                  <Text style={styles.totalStrong}>Total linea: ${money(calculateLineTotal(previewItem))}</Text>
+                </View>
+              ) : null}
+              <PrimaryButton label="Agregar producto" onPress={() => onAdd(draft)} />
+            </ScrollView>
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -163,11 +166,16 @@ const webInputStyle = {
 } as const;
 
 const styles = StyleSheet.create({
+  keyboardAvoiding: {
+    flex: 1
+  },
   creditModalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.4)",
     justifyContent: "flex-end",
-    padding: 12
+    paddingHorizontal: MODAL_EDGE_PADDING,
+    paddingTop: MODAL_EDGE_PADDING,
+    paddingBottom: MODAL_SAFE_BOTTOM_PADDING
   },
   quickClientModal: {
     maxHeight: "92%",
@@ -231,6 +239,7 @@ const styles = StyleSheet.create({
   },
   creditModalContent: {
     padding: 14,
+    paddingBottom: MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING,
     gap: 10
   },
   creditTotalsBox: {

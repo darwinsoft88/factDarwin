@@ -11,4 +11,17 @@
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
+# Expo modules rely on Kotlin descriptors through reflection during startup.
+# R8 can strip these classes in local release builds if they are not kept.
+-keep class expo.modules.kotlin.** { *; }
+-keep class expo.modules.adapters.react.** { *; }
+
+# Expo document picker optional generated descriptors.
+-dontwarn expo.modules.kotlin.types.AnyTypeCache
+-dontwarn expo.modules.kotlin.types.OptimizedRecord
+-dontwarn expo.modules.kotlin.types.descriptors.RawTypeDescriptor
+-dontwarn expo.modules.kotlin.types.descriptors.TypeDescriptor
+-dontwarn expo.modules.kotlin.types.descriptors.TypeDescriptorKt
+-dontwarn expo.modules.kotlin.types.descriptors.TypeDescriptorOfKt
+
 # Add any project specific keep options here:

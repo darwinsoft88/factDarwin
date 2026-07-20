@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text } from "react-native";
-import { Empty, Input, LoadMoreButton, Select } from "../components/common";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { EntityEditModal } from "../components/EntityEditModal";
+import { Empty, Input, LoadMoreButton, Section, Select } from "../components/common";
 import { LIST_BATCH_SIZE } from "../constants/app";
 import { roleOptions } from "../constants/options";
 import { hashPassword } from "../services/security";
@@ -19,30 +21,23 @@ type UsersListItemProps = {
   onDelete?: () => void;
 };
 
-type CrudSectionProps = {
-  title: string;
-  onSave: () => void;
-  children: React.ReactNode;
-};
-
 export function UsersScreen({
   data,
   user: currentUser,
   backendToken,
   persist,
-  ListItemComponent,
-  CrudSectionComponent
+  ListItemComponent
 }: {
   data: AppData;
   user: User;
   backendToken: string;
   persist: (data: AppData) => Promise<void>;
   ListItemComponent: React.ComponentType<UsersListItemProps>;
-  CrudSectionComponent: React.ComponentType<CrudSectionProps>;
 }) {
   const emptyForm = useMemo(() => ({ name: "", email: "", password: "", role: "vendedor" as UserRole }), []);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState("");
+  const [editModalVisible, setEditModalVisible] = useState(false);
   const [userSearch, setUserSearch] = useState("");
   const [visibleUserCount, setVisibleUserCount] = useState(LIST_BATCH_SIZE);
   const filteredUsers = useMemo(() => {
@@ -99,6 +94,7 @@ export function UsersScreen({
     }
 
     setEditingId("");
+    setEditModalVisible(false);
     setForm(emptyForm);
   };
 
@@ -110,59 +106,116 @@ export function UsersScreen({
       password: "",
       role: user.role
     });
+    setEditModalVisible(true);
   };
 
-  return (
-    <CrudSectionComponent title="Usuarios" onSave={save}>
-      <Input key={`user-name-${editingId || "new"}`} label="Nombre" value={form.name} onChangeText={(name) => setForm({ ...form, name })} autoComplete="off" />
-      <Input key={`user-email-${editingId || "new"}`} label="Correo" value={form.email} onChangeText={(email) => setForm({ ...form, email })} autoCapitalize="none" autoComplete="off" textContentType="none" importantForAutofill="no" />
-      <Input key={`user-password-${editingId || "new"}`} label={editingId ? "Nueva contrasena (opcional)" : "Contrasena"} value={form.password} onChangeText={(password) => setForm({ ...form, password })} secureTextEntry autoComplete="new-password" textContentType="none" importantForAutofill="no" />
+  const openCreate = () => {
+    setEditingId("");
+    setForm(emptyForm);
+    setEditModalVisible(true);
+  };
+
+  const cancelEdit = () => {
+    setEditingId("");
+    setEditModalVisible(false);
+    setForm(emptyForm);
+  };
+
+  const renderUserForm = (isEditing: boolean) => (
+    <>
+      <Input key={`user-name-${isEditing ? editingId : "new"}`} label="Nombre" value={form.name} onChangeText={(name) => setForm({ ...form, name })} autoComplete="off" />
+      <Input key={`user-email-${isEditing ? editingId : "new"}`} label="Correo" value={form.email} onChangeText={(email) => setForm({ ...form, email })} autoCapitalize="none" autoComplete="off" textContentType="none" importantForAutofill="no" />
+      <Input key={`user-password-${isEditing ? editingId : "new"}`} label={isEditing ? "Nueva contrasena (opcional)" : "Contrasena"} value={form.password} onChangeText={(password) => setForm({ ...form, password })} secureTextEntry autoComplete="new-password" textContentType="none" importantForAutofill="no" />
       <Select label="Rol" value={form.role} onChange={(role) => setForm({ ...form, role: role as UserRole })} options={roleOptions} />
-      {editingId ? (
-        <Pressable style={styles.smallButton} onPress={() => { setEditingId(""); setForm(emptyForm); }}>
-          <Text style={styles.smallButtonText}>Cancelar edicion</Text>
-        </Pressable>
-      ) : null}
-      <Input label="Buscar usuarios" value={userSearch} onChangeText={setUserSearch} placeholder="Nombre, correo o rol" autoCapitalize="none" />
-      {data.users.length === 0 ? <Empty text="Aun no hay usuarios." /> : null}
-      {data.users.length > 0 && filteredUsers.length === 0 ? <Empty text="No hay usuarios con esa busqueda." /> : null}
-      {visibleUsers.map((user) => (
-        <ListItemComponent
-          key={user.id}
-          title={user.name}
-          meta={`${user.email} | ${roleLabel(user.role)}`}
-          editLabel="Editar"
-          onEdit={() => edit(user)}
-          onDelete={user.id === currentUser.id ? undefined : () => confirmAction("Eliminar usuario", `Seguro que desea eliminar a ${user.name}? Esta accion quedara registrada en auditoria.`, () => {
-            void (async () => {
-              if (user.role === "admin" && data.users.filter((item) => item.role === "admin").length <= 1) {
-                showMessage("Admin requerido", "Debe existir al menos un usuario administrador.");
-                return;
-              }
-              const nextData = appendAudit({ ...data, users: data.users.filter((item) => item.id !== user.id), deletedIds: { ...(data.deletedIds || {}), users: Array.from(new Set([...(data.deletedIds?.users || []), user.id])) } }, currentUser, "USER_DELETED", "user", user.id, `Usuario eliminado: ${user.name}`);
-              await persist(nextData);
-              await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, deletions: { users: [user.id] }, auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario eliminado pendiente de sincronizar", nextData, persist);
-              showMessage("Usuario eliminado", "El usuario se elimino con exito.");
-            })();
-          })}
-        />
-      ))}
-      {visibleUsers.length < filteredUsers.length ? <LoadMoreButton label="Cargar mas usuarios" onPress={() => setVisibleUserCount((count) => count + LIST_BATCH_SIZE)} /> : null}
-    </CrudSectionComponent>
+    </>
+  );
+
+  const editingUserName = data.users.find((user) => user.id === editingId)?.name || "Usuario";
+
+  const renderEditModal = () => (
+    <EntityEditModal
+      visible={editModalVisible}
+      title={editingId ? "Editar usuario" : "Nuevo usuario"}
+      subtitle={editingId ? editingUserName : "Cree el acceso del colaborador"}
+      onClose={cancelEdit}
+      onConfirm={() => { void save(); }}
+      confirmLabel={editingId ? "Guardar cambios" : "Guardar usuario"}
+    >
+      {renderUserForm(Boolean(editingId))}
+    </EntityEditModal>
+  );
+
+  return (
+    <View style={styles.stack}>
+      <Section title="">
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Usuarios guardados</Text>
+          <Pressable style={styles.addButton} onPress={openCreate}>
+            <MaterialCommunityIcons name="account-plus-outline" size={15} color="#ffffff" />
+            <Text style={styles.addButtonText}>Agregar</Text>
+          </Pressable>
+        </View>
+        <Input label="Buscar usuarios" value={userSearch} onChangeText={setUserSearch} placeholder="Nombre, correo o rol" autoCapitalize="none" />
+        {data.users.length === 0 ? <Empty text="Aun no hay usuarios." /> : null}
+        {data.users.length > 0 && filteredUsers.length === 0 ? <Empty text="No hay usuarios con esa busqueda." /> : null}
+        {visibleUsers.map((user) => (
+          <ListItemComponent
+            key={user.id}
+            title={user.name}
+            meta={`${user.email} | ${roleLabel(user.role)}`}
+            editLabel="Editar"
+            onEdit={() => edit(user)}
+            onDelete={user.id === currentUser.id ? undefined : () => confirmAction("Eliminar usuario", `Seguro que desea eliminar a ${user.name}? Esta accion quedara registrada en auditoria.`, () => {
+              void (async () => {
+                if (user.role === "admin" && data.users.filter((item) => item.role === "admin").length <= 1) {
+                  showMessage("Admin requerido", "Debe existir al menos un usuario administrador.");
+                  return;
+                }
+                const nextData = appendAudit({ ...data, users: data.users.filter((item) => item.id !== user.id), deletedIds: { ...(data.deletedIds || {}), users: Array.from(new Set([...(data.deletedIds?.users || []), user.id])) } }, currentUser, "USER_DELETED", "user", user.id, `Usuario eliminado: ${user.name}`);
+                await persist(nextData);
+                await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, deletions: { users: [user.id] }, auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario eliminado pendiente de sincronizar", nextData, persist);
+                showMessage("Usuario eliminado", "El usuario se elimino con exito.");
+              })();
+            })}
+          />
+        ))}
+        {visibleUsers.length < filteredUsers.length ? <LoadMoreButton label="Cargar mas usuarios" onPress={() => setVisibleUserCount((count) => count + LIST_BATCH_SIZE)} /> : null}
+      </Section>
+      {renderEditModal()}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  smallButton: {
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#0f766e",
-    backgroundColor: "#e6fffb",
-    paddingHorizontal: 12,
-    paddingVertical: 8
+  stack: {
+    gap: 12
   },
-  smallButtonText: {
-    color: "#0f5f59",
+  headerRow: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10
+  },
+  title: {
+    color: "#1f2937",
+    flex: 1,
+    fontSize: 17,
+    fontWeight: "800"
+  },
+  addButton: {
+    minHeight: 34,
+    borderRadius: 8,
+    backgroundColor: "#0f766e",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    paddingHorizontal: 10
+  },
+  addButtonText: {
+    color: "#ffffff",
+    fontSize: 12,
     fontWeight: "900"
   }
 });

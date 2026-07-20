@@ -18,7 +18,7 @@ export function showMessage(title: string, message: string) {
   Alert.alert(title, message);
 }
 
-export function confirmAction(title: string, message: string, onConfirm: () => void) {
+export function confirmAction(title: string, message: string, onConfirm: () => void, confirmLabel = "Eliminar") {
   if (Platform.OS === "web" && typeof window !== "undefined") {
     if (window.confirm(`${title}\n\n${message}`)) onConfirm();
     return;
@@ -26,6 +26,6 @@ export function confirmAction(title: string, message: string, onConfirm: () => v
 
   Alert.alert(title, message, [
     { text: "Cancelar", style: "cancel" },
-    { text: "Eliminar", style: "destructive", onPress: onConfirm }
+    { text: confirmLabel, style: "destructive", onPress: onConfirm }
   ]);
 }

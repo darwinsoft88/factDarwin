@@ -11,7 +11,7 @@
     "preview": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://facturas.tudominio.com"
+        "EXPO_PUBLIC_BACKEND_URL": "https://api.factudarwin.com"
       },
       "android": {
         "buildType": "apk"
@@ -20,7 +20,7 @@
     "previewOptimized": {
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://facturas.tudominio.com"
+        "EXPO_PUBLIC_BACKEND_URL": "https://api.factudarwin.com"
       },
       "android": {
         "buildType": "app-bundle"
@@ -29,7 +29,7 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://facturas.tudominio.com"
+        "EXPO_PUBLIC_BACKEND_URL": "https://api.factudarwin.com"
       }
     }
   },

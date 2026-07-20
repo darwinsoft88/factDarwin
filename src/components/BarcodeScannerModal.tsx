@@ -1,6 +1,8 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
-import React, { useEffect, useState } from "react";
+import { useAudioPlayer } from "expo-audio";
+import React, { useEffect, useRef, useState } from "react";
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import scanBeep from "../../assets/sounds/scan-beep.wav";
 import { normalizeProductCode } from "../validation";
 import { PrimaryButton } from "./common";
 
@@ -8,21 +10,43 @@ type BarcodeScannerModalProps = {
   visible: boolean;
   title: string;
   onClose: () => void;
-  onScan: (code: string) => void;
+  onScan: (code: string) => boolean | void;
+  continuous?: boolean;
 };
 
-export function BarcodeScannerModal({ visible, title, onClose, onScan }: BarcodeScannerModalProps) {
+export function BarcodeScannerModal({ visible, title, onClose, onScan, continuous = false }: BarcodeScannerModalProps) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const [lastCode, setLastCode] = useState("");
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scanPlayer = useAudioPlayer(scanBeep);
 
   useEffect(() => {
-    if (visible) setScanned(false);
+    if (visible) {
+      setScanned(false);
+      setLastCode("");
+    }
   }, [visible]);
+
+  useEffect(() => () => {
+    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+  }, []);
+
+  if (!visible) return null;
 
   const handleOpenPermission = async () => {
     const result = await requestPermission();
     if (!result.granted) {
       Alert.alert("Camara sin permiso", "Active el permiso de camara para escanear codigos.");
+    }
+  };
+
+  const playScanBeep = () => {
+    try {
+      scanPlayer.seekTo(0);
+      scanPlayer.play();
+    } catch {
+      // El sonido es una mejora; el escaneo debe seguir funcionando si el audio falla.
     }
   };
 
@@ -47,6 +71,7 @@ export function BarcodeScannerModal({ visible, title, onClose, onScan }: Barcode
           ) : (
             <View style={styles.scannerCameraWrap}>
               <CameraView
+                key="active-barcode-scanner"
                 style={styles.scannerCamera}
                 facing="back"
                 barcodeScannerSettings={{
@@ -56,13 +81,23 @@ export function BarcodeScannerModal({ visible, title, onClose, onScan }: Barcode
                   const code = normalizeProductCode(String(data || ""));
                   if (!code) return;
                   setScanned(true);
-                  onScan(code);
+                  setLastCode(code);
+                  const accepted = onScan(code);
+                  if (accepted !== false) playScanBeep();
+                  if (continuous) {
+                    if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
+                    resetTimerRef.current = setTimeout(() => setScanned(false), 900);
+                  }
                 }}
               />
               <View style={styles.scannerFrame} />
             </View>
           )}
-          {scanned ? (
+          {continuous ? (
+            <View style={styles.scanStatus}>
+              <Text style={styles.scanStatusText}>{scanned ? `Codigo ${lastCode || ""} leido. Acerque el siguiente producto.` : "Escaner continuo activo."}</Text>
+            </View>
+          ) : scanned ? (
             <Pressable style={styles.scanButton} onPress={() => setScanned(false)}>
               <Text style={styles.scanButtonText}>Escanear otro</Text>
             </Pressable>
@@ -145,6 +180,20 @@ const styles = StyleSheet.create({
   },
   scanButtonText: {
     color: "#ffffff",
+    fontWeight: "900",
+    textAlign: "center"
+  },
+  scanStatus: {
+    minHeight: 42,
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    backgroundColor: "#ecfdf5",
+    borderTopWidth: 1,
+    borderTopColor: "#bbf7d0"
+  },
+  scanStatusText: {
+    color: "#047857",
     fontWeight: "900",
     textAlign: "center"
   },

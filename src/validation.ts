@@ -1,13 +1,15 @@
-import { calculateLineDiscount, calculateTotals, money } from "./services/sri";
-import { AppData, AppLicense, Client, Issuer, LicensePlan, LicenseStatus, Product, SaleItem, UserRole } from "./types";
+import { calculateLineDiscount, calculateTotals, money } from "./sri";
+import { AppData, AppLicense, CatalogItemType, Client, Issuer, LicensePlan, LicenseStatus, Product, SaleItem, UserRole } from "./types";
+import { isInventoryProduct } from "./utils/catalogItems";
 import { canUseEmissionScope } from "./utils/license";
 import { parseInputDate } from "./utils/format";
-import { normalizeInvoiceStatus } from "./utils/invoiceStatus";
+import { normalizeInvoiceStatus, normalizeSaleStatus } from "./utils/invoiceStatus";
 import { normalizeTaxRegime } from "./utils/taxRegime";
 
 const validRoles = new Set<UserRole>(["admin", "vendedor", "cajero", "contador"]);
 const validLicenseStatuses = new Set<LicenseStatus>(["trial", "active", "expired", "suspended"]);
-const validLicensePlans = new Set<LicensePlan>(["trial", "basico_mensual", "basico_anual", "pro_mensual", "pro_anual"]);
+const validLicensePlans = new Set<LicensePlan>(["trial", "basico_mensual", "basico_anual", "pro_mensual", "pro_anual", "premium_mensual", "premium_anual"]);
+export const CONSUMER_FINAL_MAX_INVOICE_TOTAL = 50;
 
 export function normalizeClientIdentification(value: string) {
   return value.trim().replace(/\s+/g, "");
@@ -76,6 +78,7 @@ export function validateBeforeIssue(data: AppData, client: Client, items: SaleIt
 
   validateIssuer(data.issuer, data.backendUrl, errors);
   validateClient(client, errors);
+  validateConsumerFinalInvoiceLimit(client, totals.total, errors);
   validateItems(data.products, items, errors, stockCredits);
 
   const recalculated = calculateTotals(items);
@@ -175,6 +178,12 @@ export function validateClient(client: Client, errors: string[]) {
   if (client.identificationType === "08" && identification.length < 4) errors.push("La identificacion exterior del cliente es muy corta.");
 }
 
+export function validateConsumerFinalInvoiceLimit(client: Client, total: number, errors: string[]) {
+  if (!isConsumerFinalClient(client)) return;
+  if (Number(money(total)) <= CONSUMER_FINAL_MAX_INVOICE_TOTAL) return;
+  errors.push(`Consumidor final solo puede usarse hasta $${money(CONSUMER_FINAL_MAX_INVOICE_TOTAL)}. Seleccione o cree un cliente con cedula/RUC para emitir esta factura.`);
+}
+
 export function normalizeClientForInvoice(client: Client): Client {
   const identification = client.identification.trim();
 
@@ -238,6 +247,7 @@ export function sanitizeAppData(data: AppData): AppData {
   const deletedClients = new Set(deletedIds.clients);
   const deletedProducts = new Set(deletedIds.products);
   const deletedUsers = new Set(deletedIds.users);
+  const deletedInventoryMovements = new Set(deletedIds.inventoryMovements);
   const seenClients = new Set<string>();
   const clients = data.clients.map((client) => {
     if (isConsumerFinalClient(client)) return canonicalConsumerFinalClient(client);
@@ -257,14 +267,19 @@ export function sanitizeAppData(data: AppData): AppData {
   });
 
   const seenProducts = new Set<string>();
-  const products = data.products.map((product) => ({
+  const products: Product[] = data.products.map((product) => {
+    const itemType: CatalogItemType = product.itemType === "service" ? "service" : "product";
+    return {
     ...product,
+    itemType,
     code: normalizeProductCode(product.code),
     name: product.name.trim(),
-    cost: Number.isFinite(Number(product.cost)) ? Number(product.cost) : 0,
-    minStock: Number.isFinite(Number(product.minStock)) ? Number(product.minStock) : 5,
+    cost: itemType === "service" ? 0 : Number.isFinite(Number(product.cost)) ? Number(product.cost) : 0,
+    stock: itemType === "service" ? 0 : Number.isFinite(Number(product.stock)) ? Number(product.stock) : 0,
+    minStock: itemType === "service" ? 0 : Number.isFinite(Number(product.minStock)) ? Number(product.minStock) : 5,
     updatedAt: product.updatedAt || ""
-  })).filter((product) => {
+    };
+  }).filter((product) => {
     if (deletedProducts.has(product.id)) return false;
     const key = normalizeProductCode(product.code);
     if (!key || seenProducts.has(key)) return false;
@@ -292,7 +307,9 @@ export function sanitizeAppData(data: AppData): AppData {
     clients,
     products,
     users,
-    sales: (data.sales || []).map((sale) => ({ ...sale, status: normalizeInvoiceStatus(sale.status, sale.sriMessage) })),
+    sales: (data.sales || []).map((sale) => ({ ...sale, status: normalizeSaleStatus(sale) })),
+    creditPayments: data.creditPayments || [],
+    inventoryMovements: (data.inventoryMovements || []).filter((movement) => !deletedInventoryMovements.has(movement.id)),
     auditLogs: data.auditLogs || [],
     receivedRetentions: data.receivedRetentions || [],
     guides: (data.guides || []).map((guide) => ({ ...guide, status: normalizeInvoiceStatus(guide.status, guide.sriMessage) })),
@@ -321,6 +338,7 @@ function validateItems(products: Product[], items: SaleItem[], errors: string[],
 
   quantityByProduct.forEach((quantity, productId) => {
     const product = products.find((candidate) => candidate.id === productId);
+    if (!product || !isInventoryProduct(product)) return;
     const availableStock = product ? product.stock + (stockCredits.get(product.id) || 0) : 0;
     if (checkStock && product && quantity > availableStock) errors.push(`${product.name}: stock insuficiente. Disponible ${availableStock}, solicitado ${quantity}.`);
   });
@@ -338,7 +356,8 @@ function normalizeDeletedIds(deletedIds: AppData["deletedIds"], auditLogs: AppDa
   const result = {
     clients: new Set<string>(deletedIds?.clients || []),
     products: new Set<string>(deletedIds?.products || []),
-    users: new Set<string>(deletedIds?.users || [])
+    users: new Set<string>(deletedIds?.users || []),
+    inventoryMovements: new Set<string>(deletedIds?.inventoryMovements || [])
   };
   (auditLogs || []).forEach((log) => {
     if (!log.entityId) return;
@@ -349,7 +368,8 @@ function normalizeDeletedIds(deletedIds: AppData["deletedIds"], auditLogs: AppDa
   return {
     clients: Array.from(result.clients),
     products: Array.from(result.products),
-    users: Array.from(result.users)
+    users: Array.from(result.users),
+    inventoryMovements: Array.from(result.inventoryMovements)
   };
 }
 
@@ -443,7 +463,7 @@ function normalizeEstablishmentNames<T extends { id: string; name: string; estab
 
 function sanitizeLicense(license?: AppLicense): AppLicense {
   const today = new Date();
-  const expires = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const expires = new Date(today.getTime() + 90 * 24 * 60 * 60 * 1000);
   const fallback: AppLicense = {
     status: "trial",
     plan: "trial",
@@ -451,7 +471,7 @@ function sanitizeLicense(license?: AppLicense): AppLicense {
     expiresAt: expires.toISOString().slice(0, 10),
     maxUsers: 3,
     maxDevices: 3,
-    maxEmissionPoints: 999,
+    maxEmissionPoints: 3,
     features: {
       sales: true,
       sri: true,
@@ -460,18 +480,19 @@ function sanitizeLicense(license?: AppLicense): AppLicense {
       multiDevice: true,
       multiEmissionPoint: true
     },
-    notes: "Licencia de prueba inicial"
+    notes: "Prueba gratuita tipo Pro por 3 meses"
   };
   const source = license || fallback;
 
   const plan = normalizeLicensePlan(source.plan);
   const openAllModules = plan === "trial";
   const proPlan = isProLicensePlan(plan);
+  const premiumPlan = String(plan).startsWith("premium_");
   const features = {
     ...fallback.features,
     ...(source.features || {})
   };
-  const multiEmissionPoint = openAllModules || proPlan;
+  const multiEmissionPoint = openAllModules || proPlan || premiumPlan;
 
   return {
     ...fallback,
@@ -482,7 +503,7 @@ function sanitizeLicense(license?: AppLicense): AppLicense {
     expiresAt: normalizeDate(source.expiresAt) || fallback.expiresAt,
     maxUsers: positiveInteger(source.maxUsers, fallback.maxUsers),
     maxDevices: positiveInteger(source.maxDevices, fallback.maxDevices),
-    maxEmissionPoints: multiEmissionPoint ? Math.max(999, positiveInteger(source.maxEmissionPoints || 999, 999)) : 1,
+    maxEmissionPoints: multiEmissionPoint ? positiveInteger(source.maxEmissionPoints || 0, openAllModules ? 3 : 999) : 1,
     features: {
       ...features,
       sales: openAllModules || features.sales !== false,

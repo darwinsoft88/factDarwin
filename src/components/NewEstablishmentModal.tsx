@@ -1,5 +1,6 @@
 import React from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { sanitizeIntegerInput } from "../utils/numbers";
 import { Input, PrimaryButton } from "./common";
 
@@ -24,45 +25,52 @@ type NewEstablishmentModalProps = {
 export function NewEstablishmentModal({ visible, form, onChange, onClose, onSave }: NewEstablishmentModalProps) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.creditModalBackdrop}>
-        <View style={styles.establishmentModal}>
-          <View style={styles.creditModalHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.creditModalTitle}>Nuevo establecimiento</Text>
-              <Text style={styles.creditModalMeta}>Disponible para clientes con plan Pro activo.</Text>
+      <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+        <View style={styles.creditModalBackdrop}>
+          <View style={styles.establishmentModal}>
+            <View style={styles.creditModalHeader}>
+              <View style={styles.flex}>
+                <Text style={styles.creditModalTitle}>Nuevo establecimiento</Text>
+                <Text style={styles.creditModalMeta}>Disponible para clientes con plan Pro activo.</Text>
+              </View>
+              <Pressable style={styles.smallButton} onPress={onClose}>
+                <Text style={styles.smallButtonText}>Cerrar</Text>
+              </Pressable>
             </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
-            </Pressable>
+            <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+              <Input label="Nombre establecimiento" value={form.name} onChangeText={(name) => onChange({ ...form, name })} />
+              <View style={styles.row}>
+                <View style={styles.flex}>
+                  <Input label="Estab." value={form.establishment} onChangeText={(establishment) => onChange({ ...form, establishment: sanitizeIntegerInput(establishment).slice(0, 3) })} keyboardType="number-pad" />
+                </View>
+                <View style={styles.flex}>
+                  <Input label="Pto. emi." value={form.emissionPoint} onChangeText={(emissionPoint) => onChange({ ...form, emissionPoint: sanitizeIntegerInput(emissionPoint).slice(0, 3) })} keyboardType="number-pad" />
+                </View>
+              </View>
+              <Input label="Direccion establecimiento" value={form.address} onChangeText={(address) => onChange({ ...form, address })} />
+              <Input label="Siguiente secuencial" value={form.sequential} onChangeText={(sequential) => onChange({ ...form, sequential: sanitizeIntegerInput(sequential) })} keyboardType="number-pad" />
+              <Input label="Siguiente secuencial guia" value={form.remissionSequential} onChangeText={(remissionSequential) => onChange({ ...form, remissionSequential: sanitizeIntegerInput(remissionSequential) })} keyboardType="number-pad" />
+              <Input label="Siguiente secuencial nota credito" value={form.creditNoteSequential} onChangeText={(creditNoteSequential) => onChange({ ...form, creditNoteSequential: sanitizeIntegerInput(creditNoteSequential) })} keyboardType="number-pad" />
+              <PrimaryButton label="Guardar establecimiento" onPress={onSave} />
+            </ScrollView>
           </View>
-          <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled">
-            <Input label="Nombre establecimiento" value={form.name} onChangeText={(name) => onChange({ ...form, name })} />
-            <View style={styles.row}>
-              <View style={styles.flex}>
-                <Input label="Estab." value={form.establishment} onChangeText={(establishment) => onChange({ ...form, establishment: sanitizeIntegerInput(establishment).slice(0, 3) })} keyboardType="number-pad" />
-              </View>
-              <View style={styles.flex}>
-                <Input label="Pto. emi." value={form.emissionPoint} onChangeText={(emissionPoint) => onChange({ ...form, emissionPoint: sanitizeIntegerInput(emissionPoint).slice(0, 3) })} keyboardType="number-pad" />
-              </View>
-            </View>
-            <Input label="Direccion establecimiento" value={form.address} onChangeText={(address) => onChange({ ...form, address })} />
-            <Input label="Siguiente secuencial" value={form.sequential} onChangeText={(sequential) => onChange({ ...form, sequential: sanitizeIntegerInput(sequential) })} keyboardType="number-pad" />
-            <Input label="Siguiente secuencial guia" value={form.remissionSequential} onChangeText={(remissionSequential) => onChange({ ...form, remissionSequential: sanitizeIntegerInput(remissionSequential) })} keyboardType="number-pad" />
-            <Input label="Siguiente secuencial nota credito" value={form.creditNoteSequential} onChangeText={(creditNoteSequential) => onChange({ ...form, creditNoteSequential: sanitizeIntegerInput(creditNoteSequential) })} keyboardType="number-pad" />
-            <PrimaryButton label="Guardar establecimiento" onPress={onSave} />
-          </ScrollView>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoiding: {
+    flex: 1
+  },
   creditModalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.4)",
     justifyContent: "flex-end",
-    padding: 12
+    paddingHorizontal: MODAL_EDGE_PADDING,
+    paddingTop: MODAL_EDGE_PADDING,
+    paddingBottom: MODAL_SAFE_BOTTOM_PADDING
   },
   establishmentModal: {
     maxHeight: "92%",
@@ -108,6 +116,7 @@ const styles = StyleSheet.create({
   },
   creditModalContent: {
     padding: 14,
+    paddingBottom: MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING,
     gap: 10
   },
   row: {

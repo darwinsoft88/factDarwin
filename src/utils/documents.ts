@@ -37,7 +37,7 @@ export function resolveInvoiceStatus(result: AuthorizationResponse): Sale["statu
   if (raw.includes("DEVUELTA")) return "DEVUELTA";
   if (result.ok === false || raw.includes("RECHAZADA") || raw.includes("ERROR") || raw.includes("NO AUTORIZADO")) return "ERROR_SRI";
   if (result.sent) return "ENVIADA";
-  return result.signedXml ? "FIRMADA" : "BORRADOR";
+  return result.signedXml ? "FIRMADA" : "PENDIENTE_SRI";
 }
 
 export function isAccessKeyUsed(data: AppData, accessKey: string, currentId = "") {

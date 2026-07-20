@@ -1,5 +1,5 @@
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import { AppLegalFooter } from "./AppLegalFooter";
 import { Input, PrimaryButton } from "./common";
@@ -9,6 +9,8 @@ import { PasswordVisibilityButton } from "./inputActions";
 import type { BackendCompanyOption } from "../services/backend";
 import type { IssuerEstablishment } from "../types";
 import { APP_BRAND } from "../constants/app";
+import { AUTH_KEYBOARD_BOTTOM_PADDING, KEYBOARD_AVOIDING_BEHAVIOR } from "../constants/layout";
+import { PRODUCTION_BACKEND_URL } from "../database";
 import { sanitizeIntegerInput } from "../utils/numbers";
 
 export type AuthScreenProps = {
@@ -96,11 +98,39 @@ export function AuthScreen({
   chooseLoginEstablishment,
   onCancelEstablishmentSelection
 }: AuthScreenProps) {
+  const [serverSettingsVisible, setServerSettingsVisible] = useState(false);
+  const uniqueCompanyOptions = useMemo(() => dedupeCompanyOptions(companyOptions), [companyOptions]);
+  const serverUrlInput = __DEV__ ? (
+    <View style={styles.serverUrlBlock}>
+      <Pressable style={styles.serverUrlToggle} onPress={() => setServerSettingsVisible((visible) => !visible)}>
+        <Text style={styles.serverUrlResetText}>{serverSettingsVisible ? "Ocultar servidor de pruebas" : "Servidor de pruebas"}</Text>
+      </Pressable>
+      {serverSettingsVisible ? (
+        <>
+          <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" autoCorrect={false} autoComplete="url" keyboardType="url" textContentType="URL" />
+          {authBackendUrl.trim() !== PRODUCTION_BACKEND_URL ? (
+            <Pressable style={styles.serverUrlReset} onPress={() => setAuthBackendUrl(PRODUCTION_BACKEND_URL)}>
+              <Text style={styles.serverUrlResetText}>Usar servidor oficial</Text>
+            </Pressable>
+          ) : null}
+        </>
+      ) : null}
+    </View>
+  ) : null;
+
   return (
     <SafeAreaView style={styles.screen}>
       <ExpoStatusBar style="dark" />
-      <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <ScrollView contentContainerStyle={styles.loginPanel} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+      <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.loginPanel,
+            authMode !== "login" && styles.loginPanelForm,
+            { paddingBottom: authMode === "login" ? 90 : AUTH_KEYBOARD_BOTTOM_PADDING }
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
           <View style={styles.loginBrandRow}>
             <View style={styles.loginBrandMark}>
               <Text style={styles.loginBrandMarkText}>FD</Text>
@@ -111,7 +141,7 @@ export function AuthScreen({
             <>
               <View style={styles.authCard}>
                 <Text style={styles.authTitle}>INICIAR SESION</Text>
-                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" autoCorrect={false} autoComplete="url" keyboardType="url" textContentType="URL" />
+                {serverUrlInput}
                 <Input label="Correo o RUC" value={email} onChangeText={setEmail} autoCapitalize="none" />
                 <Input
                   label="Clave"
@@ -124,9 +154,9 @@ export function AuthScreen({
                 />
                 <PrimaryButton label="Ingresar" onPress={() => login()} />
                 {loginStatus ? <Text style={[styles.authFeedback, loginStatus.tone === "error" && styles.authFeedbackError, loginStatus.tone === "success" && styles.authFeedbackSuccess]}>{loginStatus.message}</Text> : null}
-                {companyOptions.length > 0 ? (
+                {uniqueCompanyOptions.length > 0 ? (
                   <View style={styles.companyChoiceList}>
-                    {companyOptions.map((company) => (
+                    {uniqueCompanyOptions.map((company) => (
                       <Pressable key={company.id} style={styles.companyChoice} onPress={() => login(company.id)}>
                         <Text style={styles.companyChoiceTitle}>{company.tradeName || company.businessName || "Empresa"}</Text>
                         <Text style={styles.companyChoiceMeta}>RUC {company.ruc} | {company.role || "usuario"}</Text>
@@ -147,7 +177,7 @@ export function AuthScreen({
               <View style={styles.authCard}>
                 <Text style={styles.authTitle}>CREAR CUENTA</Text>
                 <Text style={styles.authSubtitle}>Registre su propia empresa con RUC activo en el SRI</Text>
-                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" autoCorrect={false} autoComplete="url" keyboardType="url" textContentType="URL" />
+                {serverUrlInput}
                 <Input label="RUC" value={registerForm.ruc} onChangeText={(ruc) => setRegisterForm({ ...registerForm, ruc: sanitizeIntegerInput(ruc).slice(0, 13) })} keyboardType="number-pad" />
                 <Input label="Razon social o nombre del negocio" value={registerForm.businessName} onChangeText={(businessName) => setRegisterForm({ ...registerForm, businessName })} placeholder="Ej. Comercial Andina" />
                 <Input label="Nombre comercial (opcional)" value={registerForm.tradeName} onChangeText={(tradeName) => setRegisterForm({ ...registerForm, tradeName })} placeholder="Ej. Market Andina" />
@@ -171,7 +201,7 @@ export function AuthScreen({
               <View style={styles.authCard}>
                 <Text style={styles.authTitle}>RECUPERAR CONTRASENA</Text>
                 <Text style={styles.authSubtitle}>Recibira una clave temporal en el correo registrado</Text>
-                <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" autoCorrect={false} autoComplete="url" keyboardType="url" textContentType="URL" />
+                {serverUrlInput}
                 <Input label="Correo o RUC" value={recoveryIdentifier} onChangeText={setRecoveryIdentifier} autoCapitalize="none" />
                 <PrimaryButton label={recoveringPassword ? "Enviando..." : "Enviar clave temporal"} onPress={recoverPassword} />
                 {recoverStatus ? <Text style={[styles.authFeedback, recoverStatus.tone === "error" && styles.authFeedbackError, recoverStatus.tone === "success" && styles.authFeedbackSuccess]}>{recoverStatus.message}</Text> : null}
@@ -198,6 +228,16 @@ export function AuthScreen({
   );
 }
 
+function dedupeCompanyOptions(options: BackendCompanyOption[]) {
+  const seen = new Set<string>();
+  return options.filter((company) => {
+    const key = company.id || company.ruc;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -211,6 +251,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 24,
     backgroundColor: "#f7f9fc"
+  },
+  loginPanelForm: {
+    justifyContent: "flex-start",
+    paddingTop: 34
   },
   loginBrandRow: {
     marginBottom: 28,
@@ -250,6 +294,22 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 6
+  },
+  serverUrlBlock: {
+    gap: 4
+  },
+  serverUrlToggle: {
+    alignSelf: "flex-start",
+    paddingVertical: 2
+  },
+  serverUrlReset: {
+    alignSelf: "flex-start",
+    paddingVertical: 2
+  },
+  serverUrlResetText: {
+    color: "#0f766e",
+    fontSize: 12,
+    fontWeight: "900"
   },
   authTitle: {
     marginBottom: 10,

@@ -1,6 +1,9 @@
 import { Client, Sale, SaleItem } from "../types";
+import { dateKey } from "./format";
 import { isTicketOffline } from "./invoiceStatus";
 import { parseDecimal, roundMoney } from "./numbers";
+
+const duplicatePendingStatuses = new Set<Sale["status"]>(["BORRADOR", "FIRMADA", "PENDIENTE_SRI", "ENVIADA", "ENVIADA_SRI"]);
 
 export function saleStatusReducesStock(status: Sale["status"]) {
   return status === "AUTORIZADA" || status === "ENVIADA" || status === "FIRMADA" || status === "ENVIADA_SRI" || status === "PENDIENTE_SRI" || isTicketOffline(status);
@@ -11,11 +14,39 @@ export function saleNeedsStockDiscount(status: Sale["status"]) {
 }
 
 export function canEditSale(sale: Sale) {
-  return !isCreditNoteSale(sale) && sale.status !== "AUTORIZADA" && sale.status !== "ANULADA";
+  if (isInvoiceSale(sale) && ["FIRMADA", "PENDIENTE_SRI", "ENVIADA", "ENVIADA_SRI"].includes(sale.status)) return false;
+  return !isCreditNoteSale(sale) && sale.status !== "AUTORIZADA" && sale.status !== "ANULADA" && !isConvertedSale(sale);
 }
 
 export function isInvoiceSale(sale: Sale) {
   return (sale.documentType || "factura") === "factura";
+}
+
+export function isPendingOfficialInvoice(sale: Sale) {
+  return isInvoiceSale(sale) && duplicatePendingStatuses.has(sale.status);
+}
+
+export function findPotentialDuplicatePendingInvoice(sales: Sale[], draft: Pick<Sale, "id" | "clientId" | "createdAt" | "establishment" | "emissionPoint" | "paymentMethod" | "subtotal" | "tax" | "total" | "items" | "sourceSaleId">) {
+  const draftSignature = saleDuplicateSignature(draft);
+
+  return sales.find((sale) => {
+    if (sale.id === draft.id) return false;
+    if (!isPendingOfficialInvoice(sale)) return false;
+    if (sale.sourceSaleId && draft.sourceSaleId && sale.sourceSaleId === draft.sourceSaleId) return true;
+    if (dateKey(new Date(sale.createdAt)) !== dateKey(new Date(draft.createdAt))) return false;
+    return saleDuplicateSignature(sale) === draftSignature;
+  });
+}
+
+export function uniquePendingOfficialInvoices(sales: Sale[]) {
+  const seen = new Set<string>();
+  return sales.filter((sale) => {
+    if (!isPendingOfficialInvoice(sale)) return true;
+    const signature = sale.sourceSaleId ? `source:${sale.sourceSaleId}` : saleDuplicateSignature(sale);
+    if (seen.has(signature)) return false;
+    seen.add(signature);
+    return true;
+  });
 }
 
 export function isCreditNoteSale(sale: Sale) {
@@ -27,6 +58,10 @@ export function documentTypeLabel(sale: Sale) {
   if (isInvoiceSale(sale)) return "Factura SRI";
   if (sale.documentType === "proforma") return "Proforma";
   return "Nota de venta";
+}
+
+export function isConvertedSale(sale: Sale) {
+  return sale.status === "CONVERTIDA" || (sale.status === "ANULADA" && Boolean(sale.voidReason?.toLowerCase().includes("convertida a")));
 }
 
 export function isTaxableSale(sale: Sale) {
@@ -139,6 +174,25 @@ function sameCreditLine(sourceItem: SaleItem, creditItem: SaleItem) {
     sourceItem.name === creditItem.name &&
     Math.abs(sourceItem.unitPrice - creditItem.unitPrice) < 0.000001 &&
     Math.abs(sourceItem.ivaRate - creditItem.ivaRate) < 0.000001;
+}
+
+function saleDuplicateSignature(sale: Pick<Sale, "clientId" | "establishment" | "emissionPoint" | "paymentMethod" | "subtotal" | "tax" | "total" | "items">) {
+  const scope = `${sale.establishment || ""}-${sale.emissionPoint || ""}`;
+  const totals = `${roundMoney(sale.subtotal).toFixed(2)}|${roundMoney(sale.tax).toFixed(2)}|${roundMoney(sale.total).toFixed(2)}`;
+  const lines = sale.items.map(lineDuplicateSignature).sort().join(";");
+  return [sale.clientId, scope, sale.paymentMethod || "01", totals, lines].join("::");
+}
+
+function lineDuplicateSignature(item: SaleItem) {
+  return [
+    item.productId,
+    item.code,
+    item.name.trim().toLowerCase(),
+    Number(item.quantity.toFixed(6)).toFixed(6),
+    Number(item.unitPrice.toFixed(6)).toFixed(6),
+    roundMoney(item.discount || 0).toFixed(2),
+    Number(item.ivaRate.toFixed(6)).toFixed(6)
+  ].join("|");
 }
 
 function getCreditedQuantityForLine(sales: Sale[], sourceSaleId: string, sourceItem: SaleItem, sourceIndex: number) {

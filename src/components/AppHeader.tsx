@@ -15,8 +15,6 @@ type AppHeaderProps = {
   license?: AppLicense;
   licenseActive: boolean;
   logoUrl: string;
-  syncError: boolean;
-  syncNotice: string;
   onOpenMenu: () => void;
 };
 
@@ -28,8 +26,6 @@ export function AppHeader({
   license,
   licenseActive,
   logoUrl,
-  syncError,
-  syncNotice,
   onOpenMenu
 }: AppHeaderProps) {
   return (
@@ -37,14 +33,16 @@ export function AppHeader({
       <View style={styles.brandRow}>
         <CompanyLogoMark logoUrl={logoUrl} backendUrl={backendUrl} />
         <View style={styles.flex}>
-          <View style={styles.headerMetaRow}>
-            <Text style={styles.headerBrand} numberOfLines={1}>{APP_BRAND}</Text>
-            <Text style={[styles.licensePill, !licenseActive && styles.licensePillError]} numberOfLines={1}>{compactLicenseStatusLabel(license)}</Text>
-          </View>
-          <Text style={styles.headerCompany} numberOfLines={1}>{shortText(companyLabel || "Empresa", 34)}</Text>
-          <Text style={styles.scopeStatus} numberOfLines={1}>{establishmentLabel}</Text>
-          {syncNotice ? <Text style={[styles.syncStatus, syncError && styles.syncStatusError]} numberOfLines={1}>{syncNotice}</Text> : null}
+        <View style={styles.headerMetaRow}>
+          <Text style={styles.headerBrand} numberOfLines={1}>{APP_BRAND}</Text>
+          <Text style={[styles.licensePill, !licenseActive && styles.licensePillError]} numberOfLines={1}>{compactLicenseStatusLabel(license)}</Text>
         </View>
+        <View style={styles.companyScopeRow}>
+          <Text style={styles.headerCompany} numberOfLines={1}>{shortText(companyLabel || "Empresa", 22)}</Text>
+          <Text style={styles.scopeSeparator}>·</Text>
+          <Text style={styles.scopeStatus} numberOfLines={1}>{shortText(establishmentLabel, 26)}</Text>
+        </View>
+      </View>
       </View>
       <Pressable accessibilityRole="button" accessibilityLabel="Abrir menu" style={styles.headerMenuButton} onPress={onOpenMenu}>
         <MenuIcon />
@@ -88,28 +86,31 @@ const styles = StyleSheet.create({
     gap: 8
   },
   headerCompany: {
-    marginTop: 1,
+    flexShrink: 1,
     color: "#334155",
     fontSize: 11,
     fontWeight: "900",
     lineHeight: 14
   },
-  syncStatus: {
-    marginTop: 2,
-    color: "#c2410c",
-    fontSize: 10,
-    fontWeight: "800",
-    lineHeight: 13
-  },
-  scopeStatus: {
+  companyScopeRow: {
     marginTop: 1,
-    color: "#0f766e",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    minWidth: 0
+  },
+  scopeSeparator: {
+    color: "#94a3b8",
     fontSize: 10,
     fontWeight: "900",
     lineHeight: 13
   },
-  syncStatusError: {
-    color: "#b91c1c"
+  scopeStatus: {
+    flexShrink: 2,
+    color: "#0f766e",
+    fontSize: 10,
+    fontWeight: "900",
+    lineHeight: 13
   },
   licensePill: {
     flexShrink: 0,

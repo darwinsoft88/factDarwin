@@ -9,6 +9,10 @@ type IssuerTaxSettingsProps = {
   onChange: (issuer: Issuer) => void;
 };
 
+function normalizeResolutionInput(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 40);
+}
+
 export function IssuerTaxSettings({ issuer, onChange }: IssuerTaxSettingsProps) {
   return (
     <>
@@ -67,7 +71,13 @@ export function IssuerTaxSettings({ issuer, onChange }: IssuerTaxSettingsProps) 
         ]}
       />
       {issuer.retentionAgent === "SI" ? (
-        <Input label="Resolucion agente de retencion" value={issuer.retentionAgentResolution || ""} onChangeText={(retentionAgentResolution) => onChange({ ...issuer, retentionAgentResolution: sanitizeIntegerInput(retentionAgentResolution) })} keyboardType="number-pad" />
+        <Input
+          label="Resolucion agente de retencion"
+          value={issuer.retentionAgentResolution || ""}
+          onChangeText={(retentionAgentResolution) => onChange({ ...issuer, retentionAgentResolution: normalizeResolutionInput(retentionAgentResolution) })}
+          placeholder="Ej. NAC-DNCRASC20-00000001"
+          autoCapitalize="characters"
+        />
       ) : null}
     </>
   );

@@ -1,8 +1,10 @@
 import React from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { money } from "../services/sri";
+import { money } from "../sri";
 import { Product } from "../types";
 import { productMinStock } from "../utils/accounting";
+import { catalogItemIcon, isServiceItem } from "../utils/catalogItems";
 
 type SelectedProductCardProps = {
   product?: Product;
@@ -11,20 +13,23 @@ type SelectedProductCardProps = {
 
 export function SelectedProductCard({ product, onAdd }: SelectedProductCardProps) {
   if (!product) return null;
+  const isService = isServiceItem(product);
 
   return (
     <View style={styles.productSummaryCard}>
-      <View style={styles.productIcon}>
-        <Text style={styles.productIconText}>▣</Text>
+      <View style={[styles.productIcon, isService && styles.serviceIcon]}>
+        <MaterialCommunityIcons name={catalogItemIcon(product)} size={15} color={isService ? "#6d28d9" : "#047857"} />
       </View>
       <View style={styles.flex}>
         <Text style={styles.itemTitle} numberOfLines={1}>{product.name}</Text>
-        <Text style={styles.inlineInfo} numberOfLines={1}>Existencia {product.stock} | Min. {productMinStock(product)} | IVA {money(product.ivaRate * 100)}%</Text>
+        <Text style={styles.inlineInfo} numberOfLines={1}>
+          {isService ? `Servicio | IVA ${money(product.ivaRate * 100)}% | sin stock` : `Stock ${product.stock} | Min. ${productMinStock(product)} | IVA ${money(product.ivaRate * 100)}%`}
+        </Text>
       </View>
       <Text style={styles.price}>${money(product.price)}</Text>
       {onAdd ? (
         <Pressable accessibilityRole="button" accessibilityLabel="Agregar producto a la venta" style={styles.addIconButton} onPress={onAdd}>
-          <Text style={styles.addIconText}>+</Text>
+          <MaterialCommunityIcons name="plus" size={24} color="#047857" />
         </Pressable>
       ) : null}
     </View>
@@ -51,10 +56,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  productIconText: {
-    color: "#047857",
-    fontSize: 14,
-    fontWeight: "900"
+  serviceIcon: {
+    backgroundColor: "#f5f3ff"
   },
   flex: {
     flex: 1,
@@ -86,11 +89,5 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center"
-  },
-  addIconText: {
-    color: "#047857",
-    fontSize: 24,
-    lineHeight: 26,
-    fontWeight: "600"
   }
 });

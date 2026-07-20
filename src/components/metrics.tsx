@@ -1,18 +1,29 @@
 import React from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-export function QuickAction({ label, onPress }: { label: string; onPress: () => void }) {
+type MetricIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
+
+export function QuickAction({ label, onPress, icon }: { label: string; onPress: () => void; icon?: MetricIconName }) {
   return (
     <Pressable style={styles.quickAction} onPress={onPress}>
+      {icon ? (
+        <View style={styles.quickActionIcon}>
+          <MaterialCommunityIcons name={icon} size={17} color="#0f766e" />
+        </View>
+      ) : null}
       <Text style={styles.quickActionText}>{label}</Text>
     </Pressable>
   );
 }
 
-export function AlertRow({ title, detail, tone }: { title: string; detail: string; tone: "warning" | "danger" }) {
+export function AlertRow({ title, detail, tone, icon }: { title: string; detail: string; tone: "warning" | "danger"; icon?: MetricIconName }) {
   return (
     <View style={[styles.alertRow, tone === "danger" ? styles.alertDanger : styles.alertWarning]}>
-      <Text style={[styles.alertTitle, tone === "danger" ? styles.alertDangerText : styles.alertWarningText]}>{title}</Text>
+      <View style={styles.alertHeader}>
+        {icon ? <MaterialCommunityIcons name={icon} size={17} color={tone === "danger" ? "#991b1b" : "#92400e"} /> : null}
+        <Text style={[styles.alertTitle, tone === "danger" ? styles.alertDangerText : styles.alertWarningText]}>{title}</Text>
+      </View>
       <Text style={[styles.alertDetail, tone === "danger" ? styles.alertDangerText : styles.alertWarningText]}>{detail}</Text>
     </View>
   );
@@ -27,20 +38,35 @@ export function ReportRow({ label, value, strong }: { label: string; value: stri
   );
 }
 
-export function OperationTile({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: "success" | "warning" | "danger" }) {
+export function OperationTile({ title, value, detail, tone, icon }: { title: string; value: string; detail: string; tone: "success" | "warning" | "danger"; icon?: MetricIconName }) {
   return (
     <View style={[styles.operationTile, tone === "success" && styles.operationSuccess, tone === "warning" && styles.operationWarning, tone === "danger" && styles.operationDanger]}>
-      <Text style={[styles.operationTitle, tone === "success" && styles.operationSuccessText, tone === "warning" && styles.operationWarningText, tone === "danger" && styles.operationDangerText]}>{title}</Text>
+      <View style={styles.operationHeader}>
+        {icon ? (
+          <View style={[styles.operationIcon, tone === "success" && styles.operationIconSuccess, tone === "warning" && styles.operationIconWarning, tone === "danger" && styles.operationIconDanger]}>
+            <MaterialCommunityIcons name={icon} size={16} color={tone === "success" ? "#166534" : tone === "warning" ? "#92400e" : "#991b1b"} />
+          </View>
+        ) : null}
+        <Text style={[styles.operationTitle, tone === "success" && styles.operationSuccessText, tone === "warning" && styles.operationWarningText, tone === "danger" && styles.operationDangerText]}>{title}</Text>
+      </View>
       <Text style={styles.operationValue}>{value}</Text>
       <Text style={styles.operationDetail}>{detail}</Text>
     </View>
   );
 }
 
-export function StatBox({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "success" | "warning" | "danger" | "info" }) {
+export function StatBox({ label, value, tone = "default", icon }: { label: string; value: string; tone?: "default" | "success" | "warning" | "danger" | "info"; icon?: MetricIconName }) {
+  const iconColor = tone === "success" ? "#15803d" : tone === "warning" ? "#b45309" : tone === "danger" ? "#b91c1c" : tone === "info" ? "#1d4ed8" : "#0f766e";
   return (
     <View style={[styles.statBox, tone === "success" && styles.statBoxSuccess, tone === "warning" && styles.statBoxWarning, tone === "danger" && styles.statBoxDanger, tone === "info" && styles.statBoxInfo]}>
-      <Text style={styles.statValue}>{value}</Text>
+      <View style={styles.statHeader}>
+        <Text style={styles.statValue}>{value}</Text>
+        {icon ? (
+          <View style={[styles.statIcon, tone === "success" && styles.statIconSuccess, tone === "warning" && styles.statIconWarning, tone === "danger" && styles.statIconDanger, tone === "info" && styles.statIconInfo]}>
+            <MaterialCommunityIcons name={icon} size={15} color={iconColor} />
+          </View>
+        ) : null}
+      </View>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
@@ -59,9 +85,40 @@ const styles = StyleSheet.create({
     minHeight: 48,
     justifyContent: "center"
   },
+  quickActionIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#d1fae5",
+    marginBottom: 6
+  },
   quickActionText: {
     color: "#0f766e",
     fontWeight: "900"
+  },
+  operationHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7
+  },
+  operationIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#e2e8f0"
+  },
+  operationIconSuccess: {
+    backgroundColor: "#dcfce7"
+  },
+  operationIconWarning: {
+    backgroundColor: "#fef3c7"
+  },
+  operationIconDanger: {
+    backgroundColor: "#fee2e2"
   },
   operationTile: {
     flexGrow: 1,
@@ -131,6 +188,32 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 1
   },
+  statHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8
+  },
+  statIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#e0f2fe"
+  },
+  statIconSuccess: {
+    backgroundColor: "#dcfce7"
+  },
+  statIconWarning: {
+    backgroundColor: "#fef3c7"
+  },
+  statIconDanger: {
+    backgroundColor: "#fee2e2"
+  },
+  statIconInfo: {
+    backgroundColor: "#dbeafe"
+  },
   statBoxSuccess: {
     borderColor: "#bbf7d0",
     backgroundColor: "#f0fdf4"
@@ -184,6 +267,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 8,
     padding: 10
+  },
+  alertHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7
   },
   alertWarning: {
     borderColor: "#fde68a",

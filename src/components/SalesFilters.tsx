@@ -1,7 +1,7 @@
 import React from "react";
-import { StyleSheet, View } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { DateRangeFilter } from "./DateRangeFilter";
-import { Input, Select } from "./common";
 
 export type SalesStatusFilter =
   | "TODAS"
@@ -14,16 +14,15 @@ export type SalesStatusFilter =
   | "ENVIADA_SRI"
   | "PENDIENTE_SRI"
   | "ANULADA"
+  | "CONVERTIDA"
   | "TICKET_OFFLINE"
   | "PROFORMA"
   | "NOTA_CREDITO";
 
 type SalesFiltersProps = {
-  search: string;
   startDate: string;
   endDate: string;
   status: string;
-  onSearchChange: (value: string) => void;
   onStartDateChange: (value: string) => void;
   onEndDateChange: (value: string) => void;
   onToday: () => void;
@@ -37,21 +36,20 @@ const statusOptions = [
   { label: "Autorizadas", value: "AUTORIZADA" },
   { label: "Devueltas", value: "DEVUELTA" },
   { label: "Error SRI", value: "ERROR_SRI" },
-  { label: "Firmadas", value: "FIRMADA" },
-  { label: "Enviadas SRI", value: "ENVIADA" },
+  { label: "Pendientes envio SRI", value: "FIRMADA" },
+  { label: "En revision SRI", value: "ENVIADA" },
   { label: "Borradores", value: "BORRADOR" },
   { label: "Anuladas", value: "ANULADA" },
+  { label: "Convertidas", value: "CONVERTIDA" },
   { label: "Notas internas", value: "TICKET_OFFLINE" },
   { label: "Proformas", value: "PROFORMA" },
   { label: "Notas credito", value: "NOTA_CREDITO" }
 ];
 
 export function SalesFilters({
-  search,
   startDate,
   endDate,
   status,
-  onSearchChange,
   onStartDateChange,
   onEndDateChange,
   onToday,
@@ -59,9 +57,11 @@ export function SalesFilters({
   onClearDates,
   onStatusChange
 }: SalesFiltersProps) {
+  const [statusVisible, setStatusVisible] = React.useState(false);
+  const selectedStatus = statusOptions.find((option) => option.value === status) || statusOptions[0];
+
   return (
     <>
-      <Input label="Buscar documento" value={search} onChangeText={onSearchChange} placeholder="Cliente, cedula, secuencial o clave" autoCapitalize="none" />
       <View style={styles.saleGroupCompact}>
         <DateRangeFilter
           title="Fecha del documento"
@@ -74,7 +74,39 @@ export function SalesFilters({
           onClear={onClearDates}
         />
       </View>
-      <Select label="Estado" value={status} onChange={onStatusChange} options={statusOptions} />
+      <View style={styles.statusRow}>
+        <Text style={styles.label}>Estado</Text>
+        <Pressable style={styles.statusButton} onPress={() => setStatusVisible(true)}>
+          <MaterialCommunityIcons name="filter-variant" size={16} color="#0f766e" />
+          <Text style={styles.statusButtonText} numberOfLines={1}>{selectedStatus?.label || "Todas"}</Text>
+          <MaterialCommunityIcons name="chevron-down" size={16} color="#475569" />
+        </Pressable>
+      </View>
+      <Modal visible={statusVisible} transparent animationType="fade" onRequestClose={() => setStatusVisible(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setStatusVisible(false)}>
+          <View style={styles.menu}>
+            <Text style={styles.menuTitle}>Filtrar estado</Text>
+            <View style={styles.optionGrid}>
+              {statusOptions.map((option) => {
+                const active = option.value === status;
+                return (
+                  <Pressable
+                    key={option.value}
+                    style={[styles.option, active && styles.optionActive]}
+                    onPress={() => {
+                      onStatusChange(option.value);
+                      setStatusVisible(false);
+                    }}
+                  >
+                    <Text style={[styles.optionText, active && styles.optionTextActive]} numberOfLines={1}>{option.label}</Text>
+                    {active ? <MaterialCommunityIcons name="check" size={15} color="#0f766e" /> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
     </>
   );
 }
@@ -87,5 +119,79 @@ const styles = StyleSheet.create({
     padding: 10,
     gap: 8,
     backgroundColor: "#ffffff"
+  },
+  statusRow: {
+    gap: 5
+  },
+  label: {
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  statusButton: {
+    alignSelf: "flex-start",
+    minHeight: 36,
+    maxWidth: "100%",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#d6e0ec",
+    backgroundColor: "#f8fafc",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingHorizontal: 10
+  },
+  statusButtonText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "900",
+    maxWidth: 210
+  },
+  backdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15, 23, 42, 0.25)",
+    justifyContent: "center",
+    padding: 20
+  },
+  menu: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#dbe4f0",
+    backgroundColor: "#ffffff",
+    padding: 10,
+    gap: 8
+  },
+  menuTitle: {
+    color: "#111827",
+    fontWeight: "900"
+  },
+  optionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7
+  },
+  option: {
+    minHeight: 34,
+    maxWidth: "100%",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#dbe4f0",
+    backgroundColor: "#f8fafc",
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5
+  },
+  optionActive: {
+    borderColor: "#0f766e",
+    backgroundColor: "#ecfdf5"
+  },
+  optionText: {
+    color: "#475569",
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  optionTextActive: {
+    color: "#0f766e"
   }
 });

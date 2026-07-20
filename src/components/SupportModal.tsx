@@ -6,12 +6,13 @@ type SupportModalProps = {
   visible: boolean;
   loading: boolean;
   diagnosticText: string;
+  showTechnicalDetails?: boolean;
   onClose: () => void;
   onRefresh: () => void;
   onShare: () => void;
 };
 
-export function SupportModal({ visible, loading, diagnosticText, onClose, onRefresh, onShare }: SupportModalProps) {
+export function SupportModal({ visible, loading, diagnosticText, showTechnicalDetails = false, onClose, onRefresh, onShare }: SupportModalProps) {
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.creditModalBackdrop}>
@@ -34,8 +35,15 @@ export function SupportModal({ visible, loading, diagnosticText, onClose, onRefr
                 <Text style={styles.secondaryActionText}>Compartir</Text>
               </Pressable>
             </View>
-            {loading ? <Text style={styles.inlineInfo}>Consultando backend y logs tecnicos...</Text> : null}
-            <Text selectable style={styles.diagnosticText}>{diagnosticText}</Text>
+            {loading ? <Text style={styles.inlineInfo}>Revisando conexion y sincronizacion...</Text> : null}
+            {showTechnicalDetails ? (
+              <Text selectable style={styles.diagnosticText}>{diagnosticText}</Text>
+            ) : (
+              <View style={styles.customerSupportCard}>
+                <Text style={styles.customerSupportTitle}>Diagnostico listo para soporte</Text>
+                <Text style={styles.customerSupportText}>Use Compartir para enviar la informacion tecnica a DarwinSoft. En esta pantalla no se muestran datos internos para evitar cambios accidentales.</Text>
+              </View>
+            )}
             <AppLegalFooter compact />
           </ScrollView>
         </View>
@@ -137,6 +145,24 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     lineHeight: 18
+  },
+  customerSupportCard: {
+    borderWidth: 1,
+    borderColor: "#bbf7d0",
+    borderRadius: 8,
+    backgroundColor: "#f0fdf4",
+    padding: 12,
+    gap: 5
+  },
+  customerSupportTitle: {
+    color: "#065f46",
+    fontWeight: "900"
+  },
+  customerSupportText: {
+    color: "#475569",
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: "700"
   },
   diagnosticText: {
     fontFamily: "monospace",

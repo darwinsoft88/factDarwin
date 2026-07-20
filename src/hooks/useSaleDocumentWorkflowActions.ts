@@ -1,16 +1,19 @@
 import React from "react";
 import { Alert } from "react-native";
 import { authorizeInvoice } from "../services/backend";
-import { buildCreditNoteXml, buildInvoiceXml } from "../services/sri";
-import { AppData, Client, DocumentType, InventoryMovement, PaymentMethod, Sale, SaleItem, User } from "../types";
+import { buildCreditNoteXml, buildInvoiceXml } from "../sri";
+import { AdditionalInfoField, AppData, Client, DocumentType, InventoryMovement, PaymentCondition, PaymentMethod, Sale, SaleItem, SalePaymentSplit, User } from "../types";
 import { appendAudit } from "../utils/audit";
+import { expireStaleSriPendingDocuments } from "../utils/autoRetrySriDocuments";
 import { getRetryInfo, MAX_DAILY_RETRIES, resolveInvoiceStatus } from "../utils/documents";
-import { getLocalVoidReason, showMessage } from "../utils/dialogs";
+import { confirmAction, getLocalVoidReason, showMessage } from "../utils/dialogs";
 import { issuerForSale } from "../utils/establishments";
 import { generateId } from "../utils/id";
 import { isSriRejected, isTicketOffline } from "../utils/invoiceStatus";
 import { canEditSale, documentTypeLabel, isCreditNoteSale, isInvoiceSale, saleNeedsStockDiscount, saleStatusReducesStock } from "../utils/sales";
 import { explainSriResult, sriUserMessage } from "../utils/sriMessages";
+import { isStaleSriPendingDocument, staleSriPendingMessage } from "../utils/sriRetryPolicy";
+import { isInventoryProduct } from "../utils/catalogItems";
 
 const uid = generateId;
 
@@ -24,8 +27,12 @@ type UseSaleDocumentWorkflowActionsParams = {
   setEditingSaleId: React.Dispatch<React.SetStateAction<string>>;
   setIssueNotice: React.Dispatch<React.SetStateAction<string>>;
   setItems: React.Dispatch<React.SetStateAction<SaleItem[]>>;
+  setAdditionalInfo: React.Dispatch<React.SetStateAction<AdditionalInfoField[]>>;
   setNotice: React.Dispatch<React.SetStateAction<string>>;
   setPaymentMethod: React.Dispatch<React.SetStateAction<PaymentMethod>>;
+  setSalePayments: React.Dispatch<React.SetStateAction<SalePaymentSplit[]>>;
+  setPaymentCondition: React.Dispatch<React.SetStateAction<PaymentCondition>>;
+  setCreditDueDate: React.Dispatch<React.SetStateAction<string>>;
   setProcessingMessage: React.Dispatch<React.SetStateAction<string>>;
   setRetryingSaleId: React.Dispatch<React.SetStateAction<string>>;
   setSourceProformaId: React.Dispatch<React.SetStateAction<string>>;
@@ -41,14 +48,25 @@ export function useSaleDocumentWorkflowActions({
   setEditingSaleId,
   setIssueNotice,
   setItems,
+  setAdditionalInfo,
   setNotice,
   setPaymentMethod,
+  setSalePayments,
+  setPaymentCondition,
+  setCreditDueDate,
   setProcessingMessage,
   setRetryingSaleId,
   setSourceProformaId,
   setSourceTicketId,
   user
 }: UseSaleDocumentWorkflowActionsParams) {
+  const loadPaymentTerms = (sale: Sale) => {
+    setPaymentMethod(sale.paymentMethod || "01");
+    setSalePayments(sale.payments || []);
+    setPaymentCondition(sale.paymentCondition || (sale.creditBalance && sale.creditBalance > 0 ? "credito" : "contado"));
+    setCreditDueDate(sale.creditDueDate || "");
+  };
+
   const retrySale = async (sale: Sale, client: Client) => {
     if (!isInvoiceSale(sale) && !isCreditNoteSale(sale)) {
       Alert.alert("Documento interno", "Este documento no se envia al SRI.");
@@ -56,6 +74,14 @@ export function useSaleDocumentWorkflowActions({
     }
     if (sale.status === "ANULADA") {
       Alert.alert("Documento anulado", "Este documento ya fue anulado localmente y no se puede reintentar.");
+      return;
+    }
+    if (isStaleSriPendingDocument(sale)) {
+      const message = staleSriPendingMessage(sale);
+      const expiredResult = expireStaleSriPendingDocuments(data, user);
+      await persist(expiredResult.data);
+      setNotice(message);
+      Alert.alert("Fuera del dia permitido", `${message}\n\nPor norma operativa, emita un nuevo comprobante con fecha actual.`);
       return;
     }
     const retryInfo = getRetryInfo(sale);
@@ -86,12 +112,15 @@ export function useSaleDocumentWorkflowActions({
         retryHistory: [...(sale.retryHistory || []), retryAt]
       };
       const stockMovements: InventoryMovement[] = [];
-      const shouldDiscountStock = isInvoiceSale(sale) && saleNeedsStockDiscount(sale.status) && !isSriRejected(updatedSale.status) && updatedSale.status !== "ANULADA";
+      const sourceSale = sale.sourceSaleId ? data.sales.find((item) => item.id === sale.sourceSaleId) : undefined;
+      const sourceTicketAlreadyDiscountedStock = sourceSale?.documentType === "nota_venta" && isTicketOffline(sourceSale.status);
+      const shouldDiscountStock = isInvoiceSale(sale) && !sourceTicketAlreadyDiscountedStock && saleNeedsStockDiscount(sale.status) && !isSriRejected(updatedSale.status) && updatedSale.status !== "ANULADA";
       const shouldRestoreCreditStock = isCreditNoteSale(sale) && sale.status !== "AUTORIZADA" && updatedSale.status === "AUTORIZADA";
       const stockSourceSale = shouldRestoreCreditStock ? data.sales.find((item) => item.id === sale.sourceSaleId) : undefined;
       const nextProducts = shouldDiscountStock
         ? data.products.map((product) => {
-            const soldQuantity = sale.items.filter((item) => item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
+            if (!isInventoryProduct(product)) return product;
+            const soldQuantity = sale.items.filter((item) => isInventoryProduct(item) && item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
             if (soldQuantity <= 0) return product;
             const stockAfter = product.stock - soldQuantity;
             stockMovements.push({
@@ -111,7 +140,8 @@ export function useSaleDocumentWorkflowActions({
           })
         : shouldRestoreCreditStock
           ? data.products.map((product) => {
-              const returnedQuantity = sale.items.filter((item) => item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
+              if (!isInventoryProduct(product)) return product;
+              const returnedQuantity = sale.items.filter((item) => isInventoryProduct(item) && item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
               if (returnedQuantity <= 0) return product;
               const stockAfter = product.stock + returnedQuantity;
               stockMovements.push({
@@ -131,11 +161,27 @@ export function useSaleDocumentWorkflowActions({
             })
           : data.products;
 
+      const convertedAt = new Date().toISOString();
       await persist(appendAudit({
         ...data,
         products: nextProducts,
         inventoryMovements: [...stockMovements, ...(data.inventoryMovements || [])],
-        sales: data.sales.map((item) => (item.id === sale.id ? updatedSale : item))
+        sales: data.sales.map((item) => {
+          if (item.id === sale.id) return updatedSale;
+          if (updatedSale.status === "AUTORIZADA" && sourceSale && item.id === sourceSale.id && (isTicketOffline(item.status) || item.status === "PROFORMA")) {
+            return {
+              ...item,
+              status: "CONVERTIDA" as const,
+              voidReason: `Convertida a factura ${updatedSale.sequence}`,
+              voidedAt: convertedAt,
+              convertedAt,
+              convertedToSaleId: updatedSale.id,
+              convertedToSequence: updatedSale.sequence,
+              sriMessage: `Convertida a factura ${updatedSale.sequence}`
+            };
+          }
+          return item;
+        })
       }, user, isCreditNoteSale(sale) ? "CREDIT_NOTE_RETRIED" : "INVOICE_RETRIED", "sale", sale.id, `Reenvio de ${documentTypeLabel(sale)} ${sale.sequence}: ${updatedSale.status}`, { status: updatedSale.status, accessKey: updatedSale.accessKey }));
       Alert.alert(explainSriResult(sriResult).title, updatedSale.status === "AUTORIZADA" ? `${documentTypeLabel(sale)} autorizada.` : sriUserMessage(sriResult));
     } catch (error) {
@@ -161,8 +207,9 @@ export function useSaleDocumentWorkflowActions({
     setSourceTicketId("");
     setDocumentType(sale.documentType || "factura");
     setClientId(sale.clientId);
-    setPaymentMethod(sale.paymentMethod || "01");
+    loadPaymentTerms(sale);
     setItems(sale.items.map((item) => ({ ...item })));
+    setAdditionalInfo((sale.additionalInfo || []).map((field) => ({ ...field })));
     setIssueNotice(`Corrigiendo factura ${sale.sequence}. Se reintentara con la misma autorizacion.`);
     setNotice("");
     showMessage("Documento cargado", `${documentTypeLabel(sale)} ${sale.sequence} listo para editar.`);
@@ -178,8 +225,9 @@ export function useSaleDocumentWorkflowActions({
     setSourceTicketId(sale.id);
     setDocumentType("factura");
     setClientId(sale.clientId);
-    setPaymentMethod(sale.paymentMethod || "01");
+    loadPaymentTerms(sale);
     setItems(sale.items.map((item) => ({ ...item })));
+    setAdditionalInfo((sale.additionalInfo || []).map((field) => ({ ...field })));
     setIssueNotice(`Facturando ticket ${sale.sequence}. Se usara el siguiente numero disponible.`);
     setNotice("");
     showMessage("Ticket cargado", `Ticket ${sale.sequence} listo para facturar.`);
@@ -196,8 +244,9 @@ export function useSaleDocumentWorkflowActions({
     setSourceProformaId(sale.id);
     setDocumentType(target);
     setClientId(sale.clientId);
-    setPaymentMethod(sale.paymentMethod || "01");
+    loadPaymentTerms(sale);
     setItems(sale.items.map((item) => ({ ...item })));
+    setAdditionalInfo((sale.additionalInfo || []).map((field) => ({ ...field })));
     setIssueNotice(target === "factura" ? `Facturando proforma ${sale.sequence}. Se usara el siguiente numero disponible.` : `Convirtiendo proforma ${sale.sequence} a ticket interno.`);
     setNotice("");
     showMessage("Proforma cargada", target === "factura" ? `Proforma ${sale.sequence} lista para facturar.` : `Proforma ${sale.sequence} lista para convertir a ticket.`);
@@ -208,19 +257,23 @@ export function useSaleDocumentWorkflowActions({
     setSourceTicketId("");
     setSourceProformaId("");
     setItems([]);
+    setAdditionalInfo([]);
     setIssueNotice("");
     setPaymentMethod("01");
+    setSalePayments([]);
+    setPaymentCondition("contado");
+    setCreditDueDate("");
     setDocumentType("factura");
     showMessage("Accion cancelada", "Se limpio el formulario y no se guardaron cambios.");
   };
 
-  const voidSale = async (sale: Sale) => {
+  const executeVoidSale = async (sale: Sale) => {
     if (sale.status === "AUTORIZADA") {
       Alert.alert("No se puede anular aqui", "Una factura autorizada requiere otro proceso. Use nota de credito o el flujo que corresponda.");
       return;
     }
-    if (sale.status === "ANULADA") {
-      Alert.alert("Factura anulada", "Esta factura ya esta anulada localmente.");
+    if (sale.status === "ANULADA" || sale.status === "CONVERTIDA") {
+      Alert.alert("Documento cerrado", sale.status === "CONVERTIDA" ? "Este documento ya fue convertido y queda solo como historial." : "Esta factura ya esta anulada localmente.");
       return;
     }
 
@@ -232,7 +285,8 @@ export function useSaleDocumentWorkflowActions({
     const stockMovements: InventoryMovement[] = [];
     const nextProducts = restoreStock
       ? data.products.map((product) => {
-          const soldQuantity = sale.items.filter((item) => item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
+          if (!isInventoryProduct(product)) return product;
+          const soldQuantity = sale.items.filter((item) => isInventoryProduct(item) && item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
           if (soldQuantity <= 0) return product;
           const stockAfter = product.stock + soldQuantity;
           stockMovements.push({
@@ -271,6 +325,19 @@ export function useSaleDocumentWorkflowActions({
     const message = restoreStock ? "Documento anulado localmente y stock devuelto." : "Documento anulado localmente.";
     setNotice(message);
     Alert.alert("Documento anulado", message);
+  };
+
+  const voidSale = (sale: Sale) => {
+    if (sale.status === "AUTORIZADA" || sale.status === "ANULADA" || sale.status === "CONVERTIDA") {
+      void executeVoidSale(sale);
+      return;
+    }
+    confirmAction(
+      "Anular documento",
+      `Se anulara localmente ${documentTypeLabel(sale)} ${sale.sequence}. Esta accion quedara auditada y no se debe usar para facturas autorizadas.`,
+      () => { void executeVoidSale(sale); },
+      "Anular"
+    );
   };
 
   return {

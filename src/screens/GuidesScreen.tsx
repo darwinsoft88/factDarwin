@@ -1,22 +1,24 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Alert, StyleSheet, Text, View } from "react-native";
-import { Empty, Input, LoadMoreButton, PrimaryButton, Section, Select } from "../components/common";
+import React from "react";
+import { Alert, StyleSheet, View } from "react-native";
+import { EntityEditModal } from "../components/EntityEditModal";
+import { GuideFormSection } from "../components/GuideFormSection";
+import { GuideListSection } from "../components/GuideListSection";
 import { ProcessingOverlay } from "../components/ProcessingOverlay";
-import { LIST_BATCH_SIZE } from "../constants/app";
+import { useGuideDocumentFilters } from "../hooks/useGuideDocumentFilters";
+import { useGuideFormState } from "../hooks/useGuideFormState";
 import { authorizeRemissionGuide, reserveDocumentSequence } from "../services/backend";
-import { buildRemissionGuideXml, createGuideAccessKey, nextSequence } from "../services/sri";
+import { buildRemissionGuideXml, createGuideAccessKey, nextSequence } from "../sri";
 import { AppData, Client, RemissionGuide, Sale, User } from "../types";
-import { canAccessSensitiveSupport, canRetryDocuments } from "../utils/appAccess";
+import { canAccessDeveloperTools, canRetryDocuments } from "../utils/appAccess";
 import { appendAudit } from "../utils/audit";
+import { resolveCompanyLogoUrl } from "../utils/assets";
 import { buildGuideRideHtml, formatGuideDetail } from "../utils/documentHtml";
-import { documentNumber, getRetryInfo, guideInActiveScope, guideNumber, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus, saleInActiveScope } from "../utils/documents";
+import { getRetryInfo, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus } from "../utils/documents";
 import { showMessage } from "../utils/dialogs";
 import { activeEstablishment, activeIssuer, issuerForGuide, updateIssuerEstablishmentSequence } from "../utils/establishments";
-import { parseInputDate, toInputDate } from "../utils/format";
+import { parseInputDate } from "../utils/format";
 import { generateId } from "../utils/id";
-import { canRetrySriStatus, isTicketOffline } from "../utils/invoiceStatus";
 import { handlePdfDocument, openHtmlViewer } from "../utils/printFiles";
-import { documentTypeLabel } from "../utils/sales";
 import { explainSriResult, sriUserMessage } from "../utils/sriMessages";
 import { syncSalePatchToBackend } from "../utils/sync";
 import { validateEmissionPointLicense, validateGuideForm } from "../validation";
@@ -56,97 +58,66 @@ export function GuidesScreen({
   ListItemComponent: React.ComponentType<GuidesListItemProps>;
   CalendarDateInputComponent: React.ComponentType<CalendarDateInputProps>;
 }) {
-  const scopedSales = useMemo(() => data.sales.filter((sale) => saleInActiveScope(sale, data)), [data]);
-  const scopedGuides = useMemo(() => (data.guides || []).filter((guide) => guideInActiveScope(guide, data)), [data]);
-  const movableDocuments = useMemo(
-    () => scopedSales.filter((sale) => sale.status === "AUTORIZADA" || isTicketOffline(sale.status) || sale.status === "PROFORMA"),
-    [scopedSales]
-  );
-  const [sourceSaleId, setSourceSaleId] = useState(movableDocuments[0]?.id || "");
-  const [documentSearch, setDocumentSearch] = useState("");
-  const [guideSearch, setGuideSearch] = useState("");
-  const [visibleDocumentCount, setVisibleDocumentCount] = useState(LIST_BATCH_SIZE);
-  const [visibleGuideCount, setVisibleGuideCount] = useState(LIST_BATCH_SIZE);
-  const clientsById = useMemo(() => new Map(data.clients.map((item) => [item.id, item])), [data.clients]);
-  const filteredMovableDocuments = useMemo(() => {
-    const search = documentSearch.trim().toLowerCase();
-    if (!search) return movableDocuments;
-
-    return movableDocuments.filter((sale) => {
-      const saleClient = clientsById.get(sale.clientId);
-      return [
-        documentTypeLabel(sale),
-        sale.sequence,
-        documentNumber(sale, data.issuer),
-        sale.accessKey,
-        sale.authorizationNumber || "",
-        saleClient?.name || "",
-        saleClient?.identification || ""
-      ].some((value) => value.toLowerCase().includes(search));
-    });
-  }, [clientsById, data.issuer, documentSearch, movableDocuments]);
-  const visibleMovableDocuments = filteredMovableDocuments.slice(0, visibleDocumentCount);
-  const filteredGuides = useMemo(() => {
-    const search = guideSearch.trim().toLowerCase();
-    const guides = scopedGuides;
-    if (!search) return guides;
-    return guides.filter((guide) => {
-      const guideClient = clientsById.get(guide.clientId);
-      const source = data.sales.find((sale) => sale.id === guide.sourceSaleId);
-      return [
-        guide.sequence,
-        guide.accessKey,
-        guide.authorizationNumber || "",
-        guide.status,
-        guide.plate,
-        guide.route,
-        guide.transporterName,
-        guide.transporterIdentification,
-        guideClient?.name || "",
-        guideClient?.identification || "",
-        source?.sequence || ""
-      ].some((value) => value.toLowerCase().includes(search));
-    });
-  }, [clientsById, data.sales, guideSearch, scopedGuides]);
-  const visibleGuides = filteredGuides.slice(0, visibleGuideCount);
-  const sourceSale = data.sales.find((sale) => sale.id === sourceSaleId);
-  const client = sourceSale ? data.clients.find((item) => item.id === sourceSale.clientId) : undefined;
-  const [transporterName, setTransporterName] = useState("");
-  const [transporterIdentification, setTransporterIdentification] = useState("");
-  const [transporterType, setTransporterType] = useState<"04" | "05" | "06">("05");
-  const [plate, setPlate] = useState("");
-  const [startAddress, setStartAddress] = useState(data.issuer.address);
-  const [endAddress, setEndAddress] = useState(client?.address || "");
-  const [route, setRoute] = useState("");
-  const [reason, setReason] = useState("Venta de mercaderia");
-  const [startDate, setStartDate] = useState(toInputDate(new Date()));
-  const [endDate, setEndDate] = useState(toInputDate(new Date()));
-  const [issuingGuide, setIssuingGuide] = useState(false);
-  const [retryingGuideId, setRetryingGuideId] = useState("");
-  const [processingMessage, setProcessingMessage] = useState("");
-
-  useEffect(() => {
-    setVisibleDocumentCount(LIST_BATCH_SIZE);
-  }, [documentSearch]);
-
-  useEffect(() => {
-    setVisibleGuideCount(LIST_BATCH_SIZE);
-  }, [guideSearch]);
-
-  useEffect(() => {
-    if (sourceSaleId && movableDocuments.some((sale) => sale.id === sourceSaleId)) return;
-    setSourceSaleId(movableDocuments[0]?.id || "");
-  }, [movableDocuments, sourceSaleId]);
-
-  useEffect(() => {
-    if (filteredMovableDocuments.length === 0) return;
-    if (filteredMovableDocuments.some((sale) => sale.id === sourceSaleId)) return;
-    setSourceSaleId(filteredMovableDocuments[0]?.id || "");
-  }, [filteredMovableDocuments, sourceSaleId]);
-
-  useEffect(() => {
-    if (client?.address) setEndAddress(client.address);
-  }, [client?.address]);
+  const {
+    client,
+    clientsById,
+    documentSearch,
+    filteredGuides,
+    filteredMovableDocuments,
+    guidePagination,
+    guideSearch,
+    movableDocuments,
+    setDocumentSearch,
+    setGuidePage,
+    setGuideSearch,
+    setSourceSaleId,
+    sourceSale,
+    sourceSaleId,
+    visibleGuides
+  } = useGuideDocumentFilters(data);
+  const issuerForGuideDocument = (guide: RemissionGuide) => {
+    const guideIssuer = issuerForGuide(data.issuer, guide);
+    return {
+      ...guideIssuer,
+      logoUrl: resolveCompanyLogoUrl(guideIssuer.logoUrl, data.backendUrl)
+    };
+  };
+  const {
+    buildGuideDraftFields,
+    endAddress,
+    endDate,
+    issuingGuide,
+    plate,
+    processingMessage,
+    reason,
+    resetGuideForm,
+    retryingGuideId,
+    route,
+    startAddress,
+    startDate,
+    transporterIdentification,
+    transporterName,
+    transporterType,
+    setEndAddress,
+    setEndDate,
+    setIssuingGuide,
+    setPlate,
+    setProcessingMessage,
+    setReason,
+    setRetryingGuideId,
+    setRoute,
+    setStartAddress,
+    setStartDate,
+    setTransporterIdentification,
+    setTransporterName,
+    setTransporterType
+  } = useGuideFormState({
+    client,
+    issuerAddress: data.issuer.address,
+    movableDocuments,
+    setSourceSaleId
+  });
+  const [guideModalVisible, setGuideModalVisible] = React.useState(false);
 
   const issueGuide = async () => {
     if (issuingGuide) return;
@@ -205,16 +176,7 @@ export function GuidesScreen({
         sequence,
         accessKey,
         status: "BORRADOR",
-        transporterName: transporterName.trim(),
-        transporterIdentification: transporterIdentification.trim(),
-        transporterIdentificationType: transporterType,
-        plate: plate.trim().toUpperCase(),
-        startAddress: startAddress.trim(),
-        endAddress: endAddress.trim(),
-        route: route.trim(),
-        reason: reason.trim(),
-        startDate,
-        endDate,
+        ...buildGuideDraftFields(),
         items: sourceSale.items
       };
       if (isAccessKeyUsed(data, guide.accessKey)) {
@@ -253,6 +215,8 @@ export function GuidesScreen({
       }, finalData, persist);
       Alert.alert(explainSriResult(sriResult).title, finalGuide.status === "AUTORIZADA" ? "Guia autorizada por el SRI." : sriUserMessage(sriResult));
       showMessage("Guia guardada", finalGuide.status === "AUTORIZADA" ? "Guia autorizada y guardada con exito." : sriUserMessage(sriResult));
+      resetGuideForm();
+      setGuideModalVisible(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo autorizar la guia.";
       if (draftData && guide) {
@@ -282,7 +246,7 @@ export function GuidesScreen({
       return;
     }
 
-    const html = buildGuideRideHtml(guide, guideClient, issuerForGuide(data.issuer, guide), source);
+    const html = buildGuideRideHtml(guide, guideClient, issuerForGuideDocument(guide), source);
 
     if (typeof window !== "undefined" && "document" in window) {
       openHtmlViewer(html, `Guia ${guide.sequence}`);
@@ -359,64 +323,69 @@ export function GuidesScreen({
 
   return (
     <View style={styles.stack}>
-      <Section title="Nueva guia de remision">
-        <Text style={styles.paragraph}>Comprobante SRI tipo 06 para traslado de mercaderia. No mueve inventario; documenta transporte.</Text>
-        <Input label="Buscar factura origen" value={documentSearch} onChangeText={setDocumentSearch} placeholder="Cliente, cedula/RUC, numero o clave" autoCapitalize="none" />
-        {movableDocuments.length === 0 ? <Empty text="No hay facturas, notas o proformas disponibles para trasladar." /> : null}
-        {movableDocuments.length > 0 && filteredMovableDocuments.length === 0 ? <Empty text="No hay documentos con esa busqueda." /> : null}
-        <Select
-          label={`Documento origen (${visibleMovableDocuments.length}/${filteredMovableDocuments.length})`}
-          value={sourceSaleId}
-          onChange={setSourceSaleId}
-          options={visibleMovableDocuments.map((sale) => {
-            const saleClient = clientsById.get(sale.clientId);
-            return { label: `${documentTypeLabel(sale)} ${documentNumber(sale, data.issuer)} - ${saleClient?.name || "Cliente"}`, value: sale.id };
-          })}
+      <GuideListSection
+        canOpenSensitive={canAccessDeveloperTools(user)}
+        canRetry={canRetryDocuments(user.role)}
+        data={data}
+        filteredGuides={filteredGuides}
+        guidePage={guidePagination.currentPage}
+        guideSearch={guideSearch}
+        ListItemComponent={ListItemComponent}
+        visibleGuides={visibleGuides}
+        onGuideDetail={(guide, guideClient, source) => onXml(formatGuideDetail(guide, guideClient, issuerForGuideDocument(guide), source))}
+        onGuidePdf={printGuide}
+        onGuideRetry={retryGuide}
+        onGuideSearchChange={setGuideSearch}
+        onCreate={() => setGuideModalVisible(true)}
+        onPageChange={setGuidePage}
+        retryingGuideId={retryingGuideId}
+      />
+      <EntityEditModal
+        visible={guideModalVisible}
+        title="Nueva guia de remision"
+        subtitle={sourceSale && client ? `${client.name} | ${sourceSale.items.length} producto(s)` : "Seleccione documento origen y transportista"}
+        confirmLabel={issuingGuide ? "Procesando..." : "Emitir guia"}
+        onClose={() => setGuideModalVisible(false)}
+        onConfirm={() => { if (!issuingGuide) void issueGuide(); }}
+      >
+        <GuideFormSection
+          CalendarDateInputComponent={CalendarDateInputComponent}
+          framed={false}
+          showIssueButton={false}
+          client={client}
+          clientsById={clientsById}
+          data={data}
+          documentSearch={documentSearch}
+          endAddress={endAddress}
+          endDate={endDate}
+          filteredMovableDocuments={filteredMovableDocuments}
+          issuingGuide={issuingGuide}
+          movableDocuments={movableDocuments}
+          plate={plate}
+          reason={reason}
+          route={route}
+          sourceSale={sourceSale}
+          sourceSaleId={sourceSaleId}
+          startAddress={startAddress}
+          startDate={startDate}
+          transporterIdentification={transporterIdentification}
+          transporterName={transporterName}
+          transporterType={transporterType}
+          onDocumentSearchChange={setDocumentSearch}
+          onEndAddressChange={setEndAddress}
+          onEndDateChange={setEndDate}
+          onIssue={issueGuide}
+          onPlateChange={setPlate}
+          onReasonChange={setReason}
+          onRouteChange={setRoute}
+          onSourceSaleChange={setSourceSaleId}
+          onStartAddressChange={setStartAddress}
+          onStartDateChange={setStartDate}
+          onTransporterIdentificationChange={setTransporterIdentification}
+          onTransporterNameChange={setTransporterName}
+          onTransporterTypeChange={setTransporterType}
         />
-        {visibleMovableDocuments.length < filteredMovableDocuments.length ? <LoadMoreButton label="Cargar mas documentos" onPress={() => setVisibleDocumentCount((count) => count + LIST_BATCH_SIZE)} /> : null}
-        {sourceSale && client ? <Text style={styles.inlineInfo}>Destino: {client.name} | Productos: {sourceSale.items.length}</Text> : null}
-        <Input label="Transportista / razon social" value={transporterName} onChangeText={setTransporterName} />
-        <Select label="Tipo identificacion transportista" value={transporterType} onChange={(value) => setTransporterType(value as "04" | "05" | "06")} options={[{ label: "Cedula", value: "05" }, { label: "RUC", value: "04" }, { label: "Pasaporte", value: "06" }]} />
-        <Input label="Identificacion transportista" value={transporterIdentification} onChangeText={setTransporterIdentification} keyboardType="number-pad" />
-        <Input label="Placa" value={plate} onChangeText={setPlate} autoCapitalize="characters" />
-        <Input label="Direccion partida" value={startAddress} onChangeText={setStartAddress} />
-        <Input label="Direccion destino" value={endAddress} onChangeText={setEndAddress} />
-        <Input label="Ruta" value={route} onChangeText={setRoute} placeholder="Ej. La Concordia - Quito" />
-        <Input label="Motivo traslado" value={reason} onChangeText={setReason} />
-        <View style={styles.row}>
-          <View style={styles.flex}>
-            <CalendarDateInputComponent label="Fecha inicio" value={startDate} onChange={setStartDate} />
-          </View>
-          <View style={styles.flex}>
-            <CalendarDateInputComponent label="Fecha fin" value={endDate} onChange={setEndDate} />
-          </View>
-        </View>
-        <PrimaryButton label={issuingGuide ? "Procesando..." : "Emitir guia"} onPress={issuingGuide ? () => undefined : issueGuide} />
-      </Section>
-
-      <Section title="Guias emitidas">
-        <Input label="Buscar guias emitidas" value={guideSearch} onChangeText={setGuideSearch} placeholder="Cliente, placa, ruta, secuencial o clave" autoCapitalize="none" />
-        {(data.guides || []).length === 0 ? <Empty text="Aun no hay guias de remision." /> : null}
-        {(data.guides || []).length > 0 && filteredGuides.length === 0 ? <Empty text="No hay guias con esa busqueda." /> : null}
-        {visibleGuides.map((guide) => {
-          const guideClient = data.clients.find((item) => item.id === guide.clientId);
-          const source = data.sales.find((item) => item.id === guide.sourceSaleId);
-          return (
-            <ListItemComponent
-              key={guide.id}
-              title={`${guideNumber(guide, data.issuer)} - ${guideClient?.name || "Destinatario"}`}
-              meta={`${guide.status} | ${guide.plate} | ${guide.route} | ${guide.accessKey}`}
-              badge={guide.status}
-              onOpen={canAccessSensitiveSupport(user.role) ? () => onXml(formatGuideDetail(guide, guideClient, issuerForGuide(data.issuer, guide), source)) : undefined}
-              secondaryLabel={guide.status === "AUTORIZADA" ? "PDF guia" : undefined}
-              onSecondary={() => guideClient && printGuide(guide, guideClient, source)}
-              retryLabel={canRetryDocuments(user.role) && canRetrySriStatus(guide.status) ? (retryingGuideId === guide.id ? "..." : `Reintentar ${getRetryInfo(guide).today}/${MAX_DAILY_RETRIES}`) : undefined}
-              onRetry={() => retryGuide(guide, guideClient, source)}
-            />
-          );
-        })}
-        {visibleGuides.length < filteredGuides.length ? <LoadMoreButton label="Cargar mas guias" onPress={() => setVisibleGuideCount((count) => count + LIST_BATCH_SIZE)} /> : null}
-      </Section>
+      </EntityEditModal>
       <ProcessingOverlay visible={Boolean(processingMessage)} message={processingMessage} />
     </View>
   );
@@ -425,25 +394,5 @@ export function GuidesScreen({
 const styles = StyleSheet.create({
   stack: {
     gap: 12
-  },
-  paragraph: {
-    color: "#4b5563",
-    lineHeight: 20
-  },
-  inlineInfo: {
-    color: "#475569",
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 18
-  },
-  row: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "flex-end",
-    gap: 10
-  },
-  flex: {
-    flex: 1,
-    minWidth: 130
   }
 });

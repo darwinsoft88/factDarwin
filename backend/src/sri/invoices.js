@@ -2,7 +2,7 @@ const config = require("../config");
 const { askAuthorization, sendToReception } = require("./client");
 const { signXmlWithP12 } = require("./signXml");
 
-async function signInvoice(xml, companyId = "") {
+async function signInvoice(xml, companyId = "", sriEnv = config.sriEnv) {
   const signedXml = await signXmlWithP12(xml, companyId);
   const accessKey = extractAccessKey(signedXml);
 
@@ -10,14 +10,14 @@ async function signInvoice(xml, companyId = "") {
     ok: true,
     accessKey,
     signedXml,
-    sriEnv: config.sriEnv,
+    sriEnv,
     warning: "XML firmado con XAdES-BES para SRI Ecuador."
   };
 }
 
 async function authorizeInvoice(xml, companyId = "") {
-  validateXmlEnvironment(xml);
-  const signed = await signInvoice(xml, companyId);
+  const sriEnv = validateXmlEnvironment(xml);
+  const signed = await signInvoice(xml, companyId, sriEnv);
   const documentName = getDocumentName(xml);
 
   if (!config.allowSriSend) {
@@ -29,8 +29,8 @@ async function authorizeInvoice(xml, companyId = "") {
     };
   }
 
-  const reception = await sendToReception(signed.signedXml);
-  const authorization = signed.accessKey ? await askAuthorization(signed.accessKey) : null;
+  const reception = await sendToReception(signed.signedXml, sriEnv);
+  const authorization = signed.accessKey ? await askAuthorization(signed.accessKey, sriEnv) : null;
   const receptionStatus = parseReceptionStatus(reception.body);
   const receptionMessage = parseSriMessages(reception.body);
   const authorizationSummary = authorization ? parseAuthorization(authorization.body) : {};
@@ -99,7 +99,6 @@ function extractAccessKey(xml) {
 
 function validateXmlEnvironment(xml) {
   const xmlEnvironment = textBetween(xml, "<ambiente>", "</ambiente>");
-  const expectedEnvironment = config.sriEnv === "production" ? "2" : "1";
 
   if (!xmlEnvironment) {
     const error = new Error("El XML no contiene el campo ambiente.");
@@ -107,13 +106,12 @@ function validateXmlEnvironment(xml) {
     throw error;
   }
 
-  if (xmlEnvironment !== expectedEnvironment) {
-    const error = new Error(
-      `El ambiente del XML (${xmlEnvironment}) no coincide con el backend (${config.sriEnv}). Use ${expectedEnvironment} para ${config.sriEnv}.`
-    );
-    error.statusCode = 400;
-    throw error;
-  }
+  if (xmlEnvironment === "1") return "test";
+  if (xmlEnvironment === "2") return "production";
+
+  const error = new Error(`Ambiente SRI invalido en XML (${xmlEnvironment}). Use 1 para pruebas o 2 para produccion.`);
+  error.statusCode = 400;
+  throw error;
 }
 
 function parseAuthorization(body) {

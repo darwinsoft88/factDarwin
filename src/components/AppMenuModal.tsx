@@ -1,6 +1,9 @@
 import React from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Modal, Platform, Pressable, StatusBar as NativeStatusBar, StyleSheet, Text, View } from "react-native";
 import { MenuAction } from "./MenuAction";
+
+type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
 type AppMenuModalProps = {
   visible: boolean;
@@ -55,18 +58,18 @@ export function AppMenuModal({
 
 function MenuGlyph({ name, tone = "default" }: { name: "sync" | "pending" | "switch" | "settings" | "license" | "support" | "logout"; tone?: "default" | "danger" }) {
   const color = tone === "danger" ? "#b91c1c" : "#0f766e";
-  const symbol = {
-    sync: "↻",
-    pending: "◷",
-    switch: "⇄",
-    settings: "⚙",
-    license: "◇",
-    support: "？",
-    logout: "›"
-  }[name];
-  return <Text style={[styles.menuGlyph, { color }]}>{symbol}</Text>;
+  const icons: Record<"sync" | "pending" | "switch" | "settings" | "license" | "support" | "logout", MaterialIconName> = {
+    sync: "sync",
+    pending: "cloud-sync-outline",
+    switch: "swap-horizontal",
+    settings: "cog-outline",
+    license: "shield-check-outline",
+    support: "lifebuoy",
+    logout: "logout"
+  };
+  const icon = icons[name];
+  return <MaterialCommunityIcons name={icon} size={18} color={color} />;
 }
-
 const styles = StyleSheet.create({
   menuBackdrop: {
     flex: 1,
@@ -116,3 +119,4 @@ const styles = StyleSheet.create({
     textAlign: "center"
   }
 });
+

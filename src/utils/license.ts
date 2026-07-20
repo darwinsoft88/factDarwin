@@ -3,7 +3,7 @@ import { AppLicense, Issuer } from "../types";
 import { normalizedEstablishments } from "./establishments";
 
 export function maxEmissionPointsForLicense(license?: AppLicense | BackendLicenseStatus) {
-  if (license?.plan === "trial" || isProLicensePlan(license?.plan)) return Math.max(999, Number(license?.maxEmissionPoints || 999));
+  if (license?.plan === "trial" || isProLicensePlan(license?.plan) || isPremiumLicensePlan(license?.plan)) return Math.max(999, Number(license?.maxEmissionPoints || 999));
   return 1;
 }
 
@@ -11,11 +11,15 @@ export function isProLicensePlan(plan?: string) {
   return String(plan || "").startsWith("pro_");
 }
 
+export function isPremiumLicensePlan(plan?: string) {
+  return String(plan || "").startsWith("premium_");
+}
+
 export function normalizeLicensePlanValue(plan?: string) {
   if (plan === "mensual") return "basico_mensual";
   if (plan === "anual") return "basico_anual";
   if (plan === "pro") return "pro_anual";
-  if (["trial", "basico_mensual", "basico_anual", "pro_mensual", "pro_anual"].includes(String(plan))) return String(plan);
+  if (["trial", "basico_mensual", "basico_anual", "pro_mensual", "pro_anual", "premium_mensual", "premium_anual"].includes(String(plan))) return String(plan);
   return "trial";
 }
 

@@ -1,0 +1,22 @@
+ {
+  "name": "FactuDarwin",
+  "short_name": "FactuDarwin",
+  "description": "FactuDarwin factura electronica en cualquier navegador y iOS.",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f7fb",
+  "theme_color": "#0b6f68",
+  "icons": [
+    {
+      "src": "assets/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/adaptive-icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

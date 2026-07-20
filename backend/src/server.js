@@ -4,7 +4,7 @@ const express = require("express");
 const fs = require("node:fs");
 const config = require("./config");
 const db = require("./db");
-const { authenticateCompanyUser, changeCompanyUserPassword, createCompanyAccount, findDocumentByAccessKey, getAudit, getSnapshot, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reserveDocumentSequence, resetCompanyUserPassword, saveSnapshot, searchClients, searchProducts } = db;
+const { authenticateCompanyUser, authenticateSupportUser, changeCompanyUserPassword, createCompanyAccount, exportTenantSnapshot, findDocumentByAccessKey, getAudit, getSnapshot, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reserveDocumentSequence, resetCompanyUserPassword, restoreTenantSnapshot, saveSnapshot, searchClients, searchProducts } = db;
 const { authenticateUser, hashPassword, requireAuth, signToken } = require("./auth");
 const { sendInvoiceEmail, sendPasswordResetEmail, sendTestEmail } = require("./email");
 const { licenseStatus, normalizeLicense, requireActiveLicense } = require("./license");
@@ -48,7 +48,8 @@ const corsOptions = {
       return;
     }
 
-    if (config.allowedOrigins.includes(origin)) {
+    const publicOrigin = safeOrigin(config.publicUrl);
+    if (config.allowedOrigins.includes(origin) || (publicOrigin && origin === publicOrigin) || isAllowedPagesPreview(origin)) {
       callback(null, true);
       return;
     }
@@ -62,8 +63,10 @@ const corsOptions = {
   }
 };
 
-app.set("etag", false);
+// Para simplificar el desarrollo y evitar problemas de CORS, permitimos todas las conexiones. En producción, se recomienda configurar allowedOrigins en config.js para restringir el acceso a dominios específicos.
 app.use(cors(corsOptions));
+
+app.set("etag", false);
 app.use(express.json({ limit: "8mb" }));
 app.use(requestLogger);
 
@@ -105,7 +108,7 @@ app.get("/health", async (_req, res, next) => {
   }
 });
 
-app.get("/master", requireMasterKey, (_req, res) => {
+app.get("/master", (_req, res) => {
   res.type("html").send(renderMasterPanel());
 });
 
@@ -178,6 +181,46 @@ app.get("/api/master/tenants/:companyId", requireMasterKey, async (req, res, nex
   }
 });
 
+app.get("/api/master/tenants/:companyId/export", requireMasterKey, async (req, res, next) => {
+  try {
+    if (!exportTenantSnapshot) {
+      res.status(501).json({ error: "Exportacion por empresa solo disponible en PostgreSQL." });
+      return;
+    }
+    const backup = await exportTenantSnapshot(req.params.companyId);
+    logTechnical("info", "tenant_exported", { companyId: req.params.companyId, summary: backup.snapshot?.summary || null });
+    res.setHeader("Content-Disposition", `attachment; filename="${tenantBackupFilename(backup)}"`);
+    res.json({ ok: true, backup });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/master/tenants/:companyId/restore", requireMasterKey, async (req, res, next) => {
+  try {
+    if (!restoreTenantSnapshot) {
+      res.status(501).json({ error: "Restauracion por empresa solo disponible en PostgreSQL." });
+      return;
+    }
+    const backup = req.body?.backup;
+    const confirmRuc = String(req.body?.confirmRuc || "").trim();
+    if (!backup || typeof backup !== "object") {
+      res.status(400).json({ error: "Debe enviar el backup JSON de la empresa." });
+      return;
+    }
+    if (!confirmRuc) {
+      res.status(400).json({ error: "Debe confirmar el RUC antes de restaurar." });
+      return;
+    }
+    const preBackup = await runPostgresBackup("pre-tenant-restore");
+    const restore = await restoreTenantSnapshot(req.params.companyId, backup, { expectedRuc: confirmRuc });
+    logTechnical("warn", "tenant_restored", { companyId: req.params.companyId, summary: restore.summary, preBackup });
+    res.json({ ok: true, restore, preBackup });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.put("/api/master/tenants/:companyId/license", requireMasterKey, async (req, res, next) => {
   try {
     const snapshot = await getSnapshot(req.params.companyId);
@@ -237,7 +280,6 @@ app.post("/api/auth/register", async (req, res, next) => {
     next(error);
   }
 });
-
 app.post("/api/auth/login", async (req, res, next) => {
   try {
     const { email, password, device = {}, companyId = "" } = req.body || {};
@@ -246,9 +288,9 @@ app.post("/api/auth/login", async (req, res, next) => {
       return;
     }
 
-    let saasUser = null;
+    let saasUser = authenticateSupportUser ? await authenticateSupportUser(email, String(password || ""), device, companyId) : null;
     try {
-      saasUser = authenticateCompanyUser ? await authenticateCompanyUser(email, String(password || ""), device, companyId) : null;
+      saasUser = saasUser || (authenticateCompanyUser ? await authenticateCompanyUser(email, String(password || ""), device, companyId) : null);
     } catch (error) {
       if (error.statusCode === 409 && Array.isArray(error.companyOptions)) {
         res.json({
@@ -453,6 +495,15 @@ app.post("/api/email/invoice", requireAuth(["admin", "vendedor", "cajero"]), req
 
     const emailContext = await getCompanyEmailContext(req.user);
     const result = await sendInvoiceEmail({ to, subject, html, xml, pdfBase64, documentType, documentNumber, ...emailContext });
+    logTechnical("info", "email_invoice_sent", {
+      companyId: req.user?.companyId || "",
+      to,
+      documentType,
+      documentNumber,
+      messageId: result.messageId,
+      accepted: result.accepted,
+      rejected: result.rejected
+    });
     res.json(result);
   } catch (error) {
     next(error);
@@ -469,6 +520,13 @@ app.post("/api/email/test", requireAuth(["admin"]), async (req, res, next) => {
       return;
     }
     const result = await sendTestEmail({ to: target, ...emailContext });
+    logTechnical("info", "email_test_sent", {
+      companyId: req.user?.companyId || "",
+      to: target,
+      messageId: result.messageId,
+      accepted: result.accepted,
+      rejected: result.rejected
+    });
     res.json({ ...result, to: target });
   } catch (error) {
     next(error);
@@ -618,7 +676,7 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
     }
 
     const patch = req.body || {};
-    const hasChanges = ["sales", "products", "inventoryMovements", "auditLogs", "guides", "cashClosings", "clients", "users", "receivedRetentions"].some((field) => Array.isArray(patch[field]) && patch[field].length > 0);
+    const hasChanges = ["sales", "products", "inventoryMovements", "auditLogs", "guides", "cashClosings", "creditPayments", "clients", "users", "receivedRetentions"].some((field) => Array.isArray(patch[field]) && patch[field].length > 0);
     const hasDeletions = Object.values(patch.deletions || {}).some((ids) => Array.isArray(ids) && ids.length > 0);
     if (!hasChanges && !hasDeletions && !patch.issuer && !patch.license) {
       res.status(400).json({ error: "Debe enviar al menos un cambio incremental." });
@@ -631,6 +689,7 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
       userId: req.user?.id || "",
       sales: patch.sales?.length || 0,
       guides: patch.guides?.length || 0,
+      creditPayments: patch.creditPayments?.length || 0,
       receivedRetentions: patch.receivedRetentions?.length || 0,
       cashClosings: patch.cashClosings?.length || 0,
       summary: result.summary || null
@@ -702,6 +761,29 @@ function publicErrorMessage(error, statusCode) {
   }
 
   return "Error interno del backend. Revise los logs tecnicos para soporte.";
+}
+
+function safeOrigin(value) {
+  try {
+    return value ? new URL(value).origin : "";
+  } catch {
+    return "";
+  }
+}
+
+function isAllowedPagesPreview(origin) {
+  try {
+    const { hostname, protocol } = new URL(origin);
+    return protocol === "https:" && hostname.endsWith(".factudarwin-app.pages.dev");
+  } catch {
+    return false;
+  }
+}
+
+function tenantBackupFilename(backup = {}) {
+  const ruc = String(backup.company?.ruc || backup.company?.id || "empresa").replace(/[^a-zA-Z0-9_-]/g, "");
+  const date = new Date().toISOString().slice(0, 10);
+  return `factudarwin-${ruc || "empresa"}-${date}.json`;
 }
 
 async function authorizeSriDocumentOnce(companyId = "", xml = "", runAuthorization) {
@@ -814,8 +896,8 @@ function allowedEmissionScopes(issuer, limit) {
 }
 
 function maxEmissionPointsForLicense(license = {}) {
-  if (license?.plan === "trial" || String(license?.plan || "").startsWith("pro_") || license?.plan === "pro") {
-    return Math.max(999, Number(license?.maxEmissionPoints || 999));
+  if (license?.plan === "trial" || String(license?.plan || "").startsWith("pro_") || String(license?.plan || "").startsWith("premium_") || license?.plan === "pro") {
+    return Math.max(1, Number(license?.maxEmissionPoints || (license?.plan === "trial" ? 3 : 999)));
   }
   return 1;
 }

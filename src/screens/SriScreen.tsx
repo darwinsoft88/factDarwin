@@ -1,13 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Platform, StyleSheet, View } from "react-native";
-import { Section } from "../components/common";
-import { ActivePlanInfo } from "../components/ActivePlanInfo";
-import { AuditSection } from "../components/AuditSection";
-import { CompanyAssetsSection } from "../components/CompanyAssetsSection";
-import { DatabaseSyncSection } from "../components/DatabaseSyncSection";
+import React, { useEffect, useMemo, useState } from "react";
+import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { CollapsibleSection } from "../components/common";
 import { DeleteEstablishmentModal } from "../components/DeleteEstablishmentModal";
 import { EstablishmentActions } from "../components/EstablishmentActions";
-import { IntegrationStatusInfo } from "../components/IntegrationStatusInfo";
 import { IssuerEstablishmentFields } from "../components/IssuerEstablishmentFields";
 import { IssuerIdentityFields } from "../components/IssuerIdentityFields";
 import { IssuerServerSettings } from "../components/IssuerServerSettings";
@@ -15,141 +10,166 @@ import { IssuerTaxSettings } from "../components/IssuerTaxSettings";
 import { NewEstablishmentModal } from "../components/NewEstablishmentModal";
 import { PlanLimitCard } from "../components/PlanLimitCard";
 import { PlanUpgradeModal } from "../components/PlanUpgradeModal";
-import { ProductionStatusSection } from "../components/ProductionStatusSection";
-import { TechnicalLogsSection } from "../components/TechnicalLogsSection";
-import { TechnicalLog, backupAppData, checkBackendHealth, getCompanyAssetsStatus, getTechnicalLogs, lookupIdentityData, restoreAppData, sendTestEmail, uploadCompanyCertificate, uploadCompanyLogo } from "../services/backend";
-import { LIST_BATCH_SIZE } from "../constants/app";
-import { initialData } from "../storage";
-import { AppData, AppLicense, IssuerEstablishment, User } from "../types";
-import { appLicenseStatus, compactLicenseStatusLabel } from "../utils/appAccess";
+import { SriAssetsStatusSections } from "../components/SriAssetsStatusSections";
+import { SriDeveloperToolsSection } from "../components/SriDeveloperToolsSection";
+import { useSriBackupRestore } from "../hooks/useSriBackupRestore";
+import { useSriCompanyAssets } from "../hooks/useSriCompanyAssets";
+import { useSriConnectionTest } from "../hooks/useSriConnectionTest";
+import { useSriEmailTest } from "../hooks/useSriEmailTest";
+import { useSriEstablishmentUiState } from "../hooks/useSriEstablishmentUiState";
+import { useSriIssuerFormState } from "../hooks/useSriIssuerFormState";
+import { useSriIssuerLookup } from "../hooks/useSriIssuerLookup";
+import { useTechnicalLogsLoader } from "../hooks/useTechnicalLogsLoader";
+import { AppData, Issuer, IssuerEstablishment, User } from "../types";
+import { appLicenseStatus, canAccessDeveloperTools, compactLicenseStatusLabel } from "../utils/appAccess";
 import { appendAudit } from "../utils/audit";
-import { addedEstablishmentIds } from "../utils/dataMerge";
 import { showMessage } from "../utils/dialogs";
-import { activeEstablishment, applyIdentityToIssuer, editableEstablishments, issuerWithEstablishment, normalizedEstablishments, normalizeThreeDigits } from "../utils/establishments";
-import { pickWebFile, readWebFileBase64 } from "../utils/files";
-import { formatShortDate } from "../utils/format";
+import { activeEstablishment, editableEstablishments, issuerWithEstablishment } from "../utils/establishments";
 import { canUseEmissionScope, maxEmissionPointsForLicense } from "../utils/license";
-import { formatBackendHealth, formatBackupSummary, summarizeAppData } from "../utils/support";
+import { buildIssuerAfterEstablishmentDeletion, buildNewEstablishmentForm, countDocumentsForEstablishment, selectedEditableEstablishment, validateDeleteEstablishmentConfirmation, validateDeleteEstablishmentRequest, validateNewEstablishmentDraft, validateSelectedEstablishmentPatch } from "../utils/sriEstablishmentEditor";
+import { buildIssuerFromSriForm, validateSriIssuerSave } from "../utils/sriIssuerSave";
 import { syncPatchToBackend } from "../utils/sync";
-import { buildProductionChecklist, sanitizeAppData, validateIssuer } from "../validation";
+import { buildProductionChecklist } from "../validation";
 export function SriScreen({ data, user, backendToken, getBackendToken, persist, onRefreshBackend }: { data: AppData; user: User; backendToken: string; getBackendToken: (backendUrl: string) => Promise<string>; persist: (data: AppData) => Promise<void>; onRefreshBackend: () => void }) {
-  const [issuer, setIssuer] = useState(data.issuer);
-  const [license, setLicense] = useState<AppLicense>(data.license || initialData.license!);
-  const [sequentialText, setSequentialText] = useState(String(data.issuer.sequential));
-  const [remissionSequentialText, setRemissionSequentialText] = useState(String(data.issuer.remissionSequential || 1));
-  const [creditNoteSequentialText, setCreditNoteSequentialText] = useState(String(data.issuer.creditNoteSequential || 1));
-  const [establishmentNameText, setEstablishmentNameText] = useState("");
-  const [establishmentCodeText, setEstablishmentCodeText] = useState(data.issuer.establishment || "001");
-  const [emissionPointText, setEmissionPointText] = useState(data.issuer.emissionPoint || "001");
-  const [backendUrl, setBackendUrl] = useState(data.backendUrl);
-  const [autoBackupEnabled, setAutoBackupEnabled] = useState(data.autoBackupEnabled !== false);
-  const [syncing, setSyncing] = useState(false);
-  const [checkingConnection, setCheckingConnection] = useState(false);
-  const [lookingUpIssuer, setLookingUpIssuer] = useState(false);
-  const [testingEmail, setTestingEmail] = useState(false);
-  const [connectionResult, setConnectionResult] = useState("");
-  const [loadingTechnicalLogs, setLoadingTechnicalLogs] = useState(false);
-  const [technicalLogs, setTechnicalLogs] = useState<TechnicalLog[]>([]);
-  const [assetStatus, setAssetStatus] = useState("");
-  const [assetStatusTone, setAssetStatusTone] = useState<"info" | "success" | "error">("info");
-  const [establishmentStatus, setEstablishmentStatus] = useState<{ tone: "info" | "success" | "error"; message: string } | null>(null);
-  const [establishmentModalVisible, setEstablishmentModalVisible] = useState(false);
-  const [deleteEstablishmentModalVisible, setDeleteEstablishmentModalVisible] = useState(false);
-  const [proEstablishmentModalVisible, setProEstablishmentModalVisible] = useState(false);
-  const [planUpgradeMessage, setPlanUpgradeMessage] = useState("");
-  const [deleteEstablishmentConfirmText, setDeleteEstablishmentConfirmText] = useState("");
-  const [deletingEstablishment, setDeletingEstablishment] = useState(false);
-  const [establishmentForm, setEstablishmentForm] = useState({
-    name: "",
-    establishment: "",
-    emissionPoint: "001",
-    address: "",
-    sequential: "1",
-    remissionSequential: "1",
-    creditNoteSequential: "1"
+  const {
+    autoBackupEnabled,
+    backendUrl,
+    creditNoteSequentialText,
+    emissionPointText,
+    establishmentCodeText,
+    establishmentNameText,
+    issuer,
+    license,
+    remissionSequentialText,
+    sequentialText,
+    setAutoBackupEnabled,
+    setBackendUrl,
+    setCreditNoteSequentialText,
+    setEmissionPointText,
+    setEstablishmentCodeText,
+    setEstablishmentNameText,
+    setIssuer,
+    setLicense,
+    setRemissionSequentialText,
+    setSequentialText
+  } = useSriIssuerFormState(data);
+  const {
+    deleteEstablishmentConfirmText,
+    deleteEstablishmentModalVisible,
+    deletingEstablishment,
+    establishmentForm,
+    establishmentModalVisible,
+    establishmentStatus,
+    planUpgradeMessage,
+    proEstablishmentModalVisible,
+    setDeleteEstablishmentConfirmText,
+    setDeleteEstablishmentModalVisible,
+    setDeletingEstablishment,
+    setEstablishmentForm,
+    setEstablishmentModalVisible,
+    setEstablishmentStatus,
+    setPlanUpgradeMessage,
+    setProEstablishmentModalVisible
+  } = useSriEstablishmentUiState();
+  const { checkingConnection, connectionResult, testConnection } = useSriConnectionTest({ backendUrl, issuer });
+  const { loadingTechnicalLogs, loadTechnicalLogs, technicalLogs } = useTechnicalLogsLoader({ backendToken, backendUrl });
+  const { testingEmail, testCompanyEmail } = useSriEmailTest({ backendToken, backendUrl, issuer });
+  const { lookingUpIssuer, lookupIssuerRuc } = useSriIssuerLookup({
+    backendToken,
+    backendUrl,
+    data,
+    getBackendToken,
+    issuer,
+    setCreditNoteSequentialText,
+    setEstablishmentStatus,
+    setIssuer,
+    setRemissionSequentialText,
+    setSequentialText
   });
-  const [certificatePassword, setCertificatePassword] = useState("");
-  const [certificateUploadModalVisible, setCertificateUploadModalVisible] = useState(false);
-  const [pendingCertificateFile, setPendingCertificateFile] = useState<{ fileName: string; base64: string } | null>(null);
-  const [uploadingAsset, setUploadingAsset] = useState(false);
-  const [checkingAssetStatus, setCheckingAssetStatus] = useState(false);
   const productionChecklist = useMemo(() => buildProductionChecklist({ ...issuer, sequential: Number(sequentialText), remissionSequential: Number(remissionSequentialText), creditNoteSequential: Number(creditNoteSequentialText) }, backendUrl, connectionResult), [backendUrl, connectionResult, creditNoteSequentialText, issuer, remissionSequentialText, sequentialText]);
   const establishments = useMemo(() => editableEstablishments(issuer), [issuer]);
-  const selectedEstablishment = establishments.find((item) => item.id === issuer.activeEstablishmentId && item.active)
-    || establishments.find((item) => item.active)
-    || establishments[0]
-    || activeEstablishment(issuer);
+  const selectedEstablishment = selectedEditableEstablishment(issuer, establishments);
   const canManageEstablishments = appLicenseStatus(license).active && maxEmissionPointsForLicense(license) > 1;
+  const canViewDeveloperTools = canAccessDeveloperTools(user);
   const maxEmissionPoints = maxEmissionPointsForLicense(license);
-  const [visibleAuditCount, setVisibleAuditCount] = useState(LIST_BATCH_SIZE);
   const auditLogs = data.auditLogs || [];
-  const visibleAuditLogs = auditLogs.slice(0, visibleAuditCount);
+  const {
+    assetStatus,
+    assetStatusTone,
+    cancelCertificateUpload,
+    certificatePassword,
+    certificateUploadModalVisible,
+    checkingAssetStatus,
+    confirmCertificateUpload,
+    pendingCertificateFile,
+    refreshAssetsStatus,
+    setCertificatePassword,
+    uploadCertificateFromWeb,
+    uploadLogoFromWeb,
+    uploadingAsset
+  } = useSriCompanyAssets({
+    autoBackupEnabled,
+    backendToken,
+    backendUrl,
+    creditNoteSequentialText,
+    data,
+    issuer,
+    remissionSequentialText,
+    sequentialText,
+    setIssuer,
+    persist,
+    user
+  });
+  const [pendingEnvironmentIssuer, setPendingEnvironmentIssuer] = useState<Issuer | null>(null);
 
   const openPlanUpgradeModal = (message?: string) => {
     setPlanUpgradeMessage(message || `Su plan actual permite ${maxEmissionPoints} punto(s) de emision. Active Pro para manejar sucursales, puntos adicionales y operacion multi punto.`);
     setProEstablishmentModalVisible(true);
   };
 
-  const refreshAssetsStatus = useCallback(async (showAlert = true) => {
-    if (showAlert) {
-      setCheckingAssetStatus(true);
-      setAssetStatus("Consultando logo y firma en el servidor...");
-      setAssetStatusTone("info");
-    }
-    try {
-      const status = await getCompanyAssetsStatus(backendUrl, backendToken);
-      const logoText = status.logo?.configured ? "Logo configurado" : "Logo pendiente";
-      const certText = status.certificate?.configured
-        ? `Certificado cargado${status.certificate.uploadedAt ? ` el ${formatShortDate(status.certificate.uploadedAt)}` : ""}`
-        : status.certificate?.needsUpload
-          ? status.certificate.error || "Certificado requiere volver a subirse"
-          : "Certificado pendiente";
-      setAssetStatus(`${logoText} | ${certText}`);
-      setAssetStatusTone(status.certificate?.needsUpload ? "error" : "info");
-      if (showAlert) Alert.alert("Activos de empresa", `${logoText}\n${certText}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo consultar logo/certificado.";
-      setAssetStatus(message);
-      setAssetStatusTone("error");
-      if (showAlert) Alert.alert("Activos no disponibles", message);
-    } finally {
-      if (showAlert) setCheckingAssetStatus(false);
-    }
-  }, [backendToken, backendUrl]);
-
-  useEffect(() => {
-    if (!backendToken) return;
-    void refreshAssetsStatus(false);
-  }, [backendToken, backendUrl, refreshAssetsStatus]);
-
   useEffect(() => {
     setEstablishmentNameText(selectedEstablishment.name);
     setEstablishmentCodeText(selectedEstablishment.establishment);
     setEmissionPointText(selectedEstablishment.emissionPoint);
-  }, [selectedEstablishment.emissionPoint, selectedEstablishment.establishment, selectedEstablishment.id, selectedEstablishment.name]);
+  }, [selectedEstablishment.emissionPoint, selectedEstablishment.establishment, selectedEstablishment.id, selectedEstablishment.name, setEmissionPointText, setEstablishmentCodeText, setEstablishmentNameText]);
 
   const issuerFromForm = () => {
-    const sequential = Number(sequentialText);
-    const remissionSequential = Number(remissionSequentialText);
-    const creditNoteSequential = Number(creditNoteSequentialText);
-    const activeId = selectedEstablishment.id;
-    const nextEstablishmentCode = normalizeThreeDigits(establishmentCodeText);
-    const nextEmissionPointCode = normalizeThreeDigits(emissionPointText);
-    const nextActiveId = `${nextEstablishmentCode}-${nextEmissionPointCode}`;
-    const nextEstablishments = establishments.map((item) => item.id === activeId ? {
-      ...item,
-      name: establishmentNameText.trim(),
-      address: issuer.address,
-      establishment: nextEstablishmentCode,
-      emissionPoint: nextEmissionPointCode,
-      id: nextActiveId,
-      sequential,
-      remissionSequential,
-      creditNoteSequential
-    } : item);
-    const active = nextEstablishments.find((item) => item.id === nextActiveId) || nextEstablishments.find((item) => item.id === activeId) || activeEstablishment(issuer);
-    return issuerWithEstablishment({ ...issuer, establishments: nextEstablishments, activeEstablishmentId: active.id, establishmentsUpdatedAt: active.id !== activeId ? new Date().toISOString() : issuer.establishmentsUpdatedAt }, active);
+    return buildIssuerFromSriForm({
+      establishments,
+      form: {
+        establishmentName: establishmentNameText,
+        establishmentCode: establishmentCodeText,
+        emissionPoint: emissionPointText,
+        sequential: sequentialText,
+        remissionSequential: remissionSequentialText,
+        creditNoteSequential: creditNoteSequentialText
+      },
+      issuer,
+      selectedEstablishment
+    });
   };
+
+  const { backupData, restoreData, syncing } = useSriBackupRestore({
+    autoBackupEnabled,
+    backendToken,
+    backendUrl,
+    buildIssuerFromForm: issuerFromForm,
+    creditNoteSequentialText,
+    data,
+    issuer,
+    license,
+    remissionSequentialText,
+    sequentialText,
+    persist,
+    setAutoBackupEnabled,
+    setBackendUrl,
+    setCreditNoteSequentialText,
+    setIssuer,
+    setLicense,
+    setRemissionSequentialText,
+    setSequentialText,
+    user
+  });
 
   const selectEstablishment = (id: string) => {
     const next = establishments.find((item) => item.id === id);
@@ -176,53 +196,35 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
       openPlanUpgradeModal();
       return;
     }
-    const nextNumber = String(establishments.length + 1).padStart(3, "0");
-    setEstablishmentForm({
-      name: `Sucursal ${establishments.length + 1}`,
-      establishment: normalizeThreeDigits(nextNumber),
-      emissionPoint: "001",
-      address: issuer.address || "Ecuador",
-      sequential: "1",
-      remissionSequential: "1",
-      creditNoteSequential: "1"
-    });
+    setEstablishmentForm(buildNewEstablishmentForm(establishments, issuer.address));
     setEstablishmentModalVisible(true);
   };
 
   const saveNewEstablishment = async () => {
-    if (!canManageEstablishments) {
-      const message = "Agregar puntos de emision requiere plan Pro activo.";
-      setEstablishmentStatus({ tone: "error", message });
-      openPlanUpgradeModal(message);
+    const validation = validateNewEstablishmentDraft({
+      canManage: canManageEstablishments,
+      establishments,
+      form: establishmentForm,
+      issuerAddress: issuer.address,
+      maxEmissionPoints
+    });
+    if (!validation.ok) {
+      const statusMessage = validation.code === "duplicate" ? `Ya existe el establecimiento ${validation.message.match(/\d{3}-\d{3}/)?.[0] || ""}.`.trim() : validation.message;
+      setEstablishmentStatus({ tone: "error", message: statusMessage });
+      if (validation.code === "plan_required" || validation.code === "limit_reached") {
+        openPlanUpgradeModal(validation.message);
+        return;
+      }
+      Alert.alert(validation.title, validation.message);
       return;
     }
-    if (establishments.filter((item) => item.active !== false).length >= maxEmissionPoints) {
-      const message = `Su plan actual permite hasta ${maxEmissionPoints} punto(s) de emision.`;
-      setEstablishmentStatus({ tone: "error", message });
-      openPlanUpgradeModal(message);
-      return;
-    }
-    const establishment = normalizeThreeDigits(establishmentForm.establishment);
-    const emissionPoint = normalizeThreeDigits(establishmentForm.emissionPoint);
-    const id = `${establishment}-${emissionPoint}`;
-    if (establishments.some((item) => item.id === id)) {
-      setEstablishmentStatus({ tone: "error", message: `Ya existe el establecimiento ${id}.` });
-      Alert.alert("Establecimiento existente", `Ya existe ${id}. Use otro establecimiento o punto de emision.`);
-      return;
-    }
-    const sequential = Number(establishmentForm.sequential);
-    const remissionSequential = Number(establishmentForm.remissionSequential);
-    const creditNoteSequential = Number(establishmentForm.creditNoteSequential);
-    if (![sequential, remissionSequential, creditNoteSequential].every((value) => Number.isInteger(value) && value > 0)) {
-      Alert.alert("Secuenciales invalidos", "Ingrese secuenciales enteros mayores a cero.");
-      return;
-    }
+    const { id, name, establishment, emissionPoint, address, sequential, remissionSequential, creditNoteSequential } = validation.value;
     const next: IssuerEstablishment = {
       id,
-      name: establishmentForm.name.trim() || `Establecimiento ${id}`,
+      name,
       establishment,
       emissionPoint,
-      address: establishmentForm.address.trim() || issuer.address,
+      address,
       sequential,
       remissionSequential,
       creditNoteSequential,
@@ -240,20 +242,18 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
   };
 
   const updateSelectedEstablishment = (patch: Partial<IssuerEstablishment>) => {
-    if ((patch.establishment !== undefined || patch.emissionPoint !== undefined) && selectedEstablishmentDocumentCount > 0) {
-      const message = `No se puede cambiar el codigo ${selectedEstablishment.id} porque tiene ${selectedEstablishmentDocumentCount} documento(s).`;
-      setEstablishmentStatus({ tone: "error", message });
-      Alert.alert("Punto protegido", message);
+    const validation = validateSelectedEstablishmentPatch({
+      documentCount: selectedEstablishmentDocumentCount,
+      establishments,
+      patch,
+      selectedEstablishment
+    });
+    if (!validation.ok) {
+      setEstablishmentStatus({ tone: "error", message: validation.message });
+      if (validation.code === "protected") Alert.alert(validation.title, validation.message);
       return;
     }
-    const baseId = selectedEstablishment.id;
-    const nextEstablishment = patch.establishment !== undefined ? normalizeThreeDigits(patch.establishment) : selectedEstablishment.establishment;
-    const nextEmissionPoint = patch.emissionPoint !== undefined ? normalizeThreeDigits(patch.emissionPoint) : selectedEstablishment.emissionPoint;
-    const nextId = `${nextEstablishment}-${nextEmissionPoint}`;
-    if (nextId !== baseId && establishments.some((item) => item.id === nextId)) {
-      setEstablishmentStatus({ tone: "error", message: `Ya existe el establecimiento ${nextId}. Use otro codigo.` });
-      return;
-    }
+    const { baseId, nextEstablishment, nextEmissionPoint, nextId } = validation.value;
     const nextEstablishments = establishments.map((item) => {
       if (item.id !== baseId) return item;
       return {
@@ -274,20 +274,18 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
   };
 
   const selectedEstablishmentDocumentCount = useMemo(() => {
-    const id = selectedEstablishment.id;
-    return data.sales.filter((sale) => `${sale.establishment || ""}-${sale.emissionPoint || ""}` === id).length
-      + (data.guides || []).filter((guide) => `${guide.establishment || ""}-${guide.emissionPoint || ""}` === id).length;
-  }, [data.guides, data.sales, selectedEstablishment.id]);
+    return countDocumentsForEstablishment(data, selectedEstablishment.id);
+  }, [data, selectedEstablishment.id]);
 
   const requestDeleteSelectedEstablishment = () => {
-    if (establishments.length <= 1) {
-      setEstablishmentStatus({ tone: "error", message: "Debe existir al menos un establecimiento para facturar." });
-      return;
-    }
-    if (selectedEstablishmentDocumentCount > 0) {
-      const message = `No se puede eliminar ${selectedEstablishment.id} porque tiene ${selectedEstablishmentDocumentCount} documento(s). Se conserva para proteger secuenciales, reportes y auditoria.`;
-      setEstablishmentStatus({ tone: "error", message });
-      Alert.alert("Establecimiento protegido", message);
+    const validation = validateDeleteEstablishmentRequest({
+      documentCount: selectedEstablishmentDocumentCount,
+      establishments,
+      selectedEstablishment
+    });
+    if (!validation.ok) {
+      setEstablishmentStatus({ tone: "error", message: validation.message });
+      if (validation.code === "protected") Alert.alert(validation.title, validation.message);
       return;
     }
     setDeleteEstablishmentConfirmText("");
@@ -296,24 +294,19 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
 
   const confirmDeleteSelectedEstablishment = async () => {
     if (deletingEstablishment) return;
-    if (deleteEstablishmentConfirmText.trim() !== selectedEstablishment.id) {
-      setEstablishmentStatus({ tone: "error", message: `Para eliminar escriba exactamente ${selectedEstablishment.id}.` });
-      return;
-    }
-    if (selectedEstablishmentDocumentCount > 0) {
-      const message = `No se puede eliminar ${selectedEstablishment.id} porque ya tiene ${selectedEstablishmentDocumentCount} documento(s).`;
-      setEstablishmentStatus({ tone: "error", message });
-      Alert.alert("Establecimiento protegido", message);
+    const validation = validateDeleteEstablishmentConfirmation({
+      confirmText: deleteEstablishmentConfirmText,
+      documentCount: selectedEstablishmentDocumentCount,
+      selectedEstablishment
+    });
+    if (!validation.ok) {
+      setEstablishmentStatus({ tone: "error", message: validation.message });
+      if (validation.code === "protected") Alert.alert(validation.title, validation.message);
       return;
     }
 
-    const deleted = selectedEstablishment;
     const now = new Date().toISOString();
-    const nextEstablishments = establishments
-      .filter((item) => item.id !== selectedEstablishment.id)
-      .map((item) => ({ ...item, updatedAt: item.updatedAt || now }));
-    const next = nextEstablishments.find((item) => item.active !== false) || activeEstablishment(issuer);
-    const nextIssuer = issuerWithEstablishment({ ...issuer, establishments: nextEstablishments, activeEstablishmentId: next.id, establishmentsUpdatedAt: now }, next);
+    const { deleted, next, nextIssuer } = buildIssuerAfterEstablishmentDeletion({ establishments, issuer, now, selectedEstablishment });
     const nextData = appendAudit(
       { ...data, backendUrl, autoBackupEnabled, issuer: nextIssuer, license },
       user,
@@ -348,75 +341,38 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
   };
 
   const save = async () => {
-    const sequential = Number(sequentialText);
-    const remissionSequential = Number(remissionSequentialText);
-    const creditNoteSequential = Number(creditNoteSequentialText);
-    const errors: string[] = [];
-    const formEstablishment = normalizeThreeDigits(establishmentCodeText);
-    const formEmissionPoint = normalizeThreeDigits(emissionPointText);
-    validateIssuer({ ...issuer, establishment: formEstablishment, emissionPoint: formEmissionPoint, sequential, remissionSequential, creditNoteSequential }, backendUrl, errors);
-    if (errors.length > 0) {
-      showMessage("Revise configuracion SRI", errors.join("\n"));
-      return;
-    }
-    if (!establishmentNameText.trim()) {
-      showMessage("Nombre requerido", "Ingrese el nombre del establecimiento antes de guardar.");
-      return;
-    }
-    if (!/^\d{1,3}$/.test(establishmentCodeText) || !/^\d{1,3}$/.test(emissionPointText)) {
-      showMessage("Punto invalido", "Estab. y Pto. emi. deben tener entre 1 y 3 digitos.");
-      return;
-    }
-    if (selectedEstablishmentDocumentCount > 0 && (formEstablishment !== selectedEstablishment.establishment || formEmissionPoint !== selectedEstablishment.emissionPoint)) {
-      const message = `No se puede cambiar el codigo ${selectedEstablishment.id} porque tiene ${selectedEstablishmentDocumentCount} documento(s).`;
-      setEstablishmentStatus({ tone: "error", message });
-      Alert.alert("Punto protegido", message);
-      return;
-    }
-    if (!Number.isInteger(sequential) || sequential <= 0) {
-      showMessage("Secuencial invalido", "Ingrese el siguiente secuencial como numero entero mayor a cero.");
-      return;
-    }
-    if (!Number.isInteger(remissionSequential) || remissionSequential <= 0) {
-      showMessage("Secuencial guia invalido", "Ingrese el siguiente secuencial de guia como numero entero mayor a cero.");
-      return;
-    }
-    if (!Number.isInteger(creditNoteSequential) || creditNoteSequential <= 0) {
-      showMessage("Secuencial nota credito invalido", "Ingrese el siguiente secuencial de nota de credito como numero entero mayor a cero.");
-      return;
-    }
     const nextIssuer = issuerFromForm();
-    const addedIds = addedEstablishmentIds(data.issuer, nextIssuer);
-    const previousIdsForGuard = new Set(normalizedEstablishments(data.issuer).map((item) => item.id));
-    const nextIdsForGuard = new Set(normalizedEstablishments(nextIssuer).map((item) => item.id));
-    const removedIdsForGuard = Array.from(previousIdsForGuard).filter((id) => !nextIdsForGuard.has(id));
-    const isActiveCodeReplacement = addedIds.length === 1 && removedIdsForGuard.length === 1 && removedIdsForGuard[0] === selectedEstablishment.id && selectedEstablishmentDocumentCount === 0;
-    if (addedIds.length > 0 && !isActiveCodeReplacement) {
-      const message = `Guardar emisor no puede crear puntos nuevos (${addedIds.join(", ")}). Use Agregar establecimiento para crear sucursales.`;
-      setEstablishmentStatus({ tone: "error", message });
-      Alert.alert("Creacion de punto bloqueada", message);
+    const validation = validateSriIssuerSave({
+      backendUrl,
+      currentIssuer: data.issuer,
+      documentCount: selectedEstablishmentDocumentCount,
+      form: {
+        establishmentName: establishmentNameText,
+        establishmentCode: establishmentCodeText,
+        emissionPoint: emissionPointText,
+        sequential: sequentialText,
+        remissionSequential: remissionSequentialText,
+        creditNoteSequential: creditNoteSequentialText
+      },
+      license,
+      nextIssuer,
+      selectedEstablishment
+    });
+    if (!validation.ok) {
+      if (validation.code === "issuer_invalid" || validation.code === "name_required" || validation.code === "point_invalid" || validation.code === "sequential_invalid" || validation.code === "remission_sequential_invalid" || validation.code === "credit_note_sequential_invalid") {
+        showMessage(validation.title, validation.message);
+        return;
+      }
+      setEstablishmentStatus({ tone: "error", message: validation.message });
+      if (validation.code === "license_limit" || validation.code === "license_scope") {
+        openPlanUpgradeModal(validation.message);
+        return;
+      }
+      if (validation.code === "point_protected" || validation.code === "new_point_blocked") Alert.alert(validation.title, validation.message);
       return;
     }
-    const activeEstablishmentCount = normalizedEstablishments(nextIssuer).filter((item) => item.active !== false).length;
-    if (activeEstablishmentCount > maxEmissionPointsForLicense(license)) {
-      const message = `Su plan actual permite ${maxEmissionPointsForLicense(license)} punto(s) de emision. Desactive puntos extra o actualice a Pro.`;
-      setEstablishmentStatus({ tone: "error", message });
-      openPlanUpgradeModal(message);
-      return;
-    }
-    if (!canUseEmissionScope(nextIssuer, license, activeEstablishment(nextIssuer).id)) {
-      const message = "El punto de emision activo no esta incluido en su plan actual.";
-      setEstablishmentStatus({ tone: "error", message });
-      openPlanUpgradeModal(message);
-      return;
-    }
-    const ids = normalizedEstablishments(nextIssuer).map((item) => item.id);
-    if (new Set(ids).size !== ids.length) {
-      setEstablishmentStatus({ tone: "error", message: "Hay establecimientos duplicados. Revise estab. y punto de emision." });
-      return;
-    }
-    const removedIds = removedIdsForGuard;
-    const nextData = appendAudit({ ...data, backendUrl, autoBackupEnabled, issuer: nextIssuer, license }, user, "SRI_CONFIG_UPDATED", "issuer", issuer.ruc, "Configuracion SRI actualizada", { environment: issuer.environment, establishment: nextIssuer.establishment, emissionPoint: nextIssuer.emissionPoint, sequential, remissionSequential, creditNoteSequential, autoBackupEnabled, removedEstablishments: removedIds, establishmentsUpdatedAt: nextIssuer.establishmentsUpdatedAt });
+    const { creditNoteSequential, remissionSequential, removedIds, sequential } = validation.value;
+    const nextData = appendAudit({ ...data, backendUrl, autoBackupEnabled, issuer: nextIssuer, license }, user, "SRI_CONFIG_UPDATED", "issuer", issuer.ruc, "Configuracion SRI actualizada", { environment: nextIssuer.environment, establishment: nextIssuer.establishment, emissionPoint: nextIssuer.emissionPoint, sequential, remissionSequential, creditNoteSequential, autoBackupEnabled, removedEstablishments: removedIds, establishmentsUpdatedAt: nextIssuer.establishmentsUpdatedAt });
     await persist(nextData);
     await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, issuer: nextIssuer, auditLogs: nextData.auditLogs.slice(0, 1) }, "Configuracion SRI pendiente de sincronizar", nextData, persist);
     setIssuer(nextIssuer);
@@ -433,273 +389,43 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
       return;
     }
     setEstablishmentStatus({ tone: "success", message: `${selectedEstablishment.name} ${nextIssuer.establishment}-${nextIssuer.emissionPoint} guardado correctamente.` });
-    Alert.alert("Configuracion guardada", "Los proximos comprobantes usaran estos datos.");
+    Alert.alert(
+      "Configuracion guardada",
+      nextIssuer.environment === "2"
+        ? "Produccion activada. Los proximos comprobantes se enviaran al ambiente real del SRI."
+        : "Pruebas activadas. Los proximos comprobantes se enviaran al ambiente de pruebas del SRI."
+    );
   };
 
-  const backupData = async () => {
-    setSyncing(true);
-    try {
-      const sequential = Number(sequentialText);
-      const remissionSequential = Number(remissionSequentialText);
-      const creditNoteSequential = Number(creditNoteSequentialText);
-      const errors: string[] = [];
-      validateIssuer({ ...issuer, sequential, remissionSequential, creditNoteSequential }, backendUrl, errors);
-      if (errors.length > 0) {
-        showMessage("Revise configuracion SRI", errors.join("\n"));
-        return;
-      }
-      if (!Number.isInteger(sequential) || sequential <= 0) {
-        showMessage("Secuencial invalido", "Ingrese el siguiente secuencial como numero entero mayor a cero.");
-        return;
-      }
-      if (!Number.isInteger(remissionSequential) || remissionSequential <= 0) {
-        showMessage("Secuencial guia invalido", "Ingrese el siguiente secuencial de guia como numero entero mayor a cero.");
-        return;
-      }
-      if (!Number.isInteger(creditNoteSequential) || creditNoteSequential <= 0) {
-        showMessage("Secuencial nota credito invalido", "Ingrese el siguiente secuencial de nota de credito como numero entero mayor a cero.");
-        return;
-      }
-      const nextIssuer = issuerFromForm();
-      const addedIds = addedEstablishmentIds(data.issuer, nextIssuer);
-      if (addedIds.length > 0) {
-        Alert.alert("Creacion de punto bloqueada", `Subir cambios no puede crear puntos nuevos (${addedIds.join(", ")}). Use Agregar establecimiento.`);
-        return;
-      }
-      const nextData = { ...data, backendUrl, autoBackupEnabled, issuer: nextIssuer, license };
-      const result = await backupAppData(backendUrl, nextData, backendToken);
-      await persist(appendAudit(nextData, user, "BACKUP_CREATED", "backup", undefined, "Base respaldada en servidor"));
-      Alert.alert("Respaldo guardado", [`Guardado: ${result.updatedAt}`, "", formatBackupSummary(result.summary || summarizeAppData(nextData))].join("\n"));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo respaldar.";
-      Alert.alert("Error de respaldo", message);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const restoreData = async () => {
-    setSyncing(true);
-    try {
-      const snapshot = await restoreAppData<AppData>(backendUrl, backendToken);
-      if (!snapshot) {
-        Alert.alert("Sin respaldo", "Todavia no hay datos guardados en el servidor.");
-        return;
-      }
-      const restoreSummary = snapshot.summary || summarizeAppData(snapshot.data);
-      const restoredData = sanitizeAppData({ ...snapshot.data, backendUrl, autoBackupEnabled });
-
-      await persist(appendAudit(restoredData, user, "BACKUP_RESTORED", "backup", undefined, `Base restaurada desde ${snapshot.updatedAt}`));
-      setIssuer(restoredData.issuer);
-      setLicense(restoredData.license || initialData.license!);
-      setSequentialText(String(restoredData.issuer.sequential));
-      setRemissionSequentialText(String(restoredData.issuer.remissionSequential || 1));
-      setCreditNoteSequentialText(String(restoredData.issuer.creditNoteSequential || 1));
-      setBackendUrl(restoredData.backendUrl);
-      setAutoBackupEnabled(restoredData.autoBackupEnabled !== false);
-      Alert.alert("Base restaurada", [`Restaurado desde: ${snapshot.updatedAt}`, "", formatBackupSummary(restoreSummary)].join("\n"));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo restaurar.";
-      Alert.alert("Error de restauracion", message);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const testConnection = async () => {
-    setCheckingConnection(true);
-    setConnectionResult("");
-
-    try {
-      const health = await checkBackendHealth(backendUrl);
-      const expectedEnv = issuer.environment === "1" ? "test" : "production";
-      const backendEnv = health.sriEnv || "desconocido";
-      const envMatches = backendEnv === expectedEnv;
-      const lines = formatBackendHealth(health, backendUrl, expectedEnv, envMatches);
-
-      setConnectionResult(lines);
-      Alert.alert(envMatches ? "Conexion OK" : "Revise ambiente", lines);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo probar la conexion.";
-      setConnectionResult(`ERROR DE CONEXION\n${message}`);
-      Alert.alert("Servidor no disponible", message);
-    } finally {
-      setCheckingConnection(false);
-    }
-  };
-
-  const lookupIssuerRuc = async () => {
-    const ruc = issuer.ruc.replace(/\D/g, "");
-    if (!/^\d{13}$/.test(ruc)) {
-      Alert.alert("RUC requerido", "Ingrese un RUC de 13 digitos para consultar.");
-      return;
-    }
-    const savedRuc = data.issuer.ruc.replace(/\D/g, "");
-    if (savedRuc && ruc === savedRuc) {
-      const current = activeEstablishment(data.issuer);
-      setIssuer(data.issuer);
-      setSequentialText(String(data.issuer.sequential));
-      setRemissionSequentialText(String(data.issuer.remissionSequential || 1));
-      setCreditNoteSequentialText(String(data.issuer.creditNoteSequential || 1));
-      setEstablishmentStatus({
-        tone: "info",
-        message: `Este RUC ya esta configurado para ${data.issuer.businessName}. No se consulto WebServices ni se creo otro establecimiento.`
-      });
-      Alert.alert("RUC ya configurado", `${data.issuer.businessName}\nEstablecimiento activo: ${current.establishment}-${current.emissionPoint}`);
-      return;
-    }
-    setLookingUpIssuer(true);
-    try {
-      const token = backendToken || await getBackendToken(backendUrl);
-      if (!token) {
-        Alert.alert("Sesion requerida", "Inicie sesion con conexion al servidor para consultar datos del RUC.");
-        return;
-      }
-      const result = await lookupIdentityData(backendUrl, ruc, token);
-      const nextIssuer = applyIdentityToIssuer(issuer, result);
+  const handleIssuerTaxChange = (nextIssuer: Issuer) => {
+    if (nextIssuer.environment === issuer.environment) {
       setIssuer(nextIssuer);
-      setEstablishmentStatus({
-        tone: "success",
-        message: `Datos encontrados: ${result.businessName || result.name || ruc}${result.status ? ` (${result.status})` : ""}.`
-      });
-      Alert.alert("RUC encontrado", `${result.businessName || result.name || ruc}\n${result.status ? `Estado: ${result.status}` : ""}`.trim());
-    } catch (error) {
-      setEstablishmentStatus({ tone: "error", message: error instanceof Error ? error.message : "No se pudo consultar el RUC." });
-      Alert.alert("No se pudo consultar", error instanceof Error ? error.message : "Intente nuevamente.");
-    } finally {
-      setLookingUpIssuer(false);
-    }
-  };
-
-  const testCompanyEmail = async () => {
-    if (!issuer.email?.trim()) {
-      Alert.alert("Correo requerido", "Ingrese y guarde un correo de contacto para la empresa.");
       return;
     }
-    setTestingEmail(true);
-    try {
-      const result = await sendTestEmail(backendUrl, { to: issuer.email.trim() }, backendToken);
-      Alert.alert("Correo probado", `Se envio una prueba a ${result.to || issuer.email}.`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo enviar el correo de prueba.";
-      Alert.alert("Correo no disponible", message);
-    } finally {
-      setTestingEmail(false);
-    }
-  };
 
-  const loadTechnicalLogs = async () => {
-    setLoadingTechnicalLogs(true);
-    try {
-      const logs = await getTechnicalLogs(backendUrl, backendToken, 80);
-      setTechnicalLogs(logs);
-      if (logs.length === 0) {
-        Alert.alert("Sin logs tecnicos", "Aun no hay eventos tecnicos registrados en el backend.");
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudieron cargar los logs tecnicos.";
-      Alert.alert("Logs no disponibles", message);
-    } finally {
-      setLoadingTechnicalLogs(false);
-    }
-  };
-
-  const uploadLogoFromWeb = async () => {
-    if (Platform.OS !== "web") {
-      Alert.alert("Selector pendiente", "En movil agregaremos selector nativo de archivos. Por ahora use la version web para subir logo.");
+    const canChangeSriEnvironment = user.role === "admin" || user.supportAccess;
+    if (!canChangeSriEnvironment) {
+      Alert.alert("Accion restringida", "Solo el administrador o soporte tecnico puede cambiar el ambiente SRI.");
       return;
     }
-    let uploaded = false;
-    try {
-      setUploadingAsset(true);
-      const file = await pickWebFile("image/png,image/jpeg,image/webp");
-      if (!file) return;
-      const base64 = await readWebFileBase64(file);
-      const result = await uploadCompanyLogo(backendUrl, { fileName: file.name, mimeType: file.type || "image/png", base64 }, backendToken);
-      uploaded = true;
-      const nextIssuer = { ...issuer, logoUrl: result.logoUrl || "" };
-      setIssuer(nextIssuer);
-      await persist(appendAudit({ ...data, backendUrl, autoBackupEnabled, issuer: { ...nextIssuer, sequential: Number(sequentialText), remissionSequential: Number(remissionSequentialText), creditNoteSequential: Number(creditNoteSequentialText) } }, user, "COMPANY_LOGO_UPDATED", "issuer", issuer.ruc, "Logo RIDE actualizado"));
-      setAssetStatus("Logo cargado y guardado para RIDE.");
-      setAssetStatusTone("success");
-      Alert.alert("Logo cargado", "El logo quedo guardado para los proximos RIDE.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Revise el archivo e intente nuevamente.";
-      setAssetStatus(`Error al subir logo: ${message}`);
-      setAssetStatusTone("error");
-      Alert.alert("No se pudo subir logo", message);
-    } finally {
-      setUploadingAsset(false);
-      if (uploaded) void refreshAssetsStatus(false);
-    }
+
+    setPendingEnvironmentIssuer(nextIssuer);
   };
 
-  const uploadCertificateFromWeb = async () => {
-    if (Platform.OS !== "web") {
-      Alert.alert("Selector pendiente", "En movil agregaremos selector nativo de archivos. Por ahora use la version web para subir .p12.");
-      return;
-    }
-    try {
-      setUploadingAsset(true);
-      const file = await pickWebFile(".p12,application/x-pkcs12");
-      if (!file) return;
-      const base64 = await readWebFileBase64(file);
-      setPendingCertificateFile({ fileName: file.name, base64 });
-      setCertificatePassword("");
-      setCertificateUploadModalVisible(true);
-      setAssetStatus(`Firma seleccionada: ${file.name}. Ingrese la contrasena para validarla.`);
-      setAssetStatusTone("info");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Revise el .p12 e intente nuevamente.";
-      setAssetStatus(`Error al seleccionar certificado: ${message}`);
-      setAssetStatusTone("error");
-      Alert.alert("No se pudo seleccionar certificado", message);
-    } finally {
-      setUploadingAsset(false);
-    }
-  };
-
-  const cancelCertificateUpload = () => {
-    if (uploadingAsset) return;
-    setCertificateUploadModalVisible(false);
-    setPendingCertificateFile(null);
-    setCertificatePassword("");
-  };
-
-  const confirmCertificateUpload = async () => {
-    if (!pendingCertificateFile) {
-      Alert.alert("Seleccione la firma", "Primero seleccione el archivo .p12.");
-      return;
-    }
-    if (!certificatePassword.trim()) {
-      Alert.alert("Clave requerida", "Ingrese la contrasena del certificado .p12.");
-      return;
-    }
-    let uploaded = false;
-    try {
-      setUploadingAsset(true);
-      await uploadCompanyCertificate(backendUrl, { fileName: pendingCertificateFile.fileName, password: certificatePassword, base64: pendingCertificateFile.base64 }, backendToken);
-      uploaded = true;
-      setPendingCertificateFile(null);
-      setCertificatePassword("");
-      setCertificateUploadModalVisible(false);
-      setAssetStatus("Certificado cargado y validado.");
-      setAssetStatusTone("success");
-      Alert.alert("Certificado listo", "El servidor valido el .p12. Las proximas emisiones usaran el certificado de esta empresa.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Revise el .p12 y la contrasena.";
-      setAssetStatus(`Error al subir certificado: ${message}`);
-      setAssetStatusTone("error");
-      Alert.alert("No se pudo subir certificado", message);
-    } finally {
-      setUploadingAsset(false);
-      if (uploaded) void refreshAssetsStatus(false);
-    }
+  const confirmIssuerEnvironmentChange = () => {
+    if (!pendingEnvironmentIssuer) return;
+    const environmentLabel = pendingEnvironmentIssuer.environment === "2" ? "PRODUCCION" : "PRUEBAS";
+    setIssuer(pendingEnvironmentIssuer);
+    setPendingEnvironmentIssuer(null);
+    setEstablishmentStatus({
+      tone: "info",
+      message: `Ambiente ${environmentLabel} seleccionado. Presione Guardar emisor para aplicar el cambio.`
+    });
   };
 
   return (
     <View style={styles.stack}>
-      <Section title="Emisor SRI">
+      <CollapsibleSection title="Emisor SRI" defaultOpen>
         <IssuerIdentityFields issuer={issuer} lookingUpIssuer={lookingUpIssuer} onChange={setIssuer} onLookupRuc={() => { void lookupIssuerRuc(); }} />
         <IssuerEstablishmentFields
           issuer={issuer}
@@ -728,55 +454,51 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
           onAdd={openEstablishmentModal}
           onDelete={requestDeleteSelectedEstablishment}
         />
-        <IssuerTaxSettings issuer={issuer} onChange={setIssuer} />
+        <IssuerTaxSettings issuer={issuer} onChange={handleIssuerTaxChange} />
         <IssuerServerSettings
           backendUrl={backendUrl}
           autoBackupEnabled={autoBackupEnabled}
           checkingConnection={checkingConnection}
           testingEmail={testingEmail}
           connectionResult={connectionResult}
+          showAdvancedServerSettings={canViewDeveloperTools}
           onBackendUrlChange={setBackendUrl}
           onAutoBackupChange={setAutoBackupEnabled}
           onSave={save}
           onTestConnection={testConnection}
           onTestEmail={testCompanyEmail}
         />
-      </Section>
-      <Section title="Logo y firma electronica">
-        <CompanyAssetsSection
-          assetStatus={assetStatus}
-          assetStatusTone={assetStatusTone}
-          uploading={uploadingAsset}
-          checkingStatus={checkingAssetStatus}
-          certificatePassword={certificatePassword}
-          certificateModalVisible={certificateUploadModalVisible}
-          pendingCertificateName={pendingCertificateFile?.fileName || ""}
-          onCertificatePasswordChange={setCertificatePassword}
-          onUploadLogo={uploadLogoFromWeb}
-          onRefreshStatus={() => { void refreshAssetsStatus(true); }}
-          onUploadCertificate={uploadCertificateFromWeb}
-          onConfirmCertificateUpload={() => { void confirmCertificateUpload(); }}
-          onCancelCertificateUpload={cancelCertificateUpload}
-        />
-      </Section>
-      <Section title="Estado de configuracion">
-        <ProductionStatusSection issuer={issuer} checklist={productionChecklist} />
-      </Section>
-      <Section title="Plan activo">
-        <ActivePlanInfo license={license} />
-      </Section>
-      <Section title="Base de datos">
-        <DatabaseSyncSection data={data} syncing={syncing} onBackup={backupData} onRestore={restoreData} onRefresh={onRefreshBackend} />
-      </Section>
-      <Section title="Estado de integracion">
-        <IntegrationStatusInfo issuer={issuer} />
-      </Section>
-      <Section title="Logs tecnicos">
-        <TechnicalLogsSection logs={technicalLogs} loading={loadingTechnicalLogs} onLoad={loadTechnicalLogs} />
-      </Section>
-      <Section title="Auditoria">
-        <AuditSection logs={auditLogs} visibleLogs={visibleAuditLogs} onLoadMore={() => setVisibleAuditCount((count) => count + LIST_BATCH_SIZE)} />
-      </Section>
+      </CollapsibleSection>
+      <SriAssetsStatusSections
+        assetStatus={assetStatus}
+        assetStatusTone={assetStatusTone}
+        certificateModalVisible={certificateUploadModalVisible}
+        certificatePassword={certificatePassword}
+        checkingAssetStatus={checkingAssetStatus}
+        checklist={productionChecklist}
+        issuer={issuer}
+        onCancelCertificateUpload={cancelCertificateUpload}
+        onCertificatePasswordChange={setCertificatePassword}
+        onConfirmCertificateUpload={() => { void confirmCertificateUpload(); }}
+        onRefreshAssetsStatus={() => { void refreshAssetsStatus(true); }}
+        onUploadCertificate={uploadCertificateFromWeb}
+        onUploadLogo={uploadLogoFromWeb}
+        pendingCertificateName={pendingCertificateFile?.fileName || ""}
+        uploadingAsset={uploadingAsset}
+      />
+      <SriDeveloperToolsSection
+        auditLogs={auditLogs}
+        canView={canViewDeveloperTools}
+        data={data}
+        issuer={issuer}
+        loadingTechnicalLogs={loadingTechnicalLogs}
+        onBackup={backupData}
+        onLoadTechnicalLogs={loadTechnicalLogs}
+        onRefreshBackend={onRefreshBackend}
+        onRestore={restoreData}
+        syncing={syncing}
+        technicalLogs={technicalLogs}
+      />
       <NewEstablishmentModal
         visible={establishmentModalVisible}
         form={establishmentForm}
@@ -798,6 +520,34 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
         message={planUpgradeMessage}
         onClose={() => setProEstablishmentModalVisible(false)}
       />
+      <Modal
+        animationType="fade"
+        transparent
+        visible={Boolean(pendingEnvironmentIssuer)}
+        onRequestClose={() => setPendingEnvironmentIssuer(null)}
+      >
+        <View style={styles.environmentModalOverlay}>
+          <View style={styles.environmentModalCard}>
+            <Text style={styles.environmentModalTitle}>
+              {pendingEnvironmentIssuer?.environment === "2" ? "Cambiar a PRODUCCION" : "Cambiar a PRUEBAS"}
+            </Text>
+            <Text style={styles.environmentModalText}>
+              {pendingEnvironmentIssuer?.environment === "2"
+                ? "Los proximos comprobantes se enviaran al ambiente real del SRI. Verifique firma, secuenciales y datos del emisor antes de guardar."
+                : "Los proximos comprobantes se enviaran al ambiente de pruebas del SRI. No tendran validez tributaria real."}
+            </Text>
+            <Text style={styles.environmentModalHint}>Despues de confirmar, presione Guardar emisor.</Text>
+            <View style={styles.environmentModalActions}>
+              <Pressable style={[styles.environmentModalButton, styles.environmentModalCancel]} onPress={() => setPendingEnvironmentIssuer(null)}>
+                <Text style={styles.environmentModalCancelText}>Cancelar</Text>
+              </Pressable>
+              <Pressable style={[styles.environmentModalButton, styles.environmentModalConfirm]} onPress={confirmIssuerEnvironmentChange}>
+                <Text style={styles.environmentModalConfirmText}>Confirmar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -805,5 +555,69 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
 const styles = StyleSheet.create({
   stack: {
     gap: 12
+  },
+  environmentModalOverlay: {
+    alignItems: "center",
+    backgroundColor: "rgba(15, 23, 42, 0.55)",
+    flex: 1,
+    justifyContent: "center",
+    padding: 20
+  },
+  environmentModalCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 18,
+    gap: 12,
+    maxWidth: 420,
+    padding: 18,
+    width: "100%"
+  },
+  environmentModalTitle: {
+    color: "#111827",
+    fontSize: 20,
+    fontWeight: "900"
+  },
+  environmentModalText: {
+    color: "#475569",
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20
+  },
+  environmentModalHint: {
+    backgroundColor: "#ecfdf5",
+    borderColor: "#a7f3d0",
+    borderRadius: 12,
+    borderWidth: 1,
+    color: "#047857",
+    fontSize: 13,
+    fontWeight: "900",
+    padding: 10
+  },
+  environmentModalActions: {
+    flexDirection: "row",
+    gap: 10
+  },
+  environmentModalButton: {
+    alignItems: "center",
+    borderRadius: 12,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 46,
+    paddingHorizontal: 12
+  },
+  environmentModalCancel: {
+    backgroundColor: "#ffffff",
+    borderColor: "#cbd5e1",
+    borderWidth: 1
+  },
+  environmentModalConfirm: {
+    backgroundColor: "#0f766e"
+  },
+  environmentModalCancelText: {
+    color: "#334155",
+    fontWeight: "900"
+  },
+  environmentModalConfirmText: {
+    color: "#ffffff",
+    fontWeight: "900"
   }
 });

@@ -367,3 +367,32 @@ Consulta desde API:
 - `GET /api/support/logs?limit=80`
 
 Tambien se pueden ver desde la pantalla `SRI > Logs tecnicos` de la app con usuario administrador.
+
+## Acceso tecnico de soporte
+
+El soporte de DarwinSoft puede entrar a una empresa sin crear un usuario visible en el modulo `Usuarios`. Este acceso no se guarda dentro del snapshot de la empresa y se controla solo desde variables del backend.
+
+Variables recomendadas:
+
+```env
+SUPPORT_ADMIN_EMAIL=soporte@factudarwin.com
+SUPPORT_ADMIN_NAME=Soporte DarwinSoft
+SUPPORT_ADMIN_PASSWORD_HASH=$2b$12$...
+```
+
+Genere el hash con:
+
+```bash
+cd backend
+npm run support:hash -- "CLAVE_SEGURA_DE_SOPORTE"
+```
+
+Para pruebas locales se puede usar `SUPPORT_ADMIN_PASSWORD`, pero en produccion use siempre `SUPPORT_ADMIN_PASSWORD_HASH`. Si no desea activar este acceso, configure `SUPPORT_ADMIN_ENABLED=false`.
+
+Uso desde la app:
+
+1. En `Correo o RUC`, ingrese el RUC de la empresa cliente.
+2. En `Clave`, ingrese la clave tecnica de soporte.
+3. El backend devuelve un usuario temporal con acceso de soporte.
+
+Ese usuario permite herramientas tecnicas de soporte, pero no aparece en la lista de usuarios de la empresa.

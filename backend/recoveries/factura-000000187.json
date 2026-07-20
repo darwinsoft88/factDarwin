@@ -1,0 +1,18 @@
+{
+  "accessKey": "2906202601172377209900110020100000001871234567817",
+  "status": "AUTORIZADO",
+  "authorizationNumber": "2906202601172377209900110020100000001871234567817",
+  "authorizationDate": "2026-06-29T12:00:12-05:00",
+  "hasXml": true,
+  "summary": {
+    "claveAcceso": "2906202601172377209900110020100000001871234567817",
+    "estab": "002",
+    "ptoEmi": "010",
+    "secuencial": "000000187",
+    "fechaEmision": "29/06/2026",
+    "razonSocialComprador": "QUILLE AGUALONGO ELVIA JANETH",
+    "identificacionComprador": "0201779378",
+    "totalSinImpuestos": "100.00",
+    "importeTotal": "100.00"
+  }
+}

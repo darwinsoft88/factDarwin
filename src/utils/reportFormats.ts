@@ -1,28 +1,30 @@
 import { paymentOptions } from "../constants/options";
-import { calculateTotalDiscount, money } from "../services/sri";
+import { money } from "../sri";
 import { AppData } from "../types";
 import { accountingMoney } from "./accounting";
 import { documentNumber } from "./documents";
 import { escapeHtml, formatShortDate, shortText } from "./format";
-import { buildSalesReport, subtotalByRate } from "./reports";
+import { buildSalesReport, reportItemFilterLabel, saleDiscountForItemFilter, saleSubtotalForItemFilter, saleTaxForItemFilter, saleTotalForItemFilter, subtotalByRate } from "./reports";
 import { documentTypeLabel, isCreditNoteSale } from "./sales";
 
 type SalesReport = ReturnType<typeof buildSalesReport>;
 
 export function formatSalesReport(report: SalesReport) {
   const paymentLines = Object.entries(report.byPayment).map(([code, total]) => `${paymentLabel(code)}: $${money(total)}`);
-  const invoiceLines = report.sales.map((sale) => `${sale.sequence} | ${sale.status} | ${formatShortDate(sale.createdAt)} | Base contable $${accountingMoney(sale, sale.subtotal)} | Desc. $${accountingMoney(sale, calculateTotalDiscount(sale.items))} | IVA $${accountingMoney(sale, sale.tax)} | Total contable $${accountingMoney(sale, sale.total)} | ${sale.authorizationNumber || sale.accessKey}${sale.voidReason ? ` | ${sale.voidReason}` : ""}${sale.sriMessage ? ` | ${shortText(sale.sriMessage, 120)}` : ""}`);
+  const invoiceLines = report.sales.map((sale) => `${sale.sequence} | ${sale.status} | ${formatShortDate(sale.createdAt)} | Base contable $${accountingMoney(sale, saleSubtotalForItemFilter(sale, report.itemFilter))} | Desc. $${accountingMoney(sale, saleDiscountForItemFilter(sale, report.itemFilter))} | IVA $${accountingMoney(sale, saleTaxForItemFilter(sale, report.itemFilter))} | Total contable $${accountingMoney(sale, saleTotalForItemFilter(sale, report.itemFilter))} | ${sale.authorizationNumber || sale.accessKey}${sale.voidReason ? ` | ${sale.voidReason}` : ""}${sale.sriMessage ? ` | ${shortText(sale.sriMessage, 120)}` : ""}`);
 
   return [
     "REPORTE CONTABLE DE VENTAS",
     `Periodo: ${report.label}`,
     `Tipo: ${report.reportType === "tax" ? "Tributario" : "Operativo"}`,
+    `Items: ${reportItemFilterLabel(report.itemFilter)}`,
     `Documentos del periodo: ${report.sales.length}`,
     `Documentos con valor: ${report.effectiveCount}`,
     `Facturas autorizadas: ${report.authorizedCount}`,
     `Notas de credito: ${report.creditNoteCount}`,
     `Notas de venta: ${report.internalCount}`,
     `Proformas: ${report.proformaCount}`,
+    `Convertidas saldo cero: ${report.convertedCount}`,
     `Anuladas: ${report.voidedCount}`,
     `Rechazadas: ${report.rejectedCount}`,
     "",
@@ -99,10 +101,10 @@ export function buildReportHtml(report: SalesReport, data: AppData) {
           <td>${escapeHtml(client?.name || "Cliente")}</td>
           <td>${escapeHtml(sale.status)}</td>
           <td>${escapeHtml(sale.authorizationNumber || sale.accessKey)}</td>
-          <td class="right">${accountingMoney(sale, sale.subtotal)}</td>
-          <td class="right">${accountingMoney(sale, calculateTotalDiscount(sale.items))}</td>
-          <td class="right">${accountingMoney(sale, sale.tax)}</td>
-          <td class="right">${accountingMoney(sale, sale.total)}</td>
+          <td class="right">${accountingMoney(sale, saleSubtotalForItemFilter(sale, report.itemFilter))}</td>
+          <td class="right">${accountingMoney(sale, saleDiscountForItemFilter(sale, report.itemFilter))}</td>
+          <td class="right">${accountingMoney(sale, saleTaxForItemFilter(sale, report.itemFilter))}</td>
+          <td class="right">${accountingMoney(sale, saleTotalForItemFilter(sale, report.itemFilter))}</td>
           <td>${escapeHtml(sale.voidReason || shortText(sale.sriMessage || "", 100))}</td>
         </tr>`;
     })
@@ -130,12 +132,13 @@ export function buildReportHtml(report: SalesReport, data: AppData) {
 </head>
 <body>
   <h1>Reporte contable de ventas</h1>
-  <div class="muted">${escapeHtml(data.issuer.businessName)} | ${escapeHtml(report.label)}</div>
+  <div class="muted">${escapeHtml(data.issuer.businessName)} | ${escapeHtml(report.label)} | Items: ${escapeHtml(reportItemFilterLabel(report.itemFilter))}</div>
   <div class="grid">
     <div class="box"><div class="label">Tipo reporte</div><div class="value">${report.reportType === "tax" ? "Tributario" : "Operativo"}</div></div>
     <div class="box"><div class="label">Documentos</div><div class="value">${report.sales.length}</div></div>
     <div class="box"><div class="label">Con valor</div><div class="value">${report.effectiveCount}</div></div>
     <div class="box"><div class="label">Autorizadas</div><div class="value">${report.authorizedCount}</div></div>
+    <div class="box"><div class="label">Convertidas</div><div class="value">${report.convertedCount}</div></div>
     <div class="box"><div class="label">Anuladas</div><div class="value">${report.voidedCount}</div></div>
     <div class="box"><div class="label">Subtotal 15%</div><div class="value">$${money(report.subtotal15)}</div></div>
     <div class="box"><div class="label">Subtotal 0%</div><div class="value">$${money(report.subtotal0)}</div></div>
@@ -174,9 +177,9 @@ export function buildMobileReportHtml(report: SalesReport, data: AppData) {
         <td>${escapeHtml(documentNumber(sale, data.issuer))}</td>
         <td>${escapeHtml(client?.name || "")}</td>
         <td>${escapeHtml(sale.status)}</td>
-        <td class="right">${accountingMoney(sale, sale.subtotal)}</td>
-        <td class="right">${accountingMoney(sale, sale.tax)}</td>
-        <td class="right">${accountingMoney(sale, sale.total)}</td>
+        <td class="right">${accountingMoney(sale, saleSubtotalForItemFilter(sale, report.itemFilter))}</td>
+        <td class="right">${accountingMoney(sale, saleTaxForItemFilter(sale, report.itemFilter))}</td>
+        <td class="right">${accountingMoney(sale, saleTotalForItemFilter(sale, report.itemFilter))}</td>
       </tr>`;
   }).join("");
 
@@ -207,7 +210,7 @@ export function buildMobileReportHtml(report: SalesReport, data: AppData) {
 <body>
   <header>
     <h1>Reporte contable de ventas</h1>
-    <div class="meta">${escapeHtml(data.issuer.businessName)} | ${escapeHtml(report.label)} | ${report.reportType === "tax" ? "Tributario" : "Operativo"}</div>
+    <div class="meta">${escapeHtml(data.issuer.businessName)} | ${escapeHtml(report.label)} | ${report.reportType === "tax" ? "Tributario" : "Operativo"} | Items: ${escapeHtml(reportItemFilterLabel(report.itemFilter))}</div>
   </header>
   <main>
     <section class="grid">
@@ -247,13 +250,13 @@ export function buildReportExcelHtml(report: SalesReport, data: AppData) {
           <td style="mso-number-format:'\\@';">${escapeHtml(client?.identification || "")}</td>
           <td>${escapeHtml(sale.status)}</td>
           <td style="mso-number-format:'\\@';">${escapeHtml(sale.authorizationNumber || sale.accessKey || "Interno")}</td>
-          <td class="number">${accountingMoney(sale, subtotalByRate(sale, 0.15))}</td>
-          <td class="number">${accountingMoney(sale, subtotalByRate(sale, 0))}</td>
-          <td class="number">${accountingMoney(sale, calculateTotalDiscount(sale.items))}</td>
-          <td class="number">${accountingMoney(sale, sale.subtotal)}</td>
-          <td class="number">${accountingMoney(sale, sale.tax)}</td>
-          <td class="number total">${accountingMoney(sale, sale.total)}</td>
-          <td>${escapeHtml(paymentLabel(sale.paymentMethod || "20"))}</td>
+          <td class="number">${accountingMoney(sale, subtotalByRate(sale, 0.15, report.itemFilter))}</td>
+          <td class="number">${accountingMoney(sale, subtotalByRate(sale, 0, report.itemFilter))}</td>
+          <td class="number">${accountingMoney(sale, saleDiscountForItemFilter(sale, report.itemFilter))}</td>
+          <td class="number">${accountingMoney(sale, saleSubtotalForItemFilter(sale, report.itemFilter))}</td>
+          <td class="number">${accountingMoney(sale, saleTaxForItemFilter(sale, report.itemFilter))}</td>
+          <td class="number total">${accountingMoney(sale, saleTotalForItemFilter(sale, report.itemFilter))}</td>
+          <td>${escapeHtml(salePaymentLabel(sale))}</td>
           <td>${escapeHtml(observation)}</td>
         </tr>`;
     })
@@ -290,7 +293,7 @@ export function buildReportExcelHtml(report: SalesReport, data: AppData) {
 <body>
   <table>
     <tr><td colspan="15" class="title">Reporte contable de ventas</td></tr>
-    <tr><td colspan="15" class="subtitle">${escapeHtml(data.issuer.businessName)} | RUC ${escapeHtml(data.issuer.ruc)} | ${escapeHtml(report.label)} | ${report.reportType === "tax" ? "Tributario" : "Operativo"}</td></tr>
+    <tr><td colspan="15" class="subtitle">${escapeHtml(data.issuer.businessName)} | RUC ${escapeHtml(data.issuer.ruc)} | ${escapeHtml(report.label)} | ${report.reportType === "tax" ? "Tributario" : "Operativo"} | Items: ${escapeHtml(reportItemFilterLabel(report.itemFilter))}</td></tr>
     <tr class="spacer"><td colspan="15"></td></tr>
     <tr><td colspan="15" class="section">Resumen</td></tr>
     <tr>
@@ -299,6 +302,7 @@ export function buildReportExcelHtml(report: SalesReport, data: AppData) {
       <td class="summary-label">Facturas autorizadas</td><td class="summary-value">${report.authorizedCount}</td>
       <td class="summary-label">Notas venta</td><td class="summary-value">${report.internalCount}</td>
       <td class="summary-label">Proformas</td><td class="summary-value">${report.proformaCount}</td>
+      <td class="summary-label">Convertidas</td><td class="summary-value">${report.convertedCount}</td>
     </tr>
     <tr>
       <td class="summary-label">Anuladas</td><td class="summary-value">${report.voidedCount}</td>
@@ -352,7 +356,7 @@ export function buildReportExcelHtml(report: SalesReport, data: AppData) {
 export function buildReportCsv(report: SalesReport, data: AppData) {
   const rows = [
     ["Reporte contable de ventas"],
-    [data.issuer.businessName, `RUC ${data.issuer.ruc}`, report.label, report.reportType === "tax" ? "Tributario" : "Operativo"],
+    [data.issuer.businessName, `RUC ${data.issuer.ruc}`, report.label, report.reportType === "tax" ? "Tributario" : "Operativo", `Items: ${reportItemFilterLabel(report.itemFilter)}`],
     [],
     ["Resumen"],
     ["Documentos periodo", report.sales.length],
@@ -361,6 +365,7 @@ export function buildReportCsv(report: SalesReport, data: AppData) {
     ["Notas credito", report.creditNoteCount],
     ["Notas venta", report.internalCount],
     ["Proformas", report.proformaCount],
+    ["Convertidas saldo cero", report.convertedCount],
     ["Anuladas", report.voidedCount],
     ["Rechazadas", report.rejectedCount],
     ["Subtotal 15%", money(report.subtotal15)],
@@ -394,13 +399,13 @@ export function buildReportCsv(report: SalesReport, data: AppData) {
         client?.identification || "",
         sale.status,
         sale.authorizationNumber || sale.accessKey || "Interno",
-        accountingMoney(sale, subtotalByRate(sale, 0.15)),
-        accountingMoney(sale, subtotalByRate(sale, 0)),
-        accountingMoney(sale, calculateTotalDiscount(sale.items)),
-        accountingMoney(sale, sale.subtotal),
-        accountingMoney(sale, sale.tax),
-        accountingMoney(sale, sale.total),
-        paymentLabel(sale.paymentMethod || "20"),
+        accountingMoney(sale, subtotalByRate(sale, 0.15, report.itemFilter)),
+        accountingMoney(sale, subtotalByRate(sale, 0, report.itemFilter)),
+        accountingMoney(sale, saleDiscountForItemFilter(sale, report.itemFilter)),
+        accountingMoney(sale, saleSubtotalForItemFilter(sale, report.itemFilter)),
+        accountingMoney(sale, saleTaxForItemFilter(sale, report.itemFilter)),
+        accountingMoney(sale, saleTotalForItemFilter(sale, report.itemFilter)),
+        salePaymentLabel(sale),
         observation
       ];
     }),
@@ -419,5 +424,10 @@ function csvCell(value: string | number) {
 }
 
 export function paymentLabel(value: string) {
+  if (value === "CREDITO") return "Credito generado / cuentas por cobrar";
   return paymentOptions.find((option) => option.value === value)?.label || value;
+}
+
+function salePaymentLabel(sale: { paymentMethod?: string; paymentCondition?: string }) {
+  return sale.paymentCondition === "credito" ? paymentLabel("CREDITO") : paymentLabel(sale.paymentMethod || "20");
 }

@@ -34,6 +34,7 @@ function signToken(user) {
     name: user.name,
     email: user.email,
     role: user.role || "vendedor",
+    supportAccess: Boolean(user.supportAccess),
     iat: now,
     exp: now + Math.max(1, config.jwtExpiresInHours) * 60 * 60
   };

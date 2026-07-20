@@ -3,6 +3,9 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import { Empty } from "./common";
 import { OperationTile } from "./metrics";
 import { AppData, PendingSyncItem } from "../types";
+import { displayInvoiceStatus } from "../utils/invoiceStatus";
+import { documentTypeLabel } from "../utils/sales";
+import { sriPendingSendSummary } from "../utils/sriRetryPolicy";
 import { formatAuditDate, formatSyncStatus, SyncState } from "../utils/support";
 
 type SyncCenterModalProps = {
@@ -17,6 +20,7 @@ type SyncCenterModalProps = {
 
 export function SyncCenterModal({ visible, data, syncState, syncActionLoading, onClose, onRetryPending, onTestServer }: SyncCenterModalProps) {
   const pendingSync: PendingSyncItem[] = data.pendingSync || [];
+  const sriSummary = sriPendingSendSummary(data);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -33,8 +37,10 @@ export function SyncCenterModal({ visible, data, syncState, syncActionLoading, o
           </View>
           <ScrollView contentContainerStyle={styles.creditModalContent}>
             <View style={styles.operationGrid}>
-              <OperationTile title="Pendientes" value={String(pendingSync.length)} detail="Cambios locales sin subir" tone={pendingSync.length ? "warning" : "success"} />
-              <OperationTile title="Estado" value={syncState === "syncing" ? "Subiendo" : syncState === "error" ? "Error" : "OK"} detail={data.autoBackupEnabled === false ? "Modo manual" : "Respaldo automatico"} tone={syncState === "error" ? "danger" : syncState === "syncing" || pendingSync.length ? "warning" : "success"} />
+              <OperationTile title="Pendientes" value={String(pendingSync.length)} detail="Cambios locales sin subir" tone={pendingSync.length ? "warning" : "success"} icon="cloud-upload-outline" />
+              <OperationTile title="SRI pendientes" value={String(sriSummary.pendingCount)} detail="Sin enviar o autorizar" tone={sriSummary.pendingCount ? "warning" : "success"} icon="file-clock-outline" />
+              <OperationTile title="Fuera de fecha" value={String(sriSummary.staleCount)} detail="No reenviar al SRI" tone={sriSummary.staleCount ? "danger" : "success"} icon="calendar-alert" />
+              <OperationTile title="Estado" value={syncState === "syncing" ? "Subiendo" : syncState === "error" ? "Error" : "OK"} detail={data.autoBackupEnabled === false ? "Modo manual" : "Respaldo automatico"} tone={syncState === "error" ? "danger" : syncState === "syncing" || pendingSync.length ? "warning" : "success"} icon="sync" />
             </View>
             <Text selectable style={styles.inlineInfo}>Servidor: {data.backendUrl || "sin URL configurada"}</Text>
             {data.autoBackupLastAt ? <Text style={styles.inlineInfo}>Ultima subida: {formatAuditDate(data.autoBackupLastAt)}</Text> : null}
@@ -56,6 +62,23 @@ export function SyncCenterModal({ visible, data, syncState, syncActionLoading, o
                 {item.lastError ? <Text style={styles.pendingSyncError}>{item.lastError}</Text> : null}
               </View>
             ))}
+            <Text style={styles.sectionMiniTitle}>Documentos SRI pendientes</Text>
+            {sriSummary.pendingCount === 0 ? <Empty text="No hay facturas ni notas credito pendientes de envio SRI." /> : null}
+            {sriSummary.pending.map((sale) => {
+              const isStale = sriSummary.stale.some((item) => item.id === sale.id);
+              return (
+                <View key={sale.id} style={[styles.pendingSyncCard, isStale && styles.staleSriCard]}>
+                  <Text style={styles.pendingSyncTitle}>{sale.sequence} | {documentTypeLabel(sale)}</Text>
+                  <Text style={styles.pendingSyncMeta}>{formatAuditDate(sale.createdAt)} | {displayInvoiceStatus(sale.status)}</Text>
+                  <Text style={[styles.pendingSyncError, !isStale && styles.pendingSriInfo]}>
+                    {isStale
+                      ? "Fuera del dia permitido. No se debe reenviar; emita un nuevo comprobante con fecha actual."
+                      : "Pendiente de envio o autorizacion SRI. Reintente durante el mismo dia."}
+                  </Text>
+                  {sale.sriMessage ? <Text style={styles.pendingSyncMeta}>{sale.sriMessage}</Text> : null}
+                </View>
+              );
+            })}
           </ScrollView>
         </View>
       </View>
@@ -193,5 +216,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     lineHeight: 17
+  },
+  pendingSriInfo: {
+    color: "#0f766e"
+  },
+  staleSriCard: {
+    borderColor: "#fecaca",
+    backgroundColor: "#fef2f2"
   }
 });

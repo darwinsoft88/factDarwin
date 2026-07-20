@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { calculateLineSubtotal, calculateLineTax, calculateLineTotal, grossToNetUnitPrice, money } from "../services/sri";
+import { Platform, StyleSheet, Text, TextInput, View } from "react-native";
+import { calculateLineSubtotal, calculateLineTax, calculateLineTotal, grossToNetUnitPrice, money } from "../sri";
 import { SaleItem } from "../types";
 import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
-import { PrimaryButton, Select } from "./common";
+import { EntityEditModal } from "./EntityEditModal";
+import { Select } from "./common";
 
 type SaleLineEditorForm = {
   quantity: string;
@@ -54,44 +55,35 @@ export function SaleLineEditor({ visible, item, form, onChange, onSave, onClose 
   const previewItem = item ? { ...item, quantity, unitPrice, discount, ivaRate } : undefined;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.creditModalBackdrop}>
-        <View style={styles.quickClientModal}>
-          <View style={styles.creditModalHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.creditModalTitle}>Editar detalle</Text>
-              <Text style={styles.creditModalMeta}>{item ? `${item.code} - ${item.name}` : "Producto"}</Text>
-            </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled">
-            <DraftNumberInput label="Cantidad" value={draft.quantity} onChange={(value) => updateDraft({ ...draft, quantity: value })} />
-            <DraftNumberInput label="Precio publico" value={draft.unitGrossPrice} onChange={(value) => updateDraft({ ...draft, unitGrossPrice: value })} />
-            <Select
-              label="Tipo de descuento"
-              value={draft.discountMode}
-              onChange={(value) => updateDraft({ ...draft, discountMode: value as "amount" | "percent" })}
-              options={[
-                { label: "Valor $", value: "amount" },
-                { label: "Porcentaje %", value: "percent" }
-              ]}
-            />
-            <DraftNumberInput label={draft.discountMode === "percent" ? "Descuento %" : "Descuento publico"} value={draft.grossDiscount} onChange={(value) => updateDraft({ ...draft, grossDiscount: value })} />
-            {previewItem ? (
-              <View style={styles.creditTotalsBox}>
-                <Text style={styles.totalLine}>Base: ${money(calculateLineSubtotal(previewItem))}</Text>
-                <Text style={styles.totalLine}>Descuento: ${money(grossDiscount)}</Text>
-                <Text style={styles.totalLine}>IVA: ${money(calculateLineTax(previewItem))}</Text>
-                <Text style={styles.totalStrong}>Total linea: ${money(calculateLineTotal(previewItem))}</Text>
-              </View>
-            ) : null}
-            <PrimaryButton label="Guardar cambio" onPress={() => onSave(draft)} />
-          </ScrollView>
+    <EntityEditModal
+      visible={visible}
+      title="Editar detalle"
+      subtitle={item ? `${item.code} - ${item.name}` : "Producto"}
+      confirmLabel="Guardar cambio"
+      onClose={onClose}
+      onConfirm={() => onSave(draft)}
+    >
+      <DraftNumberInput label="Cantidad" value={draft.quantity} onChange={(value) => updateDraft({ ...draft, quantity: value })} />
+      <DraftNumberInput label="Precio publico" value={draft.unitGrossPrice} onChange={(value) => updateDraft({ ...draft, unitGrossPrice: value })} />
+      <Select
+        label="Tipo de descuento"
+        value={draft.discountMode}
+        onChange={(value) => updateDraft({ ...draft, discountMode: value as "amount" | "percent" })}
+        options={[
+          { label: "Valor $", value: "amount" },
+          { label: "Porcentaje %", value: "percent" }
+        ]}
+      />
+      <DraftNumberInput label={draft.discountMode === "percent" ? "Descuento %" : "Descuento publico"} value={draft.grossDiscount} onChange={(value) => updateDraft({ ...draft, grossDiscount: value })} />
+      {previewItem ? (
+        <View style={styles.creditTotalsBox}>
+          <Text style={styles.totalLine}>Base: ${money(calculateLineSubtotal(previewItem))}</Text>
+          <Text style={styles.totalLine}>Descuento: ${money(grossDiscount)}</Text>
+          <Text style={styles.totalLine}>IVA: ${money(calculateLineTax(previewItem))}</Text>
+          <Text style={styles.totalStrong}>Total linea: ${money(calculateLineTotal(previewItem))}</Text>
         </View>
-      </View>
-    </Modal>
+      ) : null}
+    </EntityEditModal>
   );
 }
 
@@ -150,32 +142,6 @@ const webInputStyle = {
 } as const;
 
 const styles = StyleSheet.create({
-  creditModalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.4)",
-    justifyContent: "flex-end",
-    padding: 12
-  },
-  quickClientModal: {
-    maxHeight: "92%",
-    borderRadius: 12,
-    backgroundColor: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#e5e7eb",
-    overflow: "hidden"
-  },
-  creditModalHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e5e7eb"
-  },
-  flex: {
-    flex: 1,
-    minWidth: 130
-  },
   inputGroup: {
     gap: 5
   },
@@ -193,32 +159,6 @@ const styles = StyleSheet.create({
     color: "#111827",
     backgroundColor: "#fbfdff",
     fontWeight: "700"
-  },
-  creditModalTitle: {
-    color: "#111827",
-    fontSize: 18,
-    fontWeight: "900"
-  },
-  creditModalMeta: {
-    color: "#64748b",
-    fontSize: 12,
-    marginTop: 3
-  },
-  smallButton: {
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#0f766e",
-    backgroundColor: "#e6fffb",
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  smallButtonText: {
-    color: "#0f5f59",
-    fontWeight: "900"
-  },
-  creditModalContent: {
-    padding: 14,
-    gap: 10
   },
   creditTotalsBox: {
     borderRadius: 8,

@@ -3,21 +3,22 @@ import * as Sharing from "expo-sharing";
 import React from "react";
 import { Alert, Linking, Platform } from "react-native";
 import { sendInvoiceEmail } from "../services/backend";
-import { buildRideHtml } from "../services/ride";
-import { buildCreditNoteXml, buildInvoiceXml, money } from "../services/sri";
+import { buildRideHtml } from "../sri/ride";
+import { buildCreditNoteXml, buildInvoiceXml, money } from "../sri";
 import { AppData, Client, Sale, User } from "../types";
 import { appendAudit } from "../utils/audit";
 import { resolveCompanyLogoUrl } from "../utils/assets";
 import { buildCreditNoteRideHtml, buildInternalTicketHtml, buildProformaHtml } from "../utils/documentHtml";
 import { issuerForSale } from "../utils/establishments";
-import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleTicketDocument, openHtmlViewer } from "../utils/printFiles";
+import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleThermalPdfDocument, openHtmlViewer } from "../utils/printFiles";
+import { appendPendingSync, buildPendingSyncItem } from "../utils/pendingSync";
 import { isCreditNoteSale } from "../utils/sales";
 import { syncSalePatchToBackend } from "../utils/sync";
 
 type UseSaleDocumentActionsParams = {
   backendToken: string;
   data: AppData;
-  persist: (data: AppData) => Promise<void>;
+  persist: (data: AppData, options?: { skipAutoBackup?: boolean; syncState?: "pending" | "syncing" | "synced" | "error" }) => Promise<void>;
   setNotice: React.Dispatch<React.SetStateAction<string>>;
   setProcessingMessage: React.Dispatch<React.SetStateAction<string>>;
   user: User;
@@ -64,7 +65,7 @@ export function useSaleDocumentActions({
       return;
     }
 
-    await handleTicketDocument(html, `Ticket ${sale.sequence}`, pageHeightMm);
+    await handleThermalPdfDocument(html, `Ticket ${sale.sequence}`, "Nota de venta 80mm", pageHeightMm);
   };
 
   const createProforma = async (sale: Sale, client: Client) => {
@@ -104,12 +105,16 @@ export function useSaleDocumentActions({
       ...data,
       sales: data.sales.map((item) => (item.id === sale.id ? updatedSale : item))
     }, user, status === "sent" ? "EMAIL_SENT" : "EMAIL_FAILED", "sale", sale.id, status === "sent" ? `Correo enviado a ${to}` : `Correo fallido a ${to}`, { to, error });
-    await persist(nextData);
-    await syncSalePatchToBackend(data.backendUrl, backendToken, {
+    const patch = {
       baseData: data,
       sales: [updatedSale],
       auditLogs: nextData.auditLogs.slice(0, 1)
-    }, nextData, persist);
+    };
+    const synced = await syncSalePatchToBackend(data.backendUrl, backendToken, patch);
+    const localData = synced
+      ? nextData
+      : appendPendingSync(nextData, buildPendingSyncItem(patch, "Correo pendiente de sincronizar", "El correo fue procesado, pero no se pudo sincronizar el historial en este momento."));
+    await persist(localData, { skipAutoBackup: synced, syncState: synced ? "synced" : "pending" });
   };
 
   const sendSaleEmail = async (sale: Sale, client: Client, source?: Sale, showAlerts = true) => {

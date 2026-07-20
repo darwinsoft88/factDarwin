@@ -1,4 +1,4 @@
-import { initialData } from "../../storage";
+import { initialData } from "../../database";
 import { activeEstablishment, normalizedEstablishments, updateIssuerEstablishmentSequence } from "../establishments";
 
 describe("establishments", () => {

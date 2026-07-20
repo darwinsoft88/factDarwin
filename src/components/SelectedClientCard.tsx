@@ -1,7 +1,7 @@
 import React from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Client } from "../types";
-import { PencilIcon } from "./icons";
 
 type SelectedClientCardProps = {
   client?: Client;
@@ -19,7 +19,7 @@ export function SelectedClientCard({ client, onEdit }: SelectedClientCardProps) 
         {client.address ? <Text style={styles.inlineInfo} numberOfLines={1}>{client.address}</Text> : null}
       </View>
       <Pressable accessibilityRole="button" accessibilityLabel="Editar cliente" style={styles.quickEditButton} onPress={onEdit}>
-        <PencilIcon />
+        <MaterialCommunityIcons name="account-edit-outline" size={20} color="#ffffff" />
       </Pressable>
     </View>
   );

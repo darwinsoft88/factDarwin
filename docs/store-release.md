@@ -4,130 +4,147 @@
 
 La app ya esta preparada para construir binarios con EAS:
 
-- `app.json` con `bundleIdentifier`, `package`, icono, splash y version.
-- `eas.json` con perfiles `development`, `preview` y `production`.
-- Scripts npm para build y submit.
-- Backend configurable con `EXPO_PUBLIC_BACKEND_URL`.
+- `app.json` define nombre, paquete Android, bundle iOS, icono, splash y version.
+- `eas.json` apunta al backend oficial `https://api.factudarwin.com`.
+- `npm run release:android:check` corre typecheck, lint, pruebas, validacion backend y validacion de produccion.
+- `npm run version:bump -- 1.0.2` actualiza version, `versionCode`, `buildNumber` y version visible.
 
 ## Requisitos externos
 
-- Cuenta Expo.
-- EAS CLI instalado:
-
-```bash
-npm install -g eas-cli
-eas login
-```
-
-- Cuenta Google Play Developer para Android.
-- Cuenta Apple Developer para iOS.
-- Backend publicado en HTTPS. No usar `localhost` ni IP local en produccion.
+- Cuenta Expo/EAS.
+- Cuenta Google Play Developer.
+- Backend publicado en HTTPS. No usar `localhost`, IP local ni tuneles temporales en produccion.
+- Base de datos PostgreSQL con backups y restauracion probada.
+- Politica de privacidad publicada en una URL publica.
+- Borrador base disponible en `docs/privacy-policy-template.md`.
+- Textos de Play Store disponibles en `docs/play-store-listing.md`.
+- Capturas de pantalla y textos comerciales para Play Store.
 
 ## Backend de produccion
 
-El backend debe quedar publicado en una URL HTTPS, por ejemplo:
+El backend oficial debe quedar en:
 
 ```txt
-https://facturas.tudominio.com
+https://api.factudarwin.com
 ```
 
-En `backend/.env` de produccion:
+Variables minimas en `backend/.env`:
 
 ```env
+NODE_ENV=production
+AUTH_REQUIRED=true
+PUBLIC_BACKEND_URL=https://api.factudarwin.com
+DATABASE_URL=postgres://usuario:clave@host:5432/factudarwin
+JWT_SECRET=********
+ASSET_ENCRYPTION_SECRET=********
+MASTER_ADMIN_KEY=********
+SUPPORT_ADMIN_ENABLED=true
+SUPPORT_ADMIN_EMAIL=soporte@factudarwin.com
+SUPPORT_ADMIN_NAME=Soporte DarwinSoft
+SUPPORT_ADMIN_PASSWORD_HASH=********
 SRI_ENV=production
 SRI_ALLOW_SEND=true
-SRI_CERT_PATH=./certs/firma.p12
-SRI_CERT_PASSWORD=********
-SMTP_HOST=smtp.gmail.com
+SRI_ALLOW_INSECURE_TLS=false
+PG_BACKUP_ENABLED=true
+PG_BACKUP_DIR=./backups/postgres
+PG_BACKUP_RETENTION_DAYS=30
+PG_DUMP_PATH=pg_dump
+PG_RESTORE_PATH=pg_restore
+PSQL_PATH=psql
+SMTP_HOST=smtp.dominio.com
 SMTP_PORT=587
 SMTP_SECURE=false
 SMTP_USER=correo@dominio.com
 SMTP_PASS=********
 SMTP_FROM=correo@dominio.com
-DB_PATH=./data/factura-sri.sqlite
 ```
 
-## Configurar app para produccion
+No subir a Git `backend/.env`, certificados `.p12`, claves privadas ni backups reales.
 
-En `eas.json`, reemplaza:
+Generar secretos seguros:
 
-```json
-"EXPO_PUBLIC_BACKEND_URL": "https://facturas.tudominio.com"
+```bash
+cd backend
+npm run secrets:generate
 ```
 
-por la URL real HTTPS del backend.
+Generar hash para usuario soporte:
 
-En `app.json`, reemplaza:
-
-```json
-"owner": "REEMPLAZAR-CON-TU-USUARIO-EXPO"
+```bash
+cd backend
+npm run support:hash -- "CLAVE_SEGURA_DE_SOPORTE"
 ```
 
-y si ya tienes proyecto EAS:
+Copiar el resultado en `SUPPORT_ADMIN_PASSWORD_HASH`. No guardar la clave plana en produccion.
 
-```json
-"projectId": "REEMPLAZAR-CON-EAS-PROJECT-ID"
+Validar el `.env` real del backend antes de reiniciar el servidor:
+
+```bash
+cd backend
+npm run check:production
 ```
 
-Tambien conviene cambiar los identificadores si usaras una marca real:
+Probar backup y restauracion real:
 
-```json
-"bundleIdentifier": "com.tuempresa.facturasri"
-"package": "com.tuempresa.facturasri"
+```bash
+cd backend
+npm run backup:postgres
 ```
+
+Este comando crea un `.dump`, restaura ese archivo en una base temporal y verifica tablas criticas antes de marcar el backup como valido.
 
 ## Build Android
 
-```bash
-npm run build:android
-```
-
-Para pruebas internas:
+Antes de generar:
 
 ```bash
-eas build --platform android --profile preview
+npm run release:status
+npm run release:preflight
 ```
 
-## Build iOS
+Este comando corre typecheck, lint, pruebas, configuracion de produccion, aislamiento por empresa, indices PostgreSQL criticos y estado final de release. Si falla, no generar APK/AAB todavia.
+
+Despues de subir el backend actualizado:
 
 ```bash
-npm run build:ios
+npm run smoke:production
 ```
 
-Apple requiere cuenta Apple Developer y configuracion de certificados/provisioning.
+Este comando consulta `https://api.factudarwin.com/health` y confirma HTTPS, PostgreSQL, autenticacion activa, backups y TLS SRI seguro.
 
-## Submit
+APK para instalar directo o probar en telefonos:
 
-Android:
+```bash
+npm run build:android:apk
+```
+
+AAB para Play Store:
+
+```bash
+npm run build:android:aab
+```
+
+Subir a Play Console con EAS:
 
 ```bash
 npm run submit:android
 ```
 
-iOS:
+## Checklist Play Store
 
-```bash
-npm run submit:ios
-```
+- Backend actualizado y corriendo en `https://api.factudarwin.com`.
+- `npm run release:android:check` sin errores.
+- Version nueva con `npm run version:bump -- x.y.z`.
+- Prueba real de login, sincronizacion, facturacion, nota de venta, proforma, credito, recibos y reportes.
+- Prueba con dos telefonos sobre la misma empresa.
+- Politica de privacidad publicada.
+- Declaracion de seguridad de datos completada en Play Console.
+- Ficha de tienda revisada desde `docs/play-store-listing.md`.
+- Capturas de pantalla listas.
+- Descripcion corta y descripcion completa listas.
+- Soporte WhatsApp activo.
+- No exponer modulos tecnicos a usuarios finales sin rol de soporte/admin.
 
-Segun la documentacion oficial de Expo, para publicar necesitas construir un build de produccion con EAS Build y luego subirlo con EAS Submit o manualmente desde las consolas de Google/Apple.
+## Nota importante sobre paquete Android
 
-Fuentes oficiales:
-
-- https://docs.expo.dev/deploy/build-project/
-- https://docs.expo.dev/deploy/submit-to-app-stores/
-- https://docs.expo.dev/eas/json/
-
-## Checklist antes de enviar a tiendas
-
-- Probar emision en ambiente de pruebas.
-- Probar una factura real controlada en produccion.
-- Confirmar que el backend usa HTTPS.
-- Cambiar `SRI_ENV=production`.
-- Cambiar ambiente de la app a `Produccion`.
-- Revisar RUC, establecimiento, punto de emision y secuencial real.
-- Reemplazar icono/logo temporal por marca final.
-- Preparar politica de privacidad.
-- Preparar screenshots de la app.
-- No subir `backend/.env` ni `backend/certs/firma.p12`.
-- Rotar claves que hayan sido compartidas en capturas.
+No cambiar `android.package` si ya hay clientes instalados con el paquete actual. Android trataria el nuevo paquete como otra app distinta y no actualizaria la instalada.

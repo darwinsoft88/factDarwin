@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import { calculateTotalDiscount, calculateTotals } from "../services/sri";
+import { calculateTotalDiscount, calculateTotals } from "../sri";
 import { AppData, Product, Sale, SaleItem } from "../types";
 import { productMinStock } from "../utils/accounting";
+import { isInventoryProduct } from "../utils/catalogItems";
 import { parseDecimal } from "../utils/numbers";
 import { buildCreditNoteItemsFromQuantities } from "../utils/sales";
 
@@ -47,8 +48,8 @@ export function useSaleDerivedState({
     return buildCreditNoteItemsFromQuantities(creditNoteSource as Sale, data.sales, creditNoteQuantities);
   }, [creditNoteQuantities, creditNoteSource, data.sales]);
   const creditNotePreviewTotals = useMemo(() => calculateTotals(creditNotePreviewItems), [creditNotePreviewItems]);
-  const selectedProductProjectedStock = selectedProduct ? selectedProduct.stock - Math.max(0, parseDecimal(quantity) || 0) : 0;
-  const selectedProductLowStock = Boolean(selectedProduct && selectedProductProjectedStock <= productMinStock(selectedProduct));
+  const selectedProductProjectedStock = selectedProduct && isInventoryProduct(selectedProduct) ? selectedProduct.stock - Math.max(0, parseDecimal(quantity) || 0) : 0;
+  const selectedProductLowStock = Boolean(selectedProduct && isInventoryProduct(selectedProduct) && selectedProductProjectedStock <= productMinStock(selectedProduct));
 
   return {
     creditNoteClient,

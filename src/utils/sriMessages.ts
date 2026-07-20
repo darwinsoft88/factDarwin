@@ -18,18 +18,18 @@ export function userFriendlyActionError(error: unknown, action: "reserve-sequenc
 
   if (looksOffline) {
     if (action === "reserve-sequence") {
-      return "No hay internet o el servidor no esta disponible. Para emitir una factura electronica se necesita conexion a internet.";
+      return "No se pudo conectar con el servidor para reservar la secuencia. Revise la conexion con el servidor y vuelva a intentar.";
     }
     if (action === "authorize-invoice") {
-      return "No hay internet o el servidor no esta disponible. El documento quedo guardado y puede reintentarse cuando vuelva la conexion.";
+      return "No se pudo completar el envio con el servidor o el SRI. El documento quedo guardado y puede reintentarse desde pendientes.";
     }
     if (action === "sync") {
-      return "No hay internet. El cambio quedo guardado en este telefono y se sincronizara automaticamente cuando vuelva la conexion.";
+      return "No se pudo sincronizar con el servidor. El cambio quedo guardado en este dispositivo y se reintentara automaticamente cuando el servidor este disponible.";
     }
     if (action === "email") {
-      return "No hay internet para enviar el correo. Intente nuevamente cuando vuelva la conexion.";
+      return "No se pudo enviar el correo en este momento. Revise la conexion con el servidor e intente nuevamente.";
     }
-    return "No hay internet o el servidor no esta disponible. Intente nuevamente cuando vuelva la conexion.";
+    return "No se pudo conectar con el servidor. Intente nuevamente cuando el servicio este disponible.";
   }
 
   if (lower.includes("licencia")) return raw;

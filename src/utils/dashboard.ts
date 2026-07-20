@@ -1,5 +1,6 @@
 import { AppData } from "../types";
 import { accountingValue, productMinStock, saleProfitValue } from "./accounting";
+import { isInventoryProduct } from "./catalogItems";
 import { scopedReportData } from "./documents";
 import { isSriPending, isSriRejected, isTicketOffline } from "./invoiceStatus";
 import { isCreditNoteSale, isInvoiceSale } from "./sales";
@@ -16,7 +17,7 @@ export function buildDashboard(data: AppData) {
   const monthSales = effectiveSales.filter((sale) => isDateInRange(sale.createdAt, monthStart, monthEnd));
   const pending = scoped.sales.filter((sale) => isInvoiceSale(sale) && isSriPending(sale.status));
   const rejected = scoped.sales.filter((sale) => isInvoiceSale(sale) && isSriRejected(sale.status));
-  const lowStock = data.products.filter((product) => product.stock <= productMinStock(product)).sort((a, b) => a.stock - b.stock);
+  const lowStock = data.products.filter((product) => isInventoryProduct(product) && product.stock <= productMinStock(product)).sort((a, b) => a.stock - b.stock);
   const recentSales = [...scoped.sales].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5);
 
   return {

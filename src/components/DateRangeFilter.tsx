@@ -1,4 +1,5 @@
 import React from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { CalendarDateInput } from "./CalendarDateInput";
 
@@ -36,12 +37,15 @@ export function DateRangeFilter({
       </View>
       <View style={styles.actionGroup}>
         <Pressable style={styles.smallButton} onPress={onToday}>
+          <MaterialCommunityIcons name="calendar-today" size={14} color="#0f5f59" />
           <Text style={styles.smallButtonText}>Hoy</Text>
         </Pressable>
         <Pressable style={styles.smallButton} onPress={onMonth}>
+          <MaterialCommunityIcons name="calendar-month-outline" size={14} color="#0f5f59" />
           <Text style={styles.smallButtonText}>Este mes</Text>
         </Pressable>
         <Pressable style={styles.smallButton} onPress={onClear}>
+          <MaterialCommunityIcons name="filter-remove-outline" size={14} color="#0f5f59" />
           <Text style={styles.smallButtonText}>Limpiar</Text>
         </Pressable>
       </View>
@@ -76,8 +80,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#0f766e",
     backgroundColor: "#e6fffb",
-    paddingHorizontal: 11,
-    paddingVertical: 7
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5
   },
   smallButtonText: {
     color: "#0f5f59",

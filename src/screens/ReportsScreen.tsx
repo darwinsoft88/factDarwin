@@ -1,21 +1,23 @@
 import * as FileSystem from "expo-file-system/legacy";
-import React, { useEffect, useMemo, useState } from "react";
+import React from "react";
 import { Alert, Platform, StyleSheet, Text, View } from "react-native";
-import { Empty, LoadMoreButton, PrimaryButton, Section, Select } from "../components/common";
-import { ReportRow, StatBox } from "../components/metrics";
+import { CollapsibleSection, Empty, PrimaryButton, Section, Select } from "../components/common";
+import { PaginationControls } from "../components/PaginationControls";
+import { ReportStatsGrid } from "../components/ReportStatsGrid";
+import { Iva104SummarySection, PaymentSummarySection, TaxSummarySection } from "../components/ReportSummarySections";
 import { LIST_BATCH_SIZE } from "../constants/app";
 import { monthOptions } from "../constants/options";
+import { useReportsState } from "../hooks/useReportsState";
 import { AppData, Sale } from "../types";
-import { accountingMoney, saleProfitValue } from "../utils/accounting";
-import { activeScopeId, documentNumber, scopedReportData } from "../utils/documents";
+import { accountingMoney } from "../utils/accounting";
+import { documentNumber } from "../utils/documents";
 import { showMessage } from "../utils/dialogs";
-import { normalizedEstablishments } from "../utils/establishments";
-import { formatShortDate, sanitizeFileName, toInputDate } from "../utils/format";
+import { formatShortDate, sanitizeFileName } from "../utils/format";
 import { handlePdfDocument, openHtmlViewer, shareGeneratedFile } from "../utils/printFiles";
 import { buildMobileReportHtml, buildReportExcelHtml, buildReportHtml, formatIva104Report, formatSalesReport } from "../utils/reportFormats";
-import { buildSalesReport } from "../utils/reports";
+import { saleProfitForItemFilter, saleSubtotalForItemFilter, saleTaxForItemFilter, saleTotalForItemFilter } from "../utils/reports";
 import { documentTypeLabel } from "../utils/sales";
-import { money } from "../services/sri";
+import { money } from "../sri";
 
 type ReportsListItemProps = {
   title: string;
@@ -40,32 +42,36 @@ export function ReportsScreen({
   ListItemComponent: React.ComponentType<ReportsListItemProps>;
   CalendarDateInputComponent: React.ComponentType<CalendarDateInputProps>;
 }) {
-  const now = new Date();
-  const establishmentOptions = normalizedEstablishments(data.issuer);
-  const [establishmentFilter, setEstablishmentFilter] = useState(activeScopeId(data));
-  const reportData = useMemo(() => establishmentFilter === "all" ? data : scopedReportData(data, establishmentFilter), [data, establishmentFilter]);
-  const currentYear = String(new Date().getFullYear());
-  const availableYears = Array.from(new Set([
-    currentYear,
-    ...reportData.sales.map((sale) => String(new Date(sale.createdAt).getFullYear())),
-    ...(reportData.receivedRetentions || []).map((retention) => String(new Date(retention.receivedAt).getFullYear()))
-  ])).sort((a, b) => Number(b) - Number(a));
-  const [periodType, setPeriodType] = useState("monthly");
-  const [year, setYear] = useState(availableYears[0] || currentYear);
-  const [month, setMonth] = useState(String(new Date().getMonth() + 1));
-  const [semester, setSemester] = useState("1");
-  const [startDate, setStartDate] = useState(toInputDate(new Date(now.getFullYear(), now.getMonth(), 1)));
-  const [endDate, setEndDate] = useState(toInputDate(now));
-  const [reportType, setReportType] = useState("tax");
-  const [documentFilter, setDocumentFilter] = useState("all");
-  const [visibleReportSaleCount, setVisibleReportSaleCount] = useState(LIST_BATCH_SIZE);
-
-  const report = useMemo(() => buildSalesReport(reportData, periodType, year, month, semester, startDate, endDate, reportType, documentFilter), [reportData, periodType, year, month, semester, startDate, endDate, reportType, documentFilter]);
-  const visibleReportSales = report.sales.slice(0, visibleReportSaleCount);
-
-  useEffect(() => {
-    setVisibleReportSaleCount(LIST_BATCH_SIZE);
-  }, [documentFilter, endDate, month, periodType, reportType, semester, startDate, year]);
+  const reportsState = useReportsState(data);
+  const {
+    availableYears,
+    documentFilter,
+    endDate,
+    establishmentFilter,
+    establishmentOptions,
+    itemFilter,
+    month,
+    periodType,
+    report,
+    reportData,
+    reportSalePagination,
+    reportType,
+    semester,
+    setDocumentFilter,
+    setEndDate,
+    setEstablishmentFilter,
+    setItemFilter,
+    setMonth,
+    setPeriodType,
+    setReportSalePage,
+    setReportType,
+    setSemester,
+    setStartDate,
+    setYear,
+    startDate,
+    visibleReportSales,
+    year
+  } = reportsState;
 
   const exportPdf = async () => {
     const html = buildReportHtml(report, reportData);
@@ -115,7 +121,9 @@ export function ReportsScreen({
   return (
     <View style={styles.stack}>
       <Section title="Reporte contable">
-        <Text style={styles.paragraph}>El reporte tributario es para declaraciones: solo facturas autorizadas. El reporte operativo permite revisar todos los documentos, solo facturas o solo notas de venta.</Text>
+        <View style={styles.infoStrip}>
+          <Text style={styles.infoText}>Tributario para declaraciones. Operativo para revisar movimientos, notas y proformas.</Text>
+        </View>
         <Select
           label="Establecimiento"
           value={establishmentFilter}
@@ -148,6 +156,16 @@ export function ReportsScreen({
             ]}
           />
         ) : null}
+        <Select
+          label="Items"
+          value={itemFilter}
+          onChange={(value) => setItemFilter(value as "all" | "products" | "services")}
+          options={[
+            { label: "Todos", value: "all" },
+            { label: "Solo productos", value: "products" },
+            { label: "Solo servicios", value: "services" }
+          ]}
+        />
         <Select
           label="Periodo"
           value={periodType}
@@ -182,95 +200,50 @@ export function ReportsScreen({
             </View>
           </View>
         ) : null}
-        <View style={styles.statsGrid}>
-          <StatBox label="Documentos" value={String(report.sales.length)} />
-          <StatBox label="Con valor" value={String(report.effectiveCount)} />
-          <StatBox label="Autorizadas" value={String(report.authorizedCount)} />
-          <StatBox label="Notas credito" value={String(report.creditNoteCount)} />
-          <StatBox label="Notas venta" value={String(report.internalCount)} />
-          <StatBox label="Proformas" value={String(report.proformaCount)} />
-          <StatBox label="Anuladas" value={String(report.voidedCount)} />
-          <StatBox label="Rechazadas" value={String(report.rejectedCount)} />
-          <StatBox label="Subtotal 15%" value={`$${money(report.subtotal15)}`} />
-          <StatBox label="Subtotal 0%" value={`$${money(report.subtotal0)}`} />
-          <StatBox label="Descuentos" value={`$${money(report.discount)}`} />
-          <StatBox label="IVA 15%" value={`$${money(report.iva15)}`} />
-          <StatBox label="Subtotal" value={`$${money(report.subtotal)}`} />
-          <StatBox label="Costo" value={`$${money(report.cost)}`} />
-          <StatBox label="Utilidad" value={`$${money(report.profit)}`} />
-          <StatBox label="Total ventas" value={`$${money(report.total)}`} />
-          <StatBox label="Ret. IVA" value={`$${money(report.retentionIva)}`} />
-          <StatBox label="Ret. fuente" value={`$${money(report.retentionRenta)}`} />
-          <StatBox label="Neto ret." value={`$${money(report.netCollected)}`} />
-          <StatBox label="104 gravado" value={`$${money(report.iva104.salesVatNet)}`} />
-          <StatBox label="104 IVA neto" value={`$${money(report.iva104.ivaGeneratedNet)}`} />
-          <StatBox label="104 a pagar" value={`$${money(report.iva104.estimatedIvaPayable)}`} />
-        </View>
-        <PrimaryButton label="Vista contable" onPress={() => onReport(formatSalesReport(report))} />
-        <PrimaryButton label="Vista IVA 104" onPress={() => onReport(formatIva104Report(report))} />
+        <ReportStatsGrid report={report} />
+        <CollapsibleSection title="Formas de cobro">
+          <PaymentSummarySection report={report} embedded />
+        </CollapsibleSection>
         <View style={styles.row}>
           <View style={styles.flex}>
-            <PrimaryButton label="Ver PDF" onPress={exportPdf} />
+            <PrimaryButton label="Vista contable" onPress={() => onReport(formatSalesReport(report))} />
           </View>
           <View style={styles.flex}>
-            <PrimaryButton label="Excel / guardar" onPress={exportExcel} />
+            <PrimaryButton label="IVA 104" onPress={() => onReport(formatIva104Report(report))} />
+          </View>
+        </View>
+        <View style={styles.row}>
+          <View style={styles.flex}>
+            <PrimaryButton label="PDF" onPress={exportPdf} />
+          </View>
+          <View style={styles.flex}>
+            <PrimaryButton label="Excel" onPress={exportExcel} />
           </View>
         </View>
       </Section>
 
-      <Section title="Resumen tributario">
-        <ReportRow label="Periodo" value={report.label} />
-        <ReportRow label="Tipo de reporte" value={report.reportType === "tax" ? "Tributario / contador" : "Operativo"} />
-        <ReportRow label="Documentos del periodo" value={String(report.sales.length)} />
-        <ReportRow label="Documentos con valor" value={String(report.effectiveCount)} />
-        <ReportRow label="Facturas autorizadas" value={String(report.authorizedCount)} />
-        <ReportRow label="Notas de credito" value={String(report.creditNoteCount)} />
-        <ReportRow label="Notas de venta" value={String(report.internalCount)} />
-        <ReportRow label="Proformas" value={String(report.proformaCount)} />
-        <ReportRow label="Anuladas / sin efecto tributario" value={String(report.voidedCount)} />
-        <ReportRow label="Rechazadas" value={String(report.rejectedCount)} />
-        <ReportRow label="Subtotal gravado 15%" value={`$${money(report.subtotal15)}`} />
-        <ReportRow label="Subtotal tarifa 0%" value={`$${money(report.subtotal0)}`} />
-        <ReportRow label="Total descuentos" value={`$${money(report.discount)}`} />
-        <ReportRow label="Subtotal no objeto de IVA" value="$0.00" />
-        <ReportRow label="Subtotal exento de IVA" value="$0.00" />
-        <ReportRow label="Total sin impuestos" value={`$${money(report.subtotal)}`} />
-        <ReportRow label="IVA causado" value={`$${money(report.iva15)}`} />
-        <ReportRow label="Total facturado" value={`$${money(report.total)}`} />
-        <ReportRow label="Retenciones IVA recibidas" value={`$${money(report.retentionIva)}`} />
-        <ReportRow label="Retenciones fuente recibidas" value={`$${money(report.retentionRenta)}`} />
-        <ReportRow label="Neto despues de retenciones" value={`$${money(report.netCollected)}`} strong />
-      </Section>
+      <CollapsibleSection title="Resumen tributario">
+        <TaxSummarySection report={report} embedded />
+      </CollapsibleSection>
 
-      <Section title="Resumen IVA / Formulario 104">
-        <ReportRow label="Ventas tarifa diferente de cero - bruto" value={`$${money(report.iva104.salesVatGross)}`} />
-        <ReportRow label="Notas de credito tarifa diferente de cero" value={`$${money(report.iva104.creditVat)}`} />
-        <ReportRow label="Ventas tarifa diferente de cero - neto" value={`$${money(report.iva104.salesVatNet)}`} />
-        <ReportRow label="Ventas tarifa 0% - bruto" value={`$${money(report.iva104.salesZeroGross)}`} />
-        <ReportRow label="Notas de credito tarifa 0%" value={`$${money(report.iva104.creditZero)}`} />
-        <ReportRow label="Ventas tarifa 0% - neto" value={`$${money(report.iva104.salesZeroNet)}`} />
-        <ReportRow label="IVA generado bruto" value={`$${money(report.iva104.ivaGeneratedGross)}`} />
-        <ReportRow label="IVA notas de credito" value={`$${money(report.iva104.ivaCreditNotes)}`} />
-        <ReportRow label="IVA generado neto" value={`$${money(report.iva104.ivaGeneratedNet)}`} />
-        <ReportRow label="Retenciones IVA recibidas" value={`$${money(report.iva104.retentionIva)}`} />
-        <ReportRow label="IVA estimado a pagar" value={`$${money(report.iva104.estimatedIvaPayable)}`} strong />
-        <Text style={styles.paragraph}>Resumen preparado con ventas, notas de credito y retenciones recibidas. No incluye compras, credito tributario anterior, activos fijos, importaciones, ajustes, intereses ni multas.</Text>
-      </Section>
+      <CollapsibleSection title="Resumen IVA 104">
+        <Iva104SummarySection report={report} embedded />
+      </CollapsibleSection>
 
-      <Section title="Facturas del periodo">
-        {report.sales.length === 0 ? <Empty text="No hay facturas en este periodo." /> : null}
+      <Section title="Documentos del periodo">
+        {report.sales.length === 0 ? <Empty text="No hay documentos con ese filtro." /> : null}
         {visibleReportSales.map((sale: Sale) => {
           const client = reportData.clients.find((item) => item.id === sale.clientId);
           return (
             <ListItemComponent
               key={sale.id}
               title={`${documentNumber(sale, data.issuer)} - ${client?.name ?? "Cliente"}`}
-              meta={`${documentTypeLabel(sale)} | ${formatShortDate(sale.createdAt)} | Base $${accountingMoney(sale, sale.subtotal)} | IVA $${accountingMoney(sale, sale.tax)} | Total $${accountingMoney(sale, sale.total)} | Util. $${money(saleProfitValue(sale, reportData.products))}${sale.voidReason ? ` | ${sale.voidReason}` : ""}`}
+              meta={`${documentTypeLabel(sale)} | ${formatShortDate(sale.createdAt)} | Base $${accountingMoney(sale, saleSubtotalForItemFilter(sale, itemFilter))} | IVA $${accountingMoney(sale, saleTaxForItemFilter(sale, itemFilter))} | Total $${accountingMoney(sale, saleTotalForItemFilter(sale, itemFilter))} | Util. $${money(saleProfitForItemFilter(sale, reportData.products, itemFilter))}${sale.voidReason ? ` | ${sale.voidReason}` : ""}`}
               badge={sale.status}
             />
           );
         })}
-        {visibleReportSales.length < report.sales.length ? <LoadMoreButton label="Cargar mas facturas" onPress={() => setVisibleReportSaleCount((count) => count + LIST_BATCH_SIZE)} /> : null}
+        <PaginationControls page={reportSalePagination.currentPage} pageSize={LIST_BATCH_SIZE} totalItems={report.sales.length} onPageChange={setReportSalePage} />
       </Section>
     </View>
   );
@@ -280,9 +253,19 @@ const styles = StyleSheet.create({
   stack: {
     gap: 12
   },
-  paragraph: {
-    color: "#4b5563",
-    lineHeight: 20
+  infoStrip: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#bae6fd",
+    backgroundColor: "#f0f9ff",
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  infoText: {
+    color: "#075985",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17
   },
   row: {
     flexDirection: "row",
@@ -293,10 +276,5 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
     minWidth: 130
-  },
-  statsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8
   }
 });

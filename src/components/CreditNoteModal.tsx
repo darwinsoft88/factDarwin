@@ -1,6 +1,7 @@
 import React from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { calculateLineTotal, money } from "../services/sri";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { calculateLineTotal, money } from "../sri";
 import { Issuer, Sale } from "../types";
 import { documentNumber } from "../utils/documents";
 import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
@@ -44,67 +45,75 @@ export function CreditNoteModal({
 }: CreditNoteModalProps) {
   return (
     <Modal visible={Boolean(source)} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.creditModalBackdrop}>
-        <View style={styles.creditModal}>
-          <View style={styles.creditModalHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.creditModalTitle}>Nota de credito</Text>
-              <Text style={styles.creditModalMeta}>{source ? `Factura ${documentNumber(source, issuer)}` : ""}</Text>
+      <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+        <View style={styles.creditModalBackdrop}>
+          <View style={styles.creditModal}>
+            <View style={styles.creditModalHeader}>
+              <View style={styles.flex}>
+                <Text style={styles.creditModalTitle}>Nota de credito</Text>
+                <Text style={styles.creditModalMeta}>{source ? `Factura ${documentNumber(source, issuer)}` : ""}</Text>
+              </View>
+              <Pressable style={styles.smallButton} onPress={onClose}>
+                <Text style={styles.smallButtonText}>Cerrar</Text>
+              </Pressable>
             </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
-            </Pressable>
-          </View>
-          <ScrollView contentContainerStyle={styles.creditModalContent}>
-            <Input label="Motivo" value={reason} onChangeText={onReasonChange} placeholder="Ej: devolucion parcial" />
-            <Pressable style={styles.creditSelectAllButton} onPress={onSelectAll}>
-              <Text style={styles.creditSelectAllText}>Seleccionar todo disponible</Text>
-            </Pressable>
-            {source?.items.map((item, index) => {
-              const lineKey = getCreditLineKey(item, index);
-              const available = getCreditLineAvailable(sales, source, item, index);
-              const selectedQuantity = Math.max(0, parseDecimal(quantities[lineKey] || "0") || 0);
-              const selectedItem = selectedQuantity > 0 ? buildCreditNoteItem(item, selectedQuantity, lineKey) : undefined;
-              return (
-                <View key={lineKey} style={styles.creditLineCard}>
-                  <Text style={styles.creditLineTitle}>{item.code} - {item.name}</Text>
-                  <Text style={styles.creditLineMeta}>Facturado: {formatQuantity(item.quantity)} | Disponible: {formatQuantity(available)} | Total linea: ${money(calculateLineTotal(item))}</Text>
-                  <View style={styles.row}>
-                    <View style={styles.flex}>
-                      <Input
-                        label="Cantidad a devolver"
-                        value={quantities[lineKey] || "0"}
-                        onChangeText={(value) => onQuantityChange(lineKey, sanitizeDecimalInput(value))}
-                        keyboardType="decimal-pad"
-                      />
-                    </View>
-                    <View style={styles.creditLineTotalBox}>
-                      <Text style={styles.creditLineMeta}>Valor</Text>
-                      <Text style={styles.creditLineTotal}>{selectedItem ? `$${money(calculateLineTotal(selectedItem))}` : "$0.00"}</Text>
+            <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+              <Input label="Motivo" value={reason} onChangeText={onReasonChange} placeholder="Ej: devolucion parcial" />
+              <Pressable style={styles.creditSelectAllButton} onPress={onSelectAll}>
+                <Text style={styles.creditSelectAllText}>Seleccionar todo disponible</Text>
+              </Pressable>
+              {source?.items.map((item, index) => {
+                const lineKey = getCreditLineKey(item, index);
+                const available = getCreditLineAvailable(sales, source, item, index);
+                const selectedQuantity = Math.max(0, parseDecimal(quantities[lineKey] || "0") || 0);
+                const selectedItem = selectedQuantity > 0 ? buildCreditNoteItem(item, selectedQuantity, lineKey) : undefined;
+                return (
+                  <View key={lineKey} style={styles.creditLineCard}>
+                    <Text style={styles.creditLineTitle}>{item.code} - {item.name}</Text>
+                    <Text style={styles.creditLineMeta}>Facturado: {formatQuantity(item.quantity)} | Disponible: {formatQuantity(available)} | Total linea: ${money(calculateLineTotal(item))}</Text>
+                    <View style={styles.row}>
+                      <View style={styles.flex}>
+                        <Input
+                          label="Cantidad a devolver"
+                          value={quantities[lineKey] || ""}
+                          onChangeText={(value) => onQuantityChange(lineKey, sanitizeDecimalInput(value))}
+                          placeholder="0"
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                      <View style={styles.creditLineTotalBox}>
+                        <Text style={styles.creditLineMeta}>Valor</Text>
+                        <Text style={styles.creditLineTotal}>{selectedItem ? `$${money(calculateLineTotal(selectedItem))}` : "$0.00"}</Text>
+                      </View>
                     </View>
                   </View>
-                </View>
-              );
-            })}
-            <View style={styles.creditTotalsBox}>
-              <Text style={styles.totalLine}>Subtotal: ${money(totals.subtotal)}</Text>
-              <Text style={styles.totalLine}>IVA: ${money(totals.tax)}</Text>
-              <Text style={styles.totalStrong}>Total nota credito: ${money(totals.total)}</Text>
-            </View>
-            <PrimaryButton label={issuing ? "Procesando..." : "Emitir nota de credito"} onPress={issuing ? () => undefined : onIssue} />
-          </ScrollView>
+                );
+              })}
+              <View style={styles.creditTotalsBox}>
+                <Text style={styles.totalLine}>Subtotal: ${money(totals.subtotal)}</Text>
+                <Text style={styles.totalLine}>IVA: ${money(totals.tax)}</Text>
+                <Text style={styles.totalStrong}>Total nota credito: ${money(totals.total)}</Text>
+              </View>
+              <PrimaryButton label={issuing ? "Procesando..." : "Emitir nota de credito"} onPress={issuing ? () => undefined : onIssue} />
+            </ScrollView>
+          </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoiding: {
+    flex: 1
+  },
   creditModalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.4)",
     justifyContent: "flex-end",
-    padding: 12
+    paddingHorizontal: MODAL_EDGE_PADDING,
+    paddingTop: MODAL_EDGE_PADDING,
+    paddingBottom: MODAL_SAFE_BOTTOM_PADDING
   },
   creditModal: {
     maxHeight: "92%",
@@ -150,6 +159,7 @@ const styles = StyleSheet.create({
   },
   creditModalContent: {
     padding: 14,
+    paddingBottom: MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING,
     gap: 10
   },
   creditSelectAllButton: {

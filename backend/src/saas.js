@@ -60,6 +60,7 @@ function buildInitialTenantData({ company, adminUser }) {
     inventoryMovements: [],
     auditLogs: [],
     sales: [],
+    creditPayments: [],
     receivedRetentions: [],
     guides: [],
     cashClosings: [],

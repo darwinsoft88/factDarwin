@@ -2,12 +2,15 @@ import { Alert, Platform } from "react-native";
 import { useMemo } from "react";
 import { loginBackend, registerBackend, requestPasswordReset, restoreAppData, changeBackendPassword } from "../services/backend";
 import { hashPassword } from "../services/security";
+import { upsertOfflineUser } from "../utils/authOffline";
 import { isBackendConnectionError, loginErrorMessage } from "../utils/errors";
 import { normalizedEstablishments, issuerWithEstablishment } from "../utils/establishments";
 import { showMessage } from "../utils/dialogs";
 import { generateId } from "../utils/id";
+import { isSessionTokenExpired } from "../utils/sessionToken";
+import { mergeAppDataSnapshots } from "../utils/dataMerge";
 import { sanitizeAppData, isValidUrl } from "../validation";
-import { clearSession, loadSession, saveData, saveSession, initialData } from "../storage";
+import { clearSession, loadSession, saveData, saveSession, initialData } from "../database";
 import type { AppData, User, UserRole } from "../types";
 import type { SyncState } from "../utils/support";
 import type { AuthState } from "./useAuthState";
@@ -48,7 +51,7 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
           storedSession.user.email.trim().toLowerCase() === nextUser.email.trim().toLowerCase() ||
           (storedSession.companyRuc && storedSession.companyRuc === nextData.issuer.ruc)
         );
-        if (sameUser && storedSession?.token) sessionToken = storedSession.token;
+        if (sameUser && storedSession?.token && !isSessionTokenExpired(storedSession.token)) sessionToken = storedSession.token;
       }
 
       await saveData(nextData);
@@ -113,6 +116,7 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
       try {
         authState.setLoginStatus({ tone: "info", message: "Validando acceso..." });
         const result = await loginBackend(backendUrl, identifier, authState.password, companyId);
+        authState.setLoginStatus({ tone: "info", message: "Acceso validado. Cargando datos de la empresa..." });
         const snapshot = await restoreAppData<AppData>(backendUrl, result.token || "");
         if (!result.user || !snapshot?.data) {
           const message = "El servidor valido el acceso, pero no devolvio los datos de la empresa. Intente nuevamente.";
@@ -121,13 +125,27 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
           return;
         }
 
-        const restored = sanitizeAppData({
+        const passwordHash = await hashPassword(authState.password);
+        const remoteUser = {
+          id: result.user.id,
+          companyId: result.user.companyId,
+          name: result.user.name,
+          email: result.user.email,
+          role: (result.user.role || "vendedor") as User["role"],
+          mustChangePassword: Boolean(result.user.mustChangePassword),
+          supportAccess: Boolean(result.user.supportAccess)
+        } as User;
+        const restoredBase = {
           ...snapshot.data,
           backendUrl,
           autoBackupEnabled: true,
           autoBackupLastAt: snapshot.updatedAt,
           autoBackupLastError: ""
-        });
+        };
+        const localBeforeLogin = dataRef.current;
+        const sameCompany = String(localBeforeLogin.issuer?.ruc || "").replace(/\D/g, "") === String(restoredBase.issuer?.ruc || "").replace(/\D/g, "");
+        const restoredSource = sameCompany ? { ...mergeAppDataSnapshots(restoredBase, localBeforeLogin), backendUrl, autoBackupEnabled: true } : restoredBase;
+        const restored = sanitizeAppData(remoteUser.supportAccess ? restoredSource : upsertOfflineUser(restoredSource, remoteUser, passwordHash));
         const loginRuc = /^\d{13}$/.test(identifier) ? identifier : "";
         const restoredRuc = restored.issuer.ruc.replace(/\D/g, "");
         if (loginRuc && restoredRuc && restoredRuc !== loginRuc) {
@@ -140,16 +158,7 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
         await saveData(restored);
         setData(restored);
         dataRef.current = restored;
-        const remoteUser = {
-          id: result.user.id,
-          companyId: result.user.companyId,
-          name: result.user.name,
-          email: result.user.email,
-          role: (result.user.role || "vendedor") as User["role"],
-          mustChangePassword: Boolean(result.user.mustChangePassword)
-        } as User;
         const token = result.token || "";
-        const passwordHash = await hashPassword(authState.password);
         const establishments = normalizedEstablishments(restored.issuer).filter((item) => item.active !== false);
         if (establishments.length > 1) {
           authState.setPendingLogin({ data: restored, user: remoteUser, token, passwordHash });
@@ -164,7 +173,14 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
       } catch (error) {
         const options = error instanceof Error ? (error as Error & { companyOptions?: { id: string; ruc: string; tradeName?: string; businessName?: string; role?: string }[] }).companyOptions : undefined;
         if (options?.length) {
-          authState.setCompanyOptions(options);
+          const uniqueOptions = uniqueCompanyOptions(options);
+          if (!companyId && /^\d{13}$/.test(identifier) && uniqueOptions.length === 1) {
+            const singleCompany = uniqueOptions[0];
+            if (!singleCompany) return;
+            await login(singleCompany.id);
+            return;
+          }
+          authState.setCompanyOptions(uniqueOptions);
           authState.setLoginStatus({ tone: "info", message: "Elija la empresa con la que desea trabajar." });
           return;
         }
@@ -183,12 +199,13 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
       const passwordHash = await hashPassword(authState.password);
       const storedSession = await loadSession();
       if (storedSession?.user) {
+        const validStoredToken = storedSession.token && !isSessionTokenExpired(storedSession.token) ? storedSession.token : "";
         const storedEmailMatches = storedSession.user.email.trim().toLowerCase() === normalizedIdentifier;
         const rucMatches = /^\d{13}$/.test(identifier) && (storedSession.companyRuc === identifier || dataRef.current.issuer.ruc === identifier);
-        const passwordMatches = storedSession.passwordHash ? storedSession.passwordHash === passwordHash : Boolean(storedSession.token);
+        const passwordMatches = storedSession.passwordHash ? storedSession.passwordHash === passwordHash : Boolean(validStoredToken);
         if ((storedEmailMatches || rucMatches) && passwordMatches) {
           const localData = sanitizeAppData({ ...dataRef.current, backendUrl, autoBackupEnabled: true, autoBackupLastError: "" });
-          await enterSession(localData, storedSession.user, storedSession.token || "", storedSession.passwordHash || passwordHash);
+          await enterSession(localData, storedSession.user, validStoredToken, storedSession.passwordHash || passwordHash);
           return;
         }
       }
@@ -311,9 +328,9 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
           setOnboardingVisible(true);
         };
 
-        authState.setRegisterStatus({ tone: "success", message: "Cuenta creada. Demo activa por 30 dias." });
+        authState.setRegisterStatus({ tone: "success", message: "Cuenta creada. Demo activa por 3 meses." });
         enterApp();
-        showMessage("Cuenta creada", "Demo activa por 30 dias. Ya puede configurar su empresa y empezar a vender.");
+        showMessage("Cuenta creada", "Demo activa por 3 meses. Ya puede configurar su empresa y empezar a vender.");
       } catch (error) {
         const message = error instanceof Error ? error.message : "Revise los datos e intente nuevamente.";
         authState.setRegistering(false);
@@ -400,6 +417,18 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
     };
 
         const logout = () => {
+          const pendingCount = dataRef.current.pendingSync?.length || 0;
+          const hasBackupError = Boolean(dataRef.current.autoBackupLastError);
+          if (pendingCount > 0 || hasBackupError) {
+            setAppMenuVisible(false);
+            Alert.alert(
+              "Sincronizacion pendiente",
+              pendingCount > 0
+                ? `Este dispositivo tiene ${pendingCount} cambio(s) pendiente(s) por subir. Sincronice antes de cerrar sesion para no perder documentos locales.`
+                : "Este dispositivo tiene cambios locales pendientes por subir. Sincronice antes de cerrar sesion."
+            );
+            return;
+          }
           setAppMenuVisible(false);
           setOnboardingVisible(false);
           setEstablishmentSwitcherVisible(false);
@@ -443,4 +472,14 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
   ]);
 
   return authActions;
+}
+
+function uniqueCompanyOptions<T extends { id: string; ruc: string }>(options: T[]) {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    const key = option.id || option.ruc;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

@@ -1,23 +1,30 @@
-import React from "react";
+import React, { useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from "react-native";
 import { AppHeader } from "./AppHeader";
 import { AppTabs } from "./AppTabs";
 import { BarcodeScannerModal } from "./BarcodeScannerModal";
 import { CalendarDateInput } from "./CalendarDateInput";
-import { CrudSection } from "./CrudSection";
+import { CommercialSupportButton } from "./CommercialSupportButton";
+import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { ListItem } from "./ListItem";
+import { OperationAlertsBanner } from "./OperationAlertsBanner";
+import { SyncStatusBanner } from "./SyncStatusBanner";
 import { DashboardScreen } from "../screens/DashboardScreen";
 import { ReportsScreen } from "../screens/ReportsScreen";
 import { SalesScreen } from "../screens/SalesScreen";
 import { SriScreen } from "../screens/SriScreen";
 import { CashClosingScreen } from "../screens/CashClosingScreen";
+import { CreditsScreen } from "../screens/CreditsScreen";
 import { ClientsScreen } from "../screens/ClientsScreen";
 import { InventoryScreen } from "../screens/InventoryScreen";
 import { GuidesScreen } from "../screens/GuidesScreen";
 import { ProductsScreen } from "../screens/ProductsScreen";
 import { UsersScreen } from "../screens/UsersScreen";
+import { KEYBOARD_AVOIDING_BEHAVIOR } from "../constants/layout";
+import { FloatingOverlayContext } from "../context/FloatingOverlayContext";
 import { AppData, User } from "../types";
 import { AppTab } from "../utils/appAccess";
+import { SyncState } from "../utils/support";
 
 type AppMainShellProps = {
   activeTab: AppTab;
@@ -29,12 +36,17 @@ type AppMainShellProps = {
   headerTopPadding: number;
   keyboardInset: number;
   licenseActive: boolean;
+  licenseBannerVisible: boolean;
   session: User;
-  syncError: boolean;
-  syncNotice: string;
+  syncActionLoading: boolean;
+  syncState: SyncState;
   ensureBackendToken: (backendUrl: string) => Promise<string>;
+  onOpenLicense: () => void;
   onOpenMenu: () => void;
+  onOpenSupport: () => void;
+  onOpenSyncCenter: () => void;
   onRefreshBackend: () => Promise<void>;
+  onRetryPendingSync: () => Promise<void>;
   onTabChange: React.Dispatch<React.SetStateAction<AppTab>>;
   onXml: React.Dispatch<React.SetStateAction<string>>;
   persist: (data: AppData) => Promise<void>;
@@ -50,49 +62,81 @@ export function AppMainShell({
   headerTopPadding,
   keyboardInset,
   licenseActive,
+  licenseBannerVisible,
+  onOpenLicense,
   onOpenMenu,
+  onOpenSupport,
   onRefreshBackend,
   onTabChange,
   onXml,
   persist,
   session,
-  syncError,
-  syncNotice,
+  syncActionLoading,
+  syncState,
+  onOpenSyncCenter,
+  onRetryPendingSync,
   ensureBackendToken
 }: AppMainShellProps) {
+  const [floatingOverlay, setFloatingOverlay] = useState<React.ReactNode>(null);
+  const hasSalesOverlay = activeTab === "ventas" && Boolean(floatingOverlay);
+  const showCommercialSupport = activeTab !== "ventas";
+
   return (
-    <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-      <AppHeader
-        backendUrl={data.backendUrl}
-        companyLabel={companyLabel}
-        establishmentLabel={establishmentLabel}
-        headerTopPadding={headerTopPadding}
-        license={data.license}
-        licenseActive={licenseActive}
-        logoUrl={data.issuer.logoUrl}
-        syncError={syncError}
-        syncNotice={syncNotice}
-        onOpenMenu={onOpenMenu}
-      />
+    <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+      <FloatingOverlayContext.Provider value={{ setOverlay: setFloatingOverlay }}>
+        <AppHeader
+          backendUrl={data.backendUrl}
+          companyLabel={companyLabel}
+          establishmentLabel={establishmentLabel}
+          headerTopPadding={headerTopPadding}
+          license={data.license}
+          licenseActive={licenseActive}
+          logoUrl={data.issuer.logoUrl}
+          onOpenMenu={onOpenMenu}
+        />
 
-      <AppTabs availableTabs={availableTabs} activeTab={activeTab} onChange={onTabChange} />
+        <SyncStatusBanner
+          data={data}
+          loading={syncActionLoading || syncState === "syncing"}
+          syncState={syncState}
+          onOpen={onOpenSyncCenter}
+          onRetry={() => { void onRetryPendingSync(); }}
+        />
 
-      <ScrollView
-        contentContainerStyle={[styles.content, keyboardInset > 0 && { paddingBottom: keyboardInset + 220 }]}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-      >
-        {activeTab === "dashboard" && <DashboardScreen data={data} user={session} onNavigate={onTabChange} ListItemComponent={ListItem} />}
-        {activeTab === "ventas" && <SalesScreen data={data} user={session} backendToken={backendToken} persist={persist} onXml={onXml} />}
-        {activeTab === "clientes" && <ClientsScreen data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persist={persist} ListItemComponent={ListItem} />}
-        {activeTab === "productos" && <ProductsScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} BarcodeScannerModalComponent={BarcodeScannerModal} />}
-        {activeTab === "inventario" && <InventoryScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} />}
-        {activeTab === "caja" && <CashClosingScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
-        {activeTab === "guias" && <GuidesScreen data={data} user={session} backendToken={backendToken} persist={persist} onXml={onXml} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
-        {activeTab === "usuarios" && session.role === "admin" && <UsersScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} CrudSectionComponent={CrudSection} />}
-        {activeTab === "reportes" && <ReportsScreen data={data} onReport={onXml} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
-        {activeTab === "sri" && session.role === "admin" && <SriScreen data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persist={persist} onRefreshBackend={() => { void onRefreshBackend(); }} />}
-      </ScrollView>
+        <LicenseExpiryBanner license={data.license} onOpenLicense={onOpenLicense} visible={licenseBannerVisible} />
+
+        <OperationAlertsBanner data={data} onNavigate={onTabChange} />
+
+        <AppTabs availableTabs={availableTabs} activeTab={activeTab} onChange={onTabChange} />
+
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            hasSalesOverlay && styles.contentWithCheckout,
+            keyboardInset > 0 && styles.contentWithKeyboard,
+            keyboardInset > 0 && { paddingBottom: keyboardInset + (hasSalesOverlay ? 240 : 150) }
+          ]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        >
+          {activeTab === "dashboard" && <DashboardScreen data={data} user={session} onNavigate={onTabChange} ListItemComponent={ListItem} />}
+          {activeTab === "ventas" && <SalesScreen mode="sale" data={data} user={session} backendToken={backendToken} persist={persist} onXml={onXml} />}
+          {activeTab === "documentos" && <SalesScreen mode="documents" data={data} user={session} backendToken={backendToken} persist={persist} onXml={onXml} />}
+          {activeTab === "clientes" && <ClientsScreen data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persist={persist} ListItemComponent={ListItem} />}
+          {activeTab === "productos" && <ProductsScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} BarcodeScannerModalComponent={BarcodeScannerModal} />}
+          {activeTab === "inventario" && <InventoryScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} />}
+          {activeTab === "caja" && <CashClosingScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
+          {activeTab === "creditos" && <CreditsScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} />}
+          {activeTab === "guias" && <GuidesScreen data={data} user={session} backendToken={backendToken} persist={persist} onXml={onXml} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
+          {activeTab === "usuarios" && session.role === "admin" && <UsersScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} />}
+          {activeTab === "reportes" && <ReportsScreen data={data} onReport={onXml} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
+          {activeTab === "sri" && session.role === "admin" && <SriScreen data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persist={persist} onRefreshBackend={() => { void onRefreshBackend(); }} />}
+        </ScrollView>
+
+        {hasSalesOverlay ? floatingOverlay : null}
+
+        {showCommercialSupport ? <CommercialSupportButton data={data} user={session} bottomInset={keyboardInset} onOpenDiagnostics={onOpenSupport} /> : null}
+      </FloatingOverlayContext.Provider>
     </KeyboardAvoidingView>
   );
 }
@@ -103,6 +147,12 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 12,
-    paddingBottom: 170
+    paddingBottom: 92
+  },
+  contentWithCheckout: {
+    paddingBottom: 168
+  },
+  contentWithKeyboard: {
+    paddingBottom: 180
   }
 });

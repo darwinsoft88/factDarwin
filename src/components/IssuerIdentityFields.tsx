@@ -23,7 +23,6 @@ export function IssuerIdentityFields({ issuer, lookingUpIssuer, onChange, onLook
       <Input label="Razon social" value={issuer.businessName} onChangeText={(businessName) => onChange({ ...issuer, businessName })} />
       <Input label="Nombre comercial" value={issuer.tradeName} onChangeText={(tradeName) => onChange({ ...issuer, tradeName })} />
       <Input label="Correo de contacto" value={issuer.email || ""} onChangeText={(email) => onChange({ ...issuer, email })} autoCapitalize="none" />
-      <Input label="URL logo RIDE" value={issuer.logoUrl} onChangeText={(logoUrl) => onChange({ ...issuer, logoUrl })} autoCapitalize="none" />
       <Input label="Direccion matriz" value={issuer.address} onChangeText={(address) => onChange({ ...issuer, address })} />
     </>
   );

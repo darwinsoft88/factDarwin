@@ -2,10 +2,9 @@
   "expo": {
     "name": "FactuDarwin",
     "slug": "factura-sri-mobile",
-    "version": "1.0.1",
-    "orientation": "portrait",
+    "version": "1.0.10",
     "icon": "./assets/icon.png",
-    "scheme": "facturasri",
+    "scheme": "factudarwin",
     "userInterfaceStyle": "light",
     "backgroundColor": "#f5f7fb",
     "assetBundlePatterns": [
@@ -19,16 +18,16 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.facturasri.mobile",
-      "buildNumber": "2",
+      "buildNumber": "5",
       "infoPlist": {
-        "NSCameraUsageDescription": "La app puede usar la camara si se agrega lectura de codigos o documentos en futuras versiones.",
-        "NSLocalNetworkUsageDescription": "Solo se usa en desarrollo para conectar con el backend local. En produccion debe usarse un backend HTTPS.",
+        "NSCameraUsageDescription": "FactuDarwin usa la camara para escanear codigos de productos.",
+        "NSLocalNetworkUsageDescription": "FactuDarwin puede conectarse a un servidor local solo en pruebas tecnicas autorizadas.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.facturasri.mobile",
-      "versionCode": 2,
+      "versionCode": 13,
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -49,13 +48,17 @@
           "recordAudioAndroid": false
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "expo-audio"
     ],
+    "web": {
+      "favicon": "./assets/icon.png",
+      "description": "FactuDarwin app de facturacion electronica para iOS y web."
+    },
     "extra": {
       "eas": {
         "projectId": "8a8ee08e-e0c1-4d89-9406-62eb8b370ab9"
       }
-    },
-    "owner": "darwinsoft"
+    }
   }
 }

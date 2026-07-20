@@ -11,10 +11,25 @@ const isProduction = nodeEnv === "production" || env === "production";
 const defaultJwtSecret = "CAMBIA_ESTE_SECRETO_JWT_EN_PRODUCCION";
 const jwtSecret = process.env.JWT_SECRET || defaultJwtSecret;
 const assetEncryptionSecret = process.env.ASSET_ENCRYPTION_SECRET || jwtSecret;
-const allowedOrigins = (process.env.CORS_ORIGINS || "")
+const defaultCorsOrigins = [
+  "https://app.factudarwin.com",
+  "https://factudarwin-app.pages.dev",
+  "http://localhost:8081",
+  "http://127.0.0.1:8081",
+  "http://localhost:19006",
+  "http://127.0.0.1:19006"
+];
+const allowedOrigins = (process.env.CORS_ORIGINS || defaultCorsOrigins.join(","))
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const supportAdmin = {
+  enabled: process.env.SUPPORT_ADMIN_ENABLED !== "false",
+  email: (process.env.SUPPORT_ADMIN_EMAIL || "soporte@factudarwin.com").trim().toLowerCase(),
+  name: process.env.SUPPORT_ADMIN_NAME || "Soporte DarwinSoft",
+  password: process.env.SUPPORT_ADMIN_PASSWORD || "",
+  passwordHash: process.env.SUPPORT_ADMIN_PASSWORD_HASH || ""
+};
 
 function assertProductionConfig() {
   if (!isProduction) return;
@@ -41,6 +56,30 @@ function assertProductionConfig() {
   if (!process.env.PUBLIC_BACKEND_URL || !/^https:\/\//i.test(process.env.PUBLIC_BACKEND_URL)) {
     errors.push("PUBLIC_BACKEND_URL debe ser una URL HTTPS publica en produccion.");
   }
+  if (supportAdmin.enabled && !supportAdmin.passwordHash) {
+    errors.push("SUPPORT_ADMIN_PASSWORD_HASH es obligatorio en produccion para el acceso tecnico de soporte.");
+  }
+  if (supportAdmin.enabled && process.env.SUPPORT_ADMIN_PASSWORD) {
+    errors.push("SUPPORT_ADMIN_PASSWORD no debe usarse en produccion; genere y configure SUPPORT_ADMIN_PASSWORD_HASH.");
+  }
+  if (process.env.PG_BACKUP_ENABLED === "false") {
+    errors.push("PG_BACKUP_ENABLED no debe estar desactivado en produccion.");
+  }
+  if (!process.env.PG_BACKUP_DIR) {
+    errors.push("PG_BACKUP_DIR debe estar configurado en produccion.");
+  }
+  if (!process.env.PG_DUMP_PATH) {
+    errors.push("PG_DUMP_PATH debe estar configurado en produccion.");
+  }
+  if (!process.env.PG_RESTORE_PATH) {
+    errors.push("PG_RESTORE_PATH debe estar configurado para probar restauracion de backups.");
+  }
+  if (!process.env.PSQL_PATH) {
+    errors.push("PSQL_PATH debe estar configurado para probar restauracion de backups.");
+  }
+  if (!Number.isFinite(Number(process.env.PG_BACKUP_RETENTION_DAYS)) || Number(process.env.PG_BACKUP_RETENTION_DAYS) < 7) {
+    errors.push("PG_BACKUP_RETENTION_DAYS debe ser numerico y minimo 7 dias.");
+  }
 
   if (errors.length > 0) {
     throw new Error(`Configuracion de produccion incompleta:\n- ${errors.join("\n- ")}`);
@@ -65,6 +104,7 @@ module.exports = {
   assetEncryptionSecret,
   jwtExpiresInHours: Number(process.env.JWT_EXPIRES_HOURS || 12),
   masterAdminKey: process.env.MASTER_ADMIN_KEY || "",
+  supportAdmin,
   assertProductionConfig,
   certPath: resolveBackendPath(process.env.SRI_CERT_PATH || "./certs/firma.p12"),
   certPassword: process.env.SRI_CERT_PASSWORD || "",

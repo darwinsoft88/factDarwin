@@ -1,24 +1,31 @@
 import React from "react";
+import { useState } from "react";
 import { StyleSheet, Text } from "react-native";
 import { AuditLog } from "../types";
 import { AUDIT_LOG_LIMIT } from "../utils/audit";
 import { formatAuditDate } from "../utils/support";
 import { shortText } from "../utils/format";
-import { Empty, LoadMoreButton } from "./common";
+import { paginateItems } from "../utils/pagination";
+import { Empty } from "./common";
 import { ListItem } from "./ListItem";
+import { PaginationControls } from "./PaginationControls";
 
 type AuditLogListProps = {
   logs: AuditLog[];
-  visibleLogs: AuditLog[];
-  onLoadMore: () => void;
 };
 
-export function AuditLogList({ logs, visibleLogs, onLoadMore }: AuditLogListProps) {
+const AUDIT_PAGE_SIZE = 8;
+
+export function AuditLogList({ logs }: AuditLogListProps) {
+  const [page, setPage] = useState(1);
+  const paginatedLogs = paginateItems(logs, page, AUDIT_PAGE_SIZE);
+
   return (
     <>
-      <Text style={styles.paragraph}>Se guardan los ultimos {AUDIT_LOG_LIMIT} eventos. Mostrando {visibleLogs.length}/{logs.length}.</Text>
+      <Text style={styles.paragraph}>Se guardan los ultimos {AUDIT_LOG_LIMIT} eventos.</Text>
       {logs.length === 0 ? <Empty text="Aun no hay eventos de auditoria." /> : null}
-      {visibleLogs.map((log) => (
+      {logs.length > 0 ? <PaginationControls page={paginatedLogs.currentPage} pageSize={AUDIT_PAGE_SIZE} totalItems={logs.length} onPageChange={setPage} /> : null}
+      {paginatedLogs.items.map((log) => (
         <ListItem
           key={log.id}
           title={log.summary}
@@ -26,7 +33,6 @@ export function AuditLogList({ logs, visibleLogs, onLoadMore }: AuditLogListProp
           badge={log.entity}
         />
       ))}
-      {visibleLogs.length < logs.length ? <LoadMoreButton label="Cargar mas auditoria" onPress={onLoadMore} /> : null}
     </>
   );
 }

@@ -1,5 +1,6 @@
 import { buildCreditNoteXml, buildInvoiceXml } from "../sri";
-import { initialData } from "../../storage";
+import { initialData } from "../../database";
+import { buildRideHtml } from "../../sri/ride";
 import { Client, Sale } from "../../types";
 
 const client: Client = {
@@ -31,7 +32,28 @@ describe("SRI XML tax regime legends", () => {
   it("adds RIMPE negocio popular legend to invoice additional info", () => {
     const xml = buildInvoiceXml(sale, client, { ...initialData.issuer, taxRegime: "rimpe_negocio_popular" });
 
-    expect(xml).toContain("Contribuyente Negocio Popular - Régimen RIMPE");
+    expect(xml).toContain("Contribuyente Negocio Popular - Regimen RIMPE");
+  });
+
+  it("marks credit invoices as SRI payment 20 with additional credit info", () => {
+    const xml = buildInvoiceXml(
+      {
+        ...sale,
+        paymentMethod: "20",
+        paymentCondition: "credito",
+        creditDueDate: "2026-07-15",
+        creditBalance: 10,
+        creditStatus: "pendiente"
+      },
+      client,
+      initialData.issuer
+    );
+
+    expect(xml).toContain("<formaPago>20</formaPago>");
+    expect(xml).toContain("Condicion de pago");
+    expect(xml).toContain("Credito");
+    expect(xml).toContain("Fecha de vencimiento");
+    expect(xml).toContain("2026-07-15");
   });
 
   it("adds RIMPE emprendedor legend to credit notes", () => {
@@ -41,6 +63,21 @@ describe("SRI XML tax regime legends", () => {
       { ...initialData.issuer, taxRegime: "rimpe_emprendedor" }
     );
 
-    expect(xml).toContain("Contribuyente Régimen RIMPE");
+    expect(xml).toContain("Contribuyente Regimen RIMPE");
+  });
+
+  it("adds sale custom additional info to invoice XML and RIDE", () => {
+    const saleWithInfo: Sale = {
+      ...sale,
+      additionalInfo: [{ id: "info-1", name: "Orden de compra", value: "OC-2026-001" }]
+    };
+
+    const xml = buildInvoiceXml(saleWithInfo, client, initialData.issuer);
+    const ride = buildRideHtml(saleWithInfo, client, initialData.issuer);
+
+    expect(xml).toContain('campoAdicional nombre="Orden de compra"');
+    expect(xml).toContain("OC-2026-001");
+    expect(ride).toContain("Orden de compra");
+    expect(ride).toContain("OC-2026-001");
   });
 });

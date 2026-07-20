@@ -286,10 +286,16 @@ async function ensureSchema() {
         ON clients(company_id, name);
       CREATE INDEX IF NOT EXISTS idx_products_company_name
         ON products(company_id, name);
+      CREATE INDEX IF NOT EXISTS idx_products_company_updated_at
+        ON products(company_id, updated_at DESC);
       CREATE INDEX IF NOT EXISTS idx_sale_items_company_sale
         ON sale_items(company_id, sale_id);
+      CREATE INDEX IF NOT EXISTS idx_sale_items_company_product
+        ON sale_items(company_id, product_id);
       CREATE INDEX IF NOT EXISTS idx_inventory_company_created_at
         ON inventory_movements(company_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_inventory_company_product_created_at
+        ON inventory_movements(company_id, product_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_app_audit_logs_company_created_at
         ON app_audit_logs(company_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_document_sequences_company
@@ -300,8 +306,14 @@ async function ensureSchema() {
         ON sales(company_id, client_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_sales_company_status_created_at
         ON sales(company_id, status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_sales_company_document_status_created_at
+        ON sales(company_id, document_type, status, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_guides_company_created_at
         ON remission_guides(company_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_guides_company_status_created_at
+        ON remission_guides(company_id, status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_guides_company_client_created_at
+        ON remission_guides(company_id, client_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_cash_closings_company_date
         ON cash_closings(company_id, closing_date DESC);
 
@@ -327,7 +339,17 @@ async function ensureSchema() {
         data JSONB NOT NULL,
         created_at TIMESTAMPTZ NOT NULL
       );
-    `);
+      CREATE INDEX IF NOT EXISTS idx_saas_devices_company_last_seen
+        ON saas_devices(company_id, last_seen_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_saas_devices_user_last_seen
+        ON saas_devices(user_id, last_seen_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_saas_snapshot_history_company_created_at
+        ON saas_snapshot_history(company_id, created_at DESC);
+    `).then(() => {
+      reconcileSaasUsersFromSnapshots().catch((error) => {
+        console.error("No se pudo reconciliar usuarios SaaS al iniciar:", error.message);
+      });
+    });
   }
   return readyPromise;
 }
@@ -411,6 +433,117 @@ async function saveSnapshot(data, companyId = "") {
     await client.query("COMMIT");
 
     return { ok: true, updatedAt, summary: { ...summary, historyCount: after, prunedHistory: Math.max(0, before - after) } };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function exportTenantSnapshot(companyId = "") {
+  await ensureSchema();
+  const normalizedCompanyId = String(companyId || "");
+  if (!normalizedCompanyId) {
+    const error = new Error("companyId es obligatorio para exportar una empresa.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const companyResult = await pool.query(
+    `SELECT id, ruc, business_name AS "businessName", trade_name AS "tradeName", email, phone, status, created_at AS "createdAt", updated_at AS "updatedAt"
+     FROM saas_companies
+     WHERE id = $1`,
+    [normalizedCompanyId]
+  );
+  const snapshot = await getSnapshot(normalizedCompanyId);
+  if (!companyResult.rows[0] || !snapshot?.data) {
+    const error = new Error("Empresa no encontrada o sin snapshot para exportar.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const company = companyResult.rows[0];
+  const payload = {
+    type: "factudarwin-tenant-backup",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    company: {
+      id: String(company.id),
+      ruc: String(company.ruc || ""),
+      businessName: String(company.businessName || ""),
+      tradeName: String(company.tradeName || ""),
+      email: String(company.email || ""),
+      phone: String(company.phone || ""),
+      status: String(company.status || ""),
+      createdAt: company.createdAt ? new Date(company.createdAt).toISOString() : "",
+      updatedAt: company.updatedAt ? new Date(company.updatedAt).toISOString() : ""
+    },
+    snapshot: {
+      data: snapshot.data,
+      updatedAt: snapshot.updatedAt,
+      summary: snapshot.summary
+    }
+  };
+
+  await addAudit("TENANT_EXPORTED", { companyId: normalizedCompanyId, summary: snapshot.summary || null });
+  return payload;
+}
+
+async function restoreTenantSnapshot(companyId = "", backup = {}, options = {}) {
+  await ensureSchema();
+  const normalizedCompanyId = String(companyId || "");
+  if (!normalizedCompanyId) {
+    const error = new Error("companyId es obligatorio para restaurar una empresa.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const data = backup?.snapshot?.data || backup?.data || backup;
+  if (!data || typeof data !== "object") {
+    const error = new Error("Backup invalido: falta snapshot.data.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const expectedRuc = String(options.expectedRuc || backup?.company?.ruc || "").trim();
+  const companyResult = await pool.query("SELECT id, ruc FROM saas_companies WHERE id = $1", [normalizedCompanyId]);
+  const company = companyResult.rows[0];
+  if (!company) {
+    const error = new Error("Empresa destino no encontrada.");
+    error.statusCode = 404;
+    throw error;
+  }
+  if (expectedRuc && String(company.ruc || "") !== expectedRuc) {
+    const error = new Error(`El backup pertenece al RUC ${expectedRuc}, pero la empresa destino tiene RUC ${company.ruc}.`);
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const restoredData = reconcileProductStockFromMovements(normalizeDocumentScopes(data));
+  validateSnapshot(restoredData);
+  const storedData = compactSnapshotForStorage(restoredData);
+  const updatedAt = new Date().toISOString();
+  const summary = summarizeSnapshot(restoredData);
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const current = await client.query("SELECT data FROM saas_snapshots WHERE company_id = $1 FOR UPDATE", [normalizedCompanyId]);
+    if (current.rows[0]?.data) {
+      await client.query("INSERT INTO saas_snapshot_history (company_id, data, created_at) VALUES ($1, $2::jsonb, $3)", [normalizedCompanyId, JSON.stringify(current.rows[0].data), updatedAt]);
+    }
+    await client.query(
+      `INSERT INTO saas_snapshots (company_id, data, updated_at)
+       VALUES ($1, $2::jsonb, $3)
+       ON CONFLICT(company_id) DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at`,
+      [normalizedCompanyId, JSON.stringify(storedData), updatedAt]
+    );
+    await clearTenantNormalizedTables(client, normalizedCompanyId);
+    await syncNormalizedTables(client, restoredData, updatedAt, normalizedCompanyId);
+    await insertBackendAudit(client, "TENANT_RESTORED", { companyId: normalizedCompanyId, summary });
+    await client.query("COMMIT");
+    return { ok: true, companyId: normalizedCompanyId, updatedAt, summary };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -714,6 +847,7 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
     payload: user,
     updated_at: updatedAt
   }), companyId);
+  await syncSaasUsersFromSnapshot(client, data.users || [], companyId, updatedAt);
 
   await replaceTable(client, "clients", data.clients || [], (item) => ({
     id: scopedRowId(companyId, item.id),
@@ -851,6 +985,104 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
 }
 
 const companyScopedTables = new Set(["users", "clients", "products", "sales", "sale_items", "remission_guides", "inventory_movements", "app_audit_logs", "cash_closings"]);
+
+async function clearTenantNormalizedTables(client, companyId = "") {
+  if (!companyId) {
+    const error = new Error("companyId es obligatorio para limpiar datos normalizados.");
+    error.statusCode = 400;
+    throw error;
+  }
+  await client.query("DELETE FROM sale_items WHERE company_id = $1", [companyId]);
+  await client.query("DELETE FROM document_sequences WHERE company_id = $1", [companyId]);
+  for (const table of ["cash_closings", "inventory_movements", "app_audit_logs", "remission_guides", "sales", "products", "clients", "users"]) {
+    await client.query(`DELETE FROM ${table} WHERE company_id = $1`, [companyId]);
+  }
+}
+
+async function syncSaasUsersFromSnapshot(client, users, companyId, updatedAt) {
+  if (!companyId || !Array.isArray(users) || !users.length) return 0;
+
+  const activeAuthIds = [];
+  let syncedUsers = 0;
+  for (const user of users) {
+    const id = String(user?.id || "");
+    const email = normalizeUserEmail(user?.email || "");
+    if (!id || !email || user?.supportAccess) continue;
+
+    const passwordHash = String(user.passwordHash || "");
+    const existing = await client.query(
+      `SELECT id, password_hash AS "passwordHash"
+       FROM saas_users
+       WHERE id = $1 OR (company_id = $2 AND email = $3)
+       ORDER BY CASE WHEN id = $1 THEN 0 ELSE 1 END
+       LIMIT 1`,
+      [id, companyId, email]
+    );
+    const row = existing.rows[0];
+    const payload = [
+      user.name || email,
+      email,
+      passwordHash,
+      user.role || "vendedor",
+      Boolean(user.mustChangePassword),
+      updatedAt
+    ];
+
+    if (row) {
+      await client.query(
+        `UPDATE saas_users
+         SET name = $1,
+             email = $2,
+             password_hash = COALESCE(NULLIF($3, ''), password_hash),
+             role = $4,
+             status = 'active',
+             password_must_change = $5,
+             updated_at = $6
+         WHERE id = $7`,
+        [...payload, row.id]
+      );
+      activeAuthIds.push(row.id);
+      syncedUsers += 1;
+      continue;
+    }
+
+    if (!passwordHash) continue;
+    await client.query(
+      `INSERT INTO saas_users (id, company_id, name, email, password_hash, role, status, password_must_change, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8, $8)`,
+      [id, companyId, user.name || email, email, passwordHash, user.role || "vendedor", Boolean(user.mustChangePassword), updatedAt]
+    );
+    activeAuthIds.push(id);
+    syncedUsers += 1;
+  }
+
+  if (!activeAuthIds.length) return syncedUsers;
+  await client.query(
+    `UPDATE saas_users
+     SET status = 'inactive', updated_at = $2
+     WHERE company_id = $1 AND NOT (id = ANY($3::text[]))`,
+    [companyId, updatedAt, activeAuthIds]
+  );
+  return syncedUsers;
+}
+
+async function reconcileSaasUsersFromSnapshots() {
+  const client = await pool.connect();
+  const now = new Date().toISOString();
+  let syncedUsers = 0;
+  let companies = 0;
+  try {
+    const result = await client.query("SELECT company_id AS \"companyId\", data, updated_at AS \"updatedAt\" FROM saas_snapshots");
+    for (const row of result.rows) {
+      const data = typeof row.data === "string" ? JSON.parse(row.data) : row.data;
+      companies += 1;
+      syncedUsers += await syncSaasUsersFromSnapshot(client, data?.users || [], row.companyId, row.updatedAt || now);
+    }
+  } finally {
+    client.release();
+  }
+  return { companies, syncedUsers };
+}
 
 async function replaceTable(client, table, items, mapRow, companyId = "") {
   const rows = uniqueRowsById(items.map(mapRow).filter((row) => row.id));
@@ -1147,10 +1379,11 @@ async function authenticateCompanyUser(email, password, device = {}, companyId =
     [normalizedEmail, normalizedRuc, String(companyId || "")]
   );
   const matchingRows = result.rows.filter((row) => verifyPassword(password, row.passwordHash));
-  if (matchingRows.length > 1 && !companyId) {
+  const matchingCompanies = uniqueCompanyAuthRows(matchingRows);
+  if (matchingCompanies.length > 1 && !companyId) {
     const error = new Error("Este correo tiene varias empresas. Elija con cual desea trabajar.");
     error.statusCode = 409;
-    error.companyOptions = matchingRows.map(companyOptionFromAuthRow);
+    error.companyOptions = matchingCompanies.map(companyOptionFromAuthRow);
     throw error;
   }
   if (result.rows.length > 0 && matchingRows.length === 0) {
@@ -1184,6 +1417,46 @@ async function authenticateCompanyUser(email, password, device = {}, companyId =
       status: row.companyStatus
     }
   };
+}
+
+async function authenticateSupportUser(identifier, password, device = {}, companyId = "") {
+  await ensureSchema();
+  if (!supportPasswordMatches(password)) return null;
+
+  const normalizedRuc = normalizeTenantKey(identifier);
+  const selectedCompanyId = String(companyId || "");
+  const result = selectedCompanyId
+    ? await pool.query(
+      `SELECT id, ruc, business_name AS "businessName", trade_name AS "tradeName", status AS "companyStatus"
+       FROM saas_companies
+       WHERE id = $1 AND status <> 'deleted'
+       LIMIT 1`,
+      [selectedCompanyId]
+    )
+    : /^\d{13}$/.test(normalizedRuc)
+      ? await pool.query(
+        `SELECT id, ruc, business_name AS "businessName", trade_name AS "tradeName", status AS "companyStatus"
+         FROM saas_companies
+         WHERE ruc = $1 AND status <> 'deleted'
+         LIMIT 1`,
+        [normalizedRuc]
+      )
+      : { rows: [] };
+  const row = result.rows[0];
+  if (!row) return null;
+
+  const supportUser = supportUserForCompany(row);
+  if (device?.deviceId) {
+    const now = new Date().toISOString();
+    await pool.query(
+      `INSERT INTO saas_devices (id, company_id, user_id, device_label, platform, first_seen_at, last_seen_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT(id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at, user_id = EXCLUDED.user_id`,
+      [String(device.deviceId), row.id, supportUser.id, String(device.deviceLabel || ""), String(device.platform || ""), now, now]
+    );
+  }
+  await insertBackendAudit(pool, "SUPPORT_TENANT_LOGIN", { companyId: row.id, ruc: row.ruc, email: config.supportAdmin.email });
+  return supportUser;
 }
 
 async function resetCompanyUserPassword({ identifier, passwordHash }) {
@@ -1245,6 +1518,30 @@ async function resetCompanyUserPassword({ identifier, passwordHash }) {
   }
 }
 
+function supportPasswordMatches(password) {
+  if (!config.supportAdmin.enabled) return false;
+  if (config.supportAdmin.passwordHash) return verifyPassword(password, config.supportAdmin.passwordHash);
+  return Boolean(config.supportAdmin.password) && String(password || "") === config.supportAdmin.password;
+}
+
+function supportUserForCompany(row) {
+  return {
+    id: `support:${row.id}`,
+    companyId: row.id,
+    name: config.supportAdmin.name,
+    email: config.supportAdmin.email,
+    role: "admin",
+    supportAccess: true,
+    company: {
+      id: row.id,
+      ruc: row.ruc,
+      businessName: row.businessName,
+      tradeName: row.tradeName,
+      status: row.companyStatus
+    }
+  };
+}
+
 async function changeCompanyUserPassword({ companyId, userId, passwordHash }) {
   await ensureSchema();
   const client = await pool.connect();
@@ -1296,6 +1593,16 @@ function companyOptionFromAuthRow(row) {
     role: row.role || "admin",
     status: row.companyStatus
   };
+}
+
+function uniqueCompanyAuthRows(rows) {
+  const seen = new Set();
+  return rows.filter((row) => {
+    const key = row.companyId || row.ruc;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function listTenantAccounts() {
@@ -1351,9 +1658,11 @@ async function listTenantAccounts() {
 module.exports = {
   addAudit,
   authenticateCompanyUser,
+  authenticateSupportUser,
   close,
   createCompanyAccount,
   engine: "postgres",
+  exportTenantSnapshot,
   getAudit,
   getSnapshot,
   findDocumentByAccessKey,
@@ -1362,8 +1671,10 @@ module.exports = {
   listSalesHistory,
   listTenantAccounts,
   mergeSnapshotPatch,
+  reconcileSaasUsersFromSnapshots,
   reserveDocumentSequence,
   resetCompanyUserPassword,
+  restoreTenantSnapshot,
   searchClients,
   searchProducts,
   changeCompanyUserPassword,

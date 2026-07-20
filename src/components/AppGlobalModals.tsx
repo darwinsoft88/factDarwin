@@ -1,11 +1,13 @@
 import React from "react";
+import { initialData } from "../database";
 import { AppData, IssuerEstablishment, User } from "../types";
-import { AppTab, compactLicenseStatusLabel, roleLabel } from "../utils/appAccess";
+import { AppTab, canAccessDeveloperTools, compactLicenseStatusLabel, roleLabel } from "../utils/appAccess";
 import { normalizedEstablishments } from "../utils/establishments";
 import { SyncState } from "../utils/support";
 import { AuthState } from "../hooks/useAuthState";
 import { AppMenuModal } from "./AppMenuModal";
 import { EstablishmentPickerModal } from "./EstablishmentPickerModal";
+import { LicenseModal } from "./LicenseModal";
 import { OnboardingModal } from "./OnboardingModal";
 import { PasswordChangeModal } from "./PasswordChangeModal";
 import { SupportModal } from "./SupportModal";
@@ -30,6 +32,7 @@ type AppGlobalModalsProps = {
   onboardingVisible: boolean;
   session: User;
   supportDiagnostics: SupportDiagnosticsState;
+  licenseVisible: boolean;
   switchableEstablishments: IssuerEstablishment[];
   syncActionLoading: boolean;
   syncCenterVisible: boolean;
@@ -44,6 +47,7 @@ type AppGlobalModalsProps = {
   onSwitchActiveEstablishment: (establishmentId: string) => Promise<void>;
   onTestSyncServer: () => Promise<void>;
   setAppMenuVisible: React.Dispatch<React.SetStateAction<boolean>>;
+  setLicenseVisible: React.Dispatch<React.SetStateAction<boolean>>;
   setOnboardingVisible: React.Dispatch<React.SetStateAction<boolean>>;
   setSyncCenterVisible: React.Dispatch<React.SetStateAction<boolean>>;
   setTab: React.Dispatch<React.SetStateAction<AppTab>>;
@@ -58,6 +62,7 @@ export function AppGlobalModals({
   currentEstablishment,
   data,
   logout,
+  licenseVisible,
   onOpenAdminSettings,
   onOpenSyncCenter,
   onRetryPendingSync,
@@ -67,6 +72,7 @@ export function AppGlobalModals({
   onboardingVisible,
   session,
   setAppMenuVisible,
+  setLicenseVisible,
   setOnboardingVisible,
   setSyncCenterVisible,
   setTab,
@@ -91,9 +97,19 @@ export function AppGlobalModals({
         onOpenSyncCenter={onOpenSyncCenter}
         onSwitchEstablishment={() => authState.setEstablishmentSwitcherVisible(true)}
         onOpenSettings={() => onOpenAdminSettings("configuracion")}
-        onOpenLicense={() => onOpenAdminSettings("licencia")}
+        onOpenLicense={() => {
+          setAppMenuVisible(false);
+          setLicenseVisible(true);
+        }}
         onOpenSupport={supportDiagnostics.open}
         onLogout={logout}
+      />
+
+      <LicenseModal
+        visible={licenseVisible}
+        license={data.license || initialData.license!}
+        issuer={data.issuer}
+        onClose={() => setLicenseVisible(false)}
       />
 
       <SyncCenterModal
@@ -110,6 +126,7 @@ export function AppGlobalModals({
         visible={supportDiagnostics.visible}
         loading={supportDiagnostics.loading}
         diagnosticText={supportDiagnostics.diagnosticText}
+        showTechnicalDetails={canAccessDeveloperTools(session)}
         onClose={supportDiagnostics.close}
         onRefresh={() => { void supportDiagnostics.refresh(); }}
         onShare={() => { void supportDiagnostics.share(); }}

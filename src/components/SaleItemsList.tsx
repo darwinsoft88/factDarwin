@@ -1,7 +1,10 @@
-import React from "react";
-import { money, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal } from "../services/sri";
+import React, { useCallback, useEffect, useRef } from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { money, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal } from "../sri";
 import { SaleItem } from "../types";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { catalogItemBadge, catalogItemIcon, isServiceItem } from "../utils/catalogItems";
+import { formatQuantity } from "../utils/sales";
 
 type SaleItemsListProps = {
   items: SaleItem[];
@@ -10,66 +13,138 @@ type SaleItemsListProps = {
   onDelete: (index: number) => void;
 };
 
-function EditGlyph() {
-  return (
-    <View style={styles.editGlyphBox}>
-      <View style={styles.editGlyphLine} />
-    </View>
-  );
-}
-
-function TrashGlyph() {
-  return (
-    <View style={styles.trashGlyph}>
-      <View style={styles.trashLid} />
-      <View style={styles.trashBody}>
-        <View style={styles.trashLine} />
-        <View style={styles.trashLine} />
-      </View>
-    </View>
-  );
-}
-
 export function SaleItemsList({ items, onAdjustQuantity, onEdit, onDelete }: SaleItemsListProps) {
-  if (items.length === 0) return null;
+  const totalUnits = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+
+  if (items.length === 0) {
+    return (
+      <View style={styles.cartBox}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Detalle de venta</Text>
+          <Text style={styles.headerCount}>0 lineas | 0 unid.</Text>
+        </View>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyText}>Aun no hay productos o servicios. Busca uno arriba para agregarlo.</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.cartBox}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Detalle de venta</Text>
-        <Text style={styles.headerCount}>{items.length} item{items.length === 1 ? "" : "s"}</Text>
+        <Text style={styles.headerCount}>{items.length} linea{items.length === 1 ? "" : "s"} | {formatQuantity(totalUnits)} unid.</Text>
       </View>
-      {items.map((item, index) => (
-        <View key={`${item.productId}-${index}`} style={[styles.row, index === items.length - 1 && styles.lastRow]}>
-          <View style={styles.itemIcon}>
-            <Text style={styles.itemIconText}>▣</Text>
+      <View style={styles.gestureHint}>
+        <MaterialCommunityIcons name="gesture-swipe-left" size={14} color="#0f766e" />
+        <Text style={styles.gestureHintText}>Toque un item para editar. Deslice fuerte a la izquierda para eliminar.</Text>
+      </View>
+      {items.map((item, index) => {
+        const rowKey = `${item.sourceLineKey || item.productId}-${item.code}-${index}`;
+        return (
+          <SaleItemRow
+            key={rowKey}
+            item={item}
+            index={index}
+            isLast={index === items.length - 1}
+            onAdjustQuantity={onAdjustQuantity}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
+        );
+      })}
+    </View>
+  );
+}
+
+type SwipeSaleItemRowProps = {
+  item: SaleItem;
+  index: number;
+  isLast: boolean;
+  onAdjustQuantity: (index: number, amount: number) => void;
+  onEdit: (index: number) => void;
+  onDelete: (index: number) => void;
+};
+
+function SaleItemRow(props: SwipeSaleItemRowProps) {
+  return <SwipeSaleItemRow {...props} />;
+}
+
+function SwipeSaleItemRow({ item, index, isLast, onAdjustQuantity, onEdit, onDelete }: SwipeSaleItemRowProps) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const rowWidthRef = useRef(0);
+
+  const closeRow = useCallback((animated = true) => {
+    if (animated) {
+      Animated.spring(translateX, { toValue: 0, useNativeDriver: true, friction: 8, tension: 80 }).start();
+      return;
+    }
+    translateX.setValue(0);
+  }, [translateX]);
+
+  useEffect(() => {
+    closeRow(false);
+  }, [closeRow, item.productId, item.code, item.quantity]);
+
+  const deleteWithSlide = () => {
+    const rowWidth = Math.max(rowWidthRef.current, 320);
+    Animated.timing(translateX, { toValue: -rowWidth, duration: 180, useNativeDriver: true }).start(() => {
+      translateX.setValue(0);
+      onDelete(index);
+    });
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_event, gesture) => Math.abs(gesture.dx) > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+      onPanResponderMove: (_event, gesture) => {
+        const rowWidth = Math.max(rowWidthRef.current, 320);
+        const nextValue = Math.max(-rowWidth, Math.min(0, gesture.dx));
+        translateX.setValue(nextValue);
+      },
+      onPanResponderRelease: (_event, gesture) => {
+        const rowWidth = Math.max(rowWidthRef.current, 320);
+        const shouldDelete = gesture.dx <= -(rowWidth * 0.45);
+        if (shouldDelete) deleteWithSlide();
+        else closeRow();
+      },
+      onPanResponderTerminate: () => closeRow()
+    })
+  ).current;
+  const isService = isServiceItem(item);
+
+  return (
+    <View style={[styles.swipeRow, isLast && styles.lastRow]} onLayout={(event) => { rowWidthRef.current = event.nativeEvent.layout.width; }}>
+      <View style={styles.deleteReveal} pointerEvents="none">
+        <MaterialCommunityIcons name="trash-can-outline" size={20} color="#ffffff" />
+        <Text style={styles.deleteRevealText}>Eliminar</Text>
+      </View>
+      <Animated.View style={[styles.row, { transform: [{ translateX }] }]} {...panResponder.panHandlers}>
+        <Pressable accessibilityLabel={`Editar ${item.name}`} style={styles.itemTapArea} onPress={() => onEdit(index)}>
+          <View style={[styles.itemIcon, isService && styles.serviceItemIcon]}>
+            <MaterialCommunityIcons name={catalogItemIcon(item)} size={14} color={isService ? "#6d28d9" : "#047857"} />
           </View>
           <View style={styles.itemInfo}>
             <Text style={styles.itemTitle} numberOfLines={1}>{item.name}</Text>
             <Text style={styles.itemMeta} numberOfLines={1}>
-              Base ${money(calculateLineSubtotal(item))} | Desc. ${money(calculateLineDiscount(item))} | IVA ${money(calculateLineTax(item))}
+              {catalogItemBadge(item)} | Base ${money(calculateLineSubtotal(item))} | Desc. ${money(calculateLineDiscount(item))} | IVA ${money(calculateLineTax(item))}
             </Text>
           </View>
-          <View style={styles.itemSide}>
-            <View style={styles.quantityControls}>
-              <Pressable style={styles.qtyButton} onPress={() => onAdjustQuantity(index, -1)}>
-                <Text style={styles.qtyButtonText}>-</Text>
-              </Pressable>
-              <Text style={styles.qtyText}>{item.quantity}</Text>
-              <Pressable style={styles.qtyButton} onPress={() => onAdjustQuantity(index, 1)}>
-                <Text style={styles.qtyButtonText}>+</Text>
-              </Pressable>
-              <Pressable accessibilityLabel="Editar precio y descuento" style={styles.editActionButton} onPress={() => onEdit(index)}>
-                <EditGlyph />
-              </Pressable>
-              <Pressable accessibilityLabel="Eliminar producto" style={styles.deleteIconButton} onPress={() => onDelete(index)}>
-                <TrashGlyph />
-              </Pressable>
-            </View>
-            <Text style={styles.itemTotal}>${money(calculateLineTotal(item))}</Text>
+        </Pressable>
+        <View style={styles.itemSide}>
+          <View style={styles.quantityControls}>
+            <Pressable accessibilityLabel="Disminuir cantidad" style={styles.qtyButton} onPress={() => onAdjustQuantity(index, -1)}>
+              <MaterialCommunityIcons name="minus" size={15} color="#047857" />
+            </Pressable>
+            <Text style={styles.qtyText}>{item.quantity}</Text>
+            <Pressable accessibilityLabel="Aumentar cantidad" style={styles.qtyButton} onPress={() => onAdjustQuantity(index, 1)}>
+              <MaterialCommunityIcons name="plus" size={15} color="#047857" />
+            </Pressable>
           </View>
+          <Text style={styles.itemTotal}>${money(calculateLineTotal(item))}</Text>
         </View>
-      ))}
+      </Animated.View>
     </View>
   );
 }
@@ -104,40 +179,95 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "800"
   },
-  row: {
+  gestureHint: {
+    marginHorizontal: 8,
+    marginTop: 8,
+    marginBottom: 3,
+    borderRadius: 8,
+    backgroundColor: "#ecfdf5",
     paddingHorizontal: 9,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#edf2f7",
+    paddingVertical: 7,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8
+    gap: 7
+  },
+  gestureHintText: {
+    flex: 1,
+    color: "#0f766e",
+    fontSize: 9,
+    fontWeight: "800",
+    lineHeight: 12
+  },
+  emptyState: {
+    marginHorizontal: 10,
+    marginVertical: 12,
+    minHeight: 74,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "#cbd5e1",
+    borderRadius: 14,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 18
+  },
+  emptyText: {
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+    textAlign: "center"
+  },
+  swipeRow: {
+    position: "relative",
+    overflow: "hidden",
+    borderBottomWidth: 1,
+    borderBottomColor: "#edf2f7",
+    backgroundColor: "#dc2626"
+  },
+  row: {
+    backgroundColor: "#ffffff",
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7
+  },
+  simpleRow: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#edf2f7"
   },
   lastRow: {
     borderBottomWidth: 0
   },
-  itemInfo: {
-    flex: 1,
-    minWidth: 0
-  },
   itemIcon: {
-    width: 30,
-    height: 30,
+    width: 28,
+    height: 28,
     borderRadius: 8,
     backgroundColor: "#dcfce7",
     alignItems: "center",
     justifyContent: "center"
   },
-  itemIconText: {
-    color: "#047857",
-    fontSize: 13,
-    fontWeight: "900"
+  serviceItemIcon: {
+    backgroundColor: "#f5f3ff"
+  },
+  itemInfo: {
+    flex: 1,
+    minWidth: 0
+  },
+  itemTapArea: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7
   },
   itemTitle: {
     color: "#111827",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "900",
-    lineHeight: 15
+    lineHeight: 14
   },
   itemMeta: {
     color: "#64748b",
@@ -148,104 +278,79 @@ const styles = StyleSheet.create({
   itemSide: {
     alignItems: "flex-end",
     gap: 5,
-    minWidth: 118
+    minWidth: 120,
+    flexShrink: 0
+  },
+  quantityControls: {
+    minHeight: 32,
+    borderRadius: 999,
+    backgroundColor: "#f8fafc",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 3
+  },
+  simpleActionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 4
+  },
+  qtyButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#ecfdf5",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  qtyText: {
+    minWidth: 22,
+    color: "#111827",
+    textAlign: "center",
+    fontSize: 13,
+    fontWeight: "900"
+  },
+  deleteReveal: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#dc2626",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    paddingLeft: "82%"
+  },
+  deleteRevealText: {
+    color: "#ffffff",
+    fontSize: 10,
+    fontWeight: "900"
+  },
+  webDeleteReveal: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#dc2626",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    paddingLeft: "82%"
+  },
+  webDeleteButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    backgroundColor: "#fee2e2",
+    alignItems: "center",
+    justifyContent: "center"
   },
   itemTotal: {
     color: "#111827",
     fontSize: 12,
     fontWeight: "900"
-  },
-  quantityControls: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 5
-  },
-  qtyButton: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: "#ecfdf5",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  qtyButtonText: {
-    color: "#047857",
-    fontSize: 16,
-    fontWeight: "900"
-  },
-  qtyText: {
-    minWidth: 16,
-    color: "#111827",
-    textAlign: "center",
-    fontSize: 12,
-    fontWeight: "900"
-  },
-  editActionButton: {
-    width: 26,
-    height: 26,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-    backgroundColor: "#eff6ff",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row"
-  },
-  editGlyphBox: {
-    width: 12,
-    height: 12,
-    borderWidth: 1.5,
-    borderColor: "#1d4ed8",
-    borderRadius: 3,
-    justifyContent: "center",
-    alignItems: "center"
-  },
-  editGlyphLine: {
-    width: 7,
-    height: 1.5,
-    borderRadius: 2,
-    backgroundColor: "#1d4ed8",
-    transform: [{ rotate: "-25deg" }]
-  },
-  deleteIconButton: {
-    width: 26,
-    height: 26,
-    borderRadius: 9,
-    backgroundColor: "#fee2e2",
-    alignItems: "center",
-    justifyContent: "center"
-  },
-  trashGlyph: {
-    width: 14,
-    height: 16,
-    alignItems: "center",
-    justifyContent: "flex-end"
-  },
-  trashLid: {
-    width: 12,
-    height: 2,
-    borderRadius: 2,
-    backgroundColor: "#991b1b",
-    marginBottom: 1
-  },
-  trashBody: {
-    width: 11,
-    height: 12,
-    borderWidth: 2,
-    borderTopWidth: 1,
-    borderColor: "#991b1b",
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 2,
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 2,
-    paddingTop: 2
-  },
-  trashLine: {
-    width: 1,
-    height: 7,
-    borderRadius: 1,
-    backgroundColor: "#991b1b"
   }
 });

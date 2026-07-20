@@ -1,10 +1,11 @@
 export type Environment = "1" | "2";
-export type InvoiceStatus = "BORRADOR" | "TICKET_OFFLINE" | "FIRMADA" | "ENVIADA" | "PENDIENTE_SRI" | "ENVIADA_SRI" | "AUTORIZADA" | "DEVUELTA" | "ERROR_SRI" | "ANULADA" | "PROFORMA";
+export type InvoiceStatus = "BORRADOR" | "TICKET_OFFLINE" | "FIRMADA" | "ENVIADA" | "PENDIENTE_SRI" | "ENVIADA_SRI" | "AUTORIZADA" | "DEVUELTA" | "ERROR_SRI" | "ANULADA" | "PROFORMA" | "CONVERTIDA";
 export type DocumentType = "factura" | "nota_venta" | "proforma" | "nota_credito";
 export type UserRole = "admin" | "vendedor" | "cajero" | "contador";
 export type LicenseStatus = "trial" | "active" | "expired" | "suspended";
-export type LicensePlan = "trial" | "basico_mensual" | "basico_anual" | "pro_mensual" | "pro_anual";
+export type LicensePlan = "trial" | "basico_mensual" | "basico_anual" | "pro_mensual" | "pro_anual" | "premium_mensual" | "premium_anual";
 export type TaxRegime = "general" | "rimpe_emprendedor" | "rimpe_negocio_popular";
+export type CatalogItemType = "product" | "service";
 
 export type User = {
   id: string;
@@ -15,6 +16,7 @@ export type User = {
   passwordHash?: string;
   mustChangePassword?: boolean;
   role: UserRole;
+  supportAccess?: boolean;
 };
 
 export type Client = {
@@ -30,6 +32,7 @@ export type Client = {
 
 export type Product = {
   id: string;
+  itemType?: CatalogItemType;
   code: string;
   name: string;
   price: number;
@@ -88,6 +91,25 @@ export type CashClosing = {
   createdAt: string;
 };
 
+export type CreditPayment = {
+  id: string;
+  saleId: string;
+  clientId: string;
+  establishment?: string;
+  emissionPoint?: string;
+  establishmentName?: string;
+  userId: string;
+  userName: string;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  note?: string;
+  createdAt: string;
+  voidedAt?: string;
+  voidedByUserId?: string;
+  voidedByUserName?: string;
+  voidReason?: string;
+};
+
 export type Issuer = {
   ruc: string;
   businessName: string;
@@ -128,6 +150,7 @@ export type IssuerEstablishment = {
 
 export type SaleItem = {
   productId: string;
+  itemType?: CatalogItemType;
   code: string;
   name: string;
   quantity: number;
@@ -138,7 +161,23 @@ export type SaleItem = {
   sourceLineKey?: string;
 };
 
+export type AdditionalInfoField = {
+  id: string;
+  name: string;
+  value: string;
+};
+
 export type PaymentMethod = "01" | "15" | "16" | "17" | "18" | "19" | "20" | "21";
+export type PaymentCondition = "contado" | "credito";
+export type CreditStatus = "pendiente" | "pagado";
+
+export type SalePaymentSplit = {
+  id: string;
+  paymentMethod: PaymentMethod;
+  amount: number;
+  bank?: string;
+  reference?: string;
+};
 
 export type Sale = {
   id: string;
@@ -163,6 +202,12 @@ export type Sale = {
     error?: string;
   }[];
   sourceSaleId?: string;
+  autoInvoiceOnSync?: boolean;
+  autoInvoiceAttemptedAt?: string;
+  autoInvoiceLastError?: string;
+  convertedAt?: string;
+  convertedToSaleId?: string;
+  convertedToSequence?: string;
   supportDocumentType?: "01";
   supportDocumentNumber?: string;
   supportAuthorizationNumber?: string;
@@ -176,6 +221,12 @@ export type Sale = {
   tax: number;
   total: number;
   paymentMethod: PaymentMethod;
+  payments?: SalePaymentSplit[];
+  paymentCondition?: PaymentCondition;
+  creditDueDate?: string;
+  creditBalance?: number;
+  creditStatus?: CreditStatus;
+  additionalInfo?: AdditionalInfoField[];
   status: InvoiceStatus;
   items: SaleItem[];
 };
@@ -266,6 +317,7 @@ export type AppData = {
   inventoryMovements: InventoryMovement[];
   auditLogs: AuditLog[];
   sales: Sale[];
+  creditPayments: CreditPayment[];
   receivedRetentions: ReceivedRetention[];
   guides: RemissionGuide[];
   cashClosings: CashClosing[];
@@ -279,6 +331,7 @@ export type AppData = {
     clients?: string[];
     products?: string[];
     users?: string[];
+    inventoryMovements?: string[];
   };
   license?: AppLicense;
   historyPolicy?: {

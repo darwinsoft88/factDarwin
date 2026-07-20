@@ -1,0 +1,829 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>
+endobj
+3 0 obj
+<< /Length 2462 >>
+stream
+BT
+/F1 19 Tf
+54 730 Td (Guia rapida para generar AAB y subir a Google Play Console) Tj
+-54 -730 Td
+/F1 10 Tf
+54 712 Td () Tj
+-54 -712 Td
+/F1 10 Tf
+54 698 Td (Proyecto: FactuDarwin  ) Tj
+-54 -698 Td
+/F1 10 Tf
+54 684 Td (Ruta del proyecto movil: `C:\\app`  ) Tj
+-54 -684 Td
+/F1 10 Tf
+54 670 Td (Paquete Android: `com.facturasri.mobile`  ) Tj
+-54 -670 Td
+/F1 10 Tf
+54 656 Td (Fecha de guia: 2026-06-25) Tj
+-54 -656 Td
+/F1 10 Tf
+54 642 Td () Tj
+-54 -642 Td
+/F1 15 Tf
+54 618 Td (1. Antes de generar una version) Tj
+-54 -618 Td
+/F1 10 Tf
+54 602 Td () Tj
+-54 -602 Td
+/F1 10 Tf
+64 588 Td (1. Verifique que el backend este levantado y responda:) Tj
+-64 -588 Td
+/F1 10 Tf
+54 574 Td () Tj
+-54 -574 Td
+/F1 10 Tf
+54 560 Td () Tj
+-54 -560 Td
+/F2 9 Tf
+68 546 Td (cd C:\\app) Tj
+-68 -546 Td
+/F2 9 Tf
+68 532 Td (npm run smoke:production) Tj
+-68 -532 Td
+/F1 10 Tf
+54 518 Td () Tj
+-54 -518 Td
+/F1 10 Tf
+54 504 Td () Tj
+-54 -504 Td
+/F1 10 Tf
+54 490 Td (Debe salir algo parecido a:) Tj
+-54 -490 Td
+/F1 10 Tf
+54 476 Td () Tj
+-54 -476 Td
+/F1 10 Tf
+54 462 Td () Tj
+-54 -462 Td
+/F2 9 Tf
+68 448 Td (Smoke test OK: https://api.factudarwin.com/health) Tj
+-68 -448 Td
+/F1 10 Tf
+54 434 Td () Tj
+-54 -434 Td
+/F1 10 Tf
+54 420 Td () Tj
+-54 -420 Td
+/F1 10 Tf
+64 406 Td (2. Verifique configuracion de produccion de la app:) Tj
+-64 -406 Td
+/F1 10 Tf
+54 392 Td () Tj
+-54 -392 Td
+/F1 10 Tf
+54 378 Td () Tj
+-54 -378 Td
+/F2 9 Tf
+68 364 Td (cd C:\\app) Tj
+-68 -364 Td
+/F2 9 Tf
+68 350 Td (npm run check:production) Tj
+-68 -350 Td
+/F1 10 Tf
+54 336 Td () Tj
+-54 -336 Td
+/F1 10 Tf
+54 322 Td () Tj
+-54 -322 Td
+/F1 10 Tf
+54 308 Td (Debe indicar que la configuracion basica esta verificada.) Tj
+-54 -308 Td
+/F1 10 Tf
+54 294 Td () Tj
+-54 -294 Td
+/F1 10 Tf
+64 280 Td (3. Verifique TypeScript:) Tj
+-64 -280 Td
+/F1 10 Tf
+54 266 Td () Tj
+-54 -266 Td
+/F1 10 Tf
+54 252 Td () Tj
+-54 -252 Td
+/F2 9 Tf
+68 238 Td (cd C:\\app) Tj
+-68 -238 Td
+/F2 9 Tf
+68 224 Td (npm run typecheck) Tj
+-68 -224 Td
+/F1 10 Tf
+54 210 Td () Tj
+-54 -210 Td
+/F1 10 Tf
+54 196 Td () Tj
+-54 -196 Td
+/F1 10 Tf
+64 182 Td (4. Ejecute pruebas:) Tj
+-64 -182 Td
+/F1 10 Tf
+54 168 Td () Tj
+-54 -168 Td
+/F1 10 Tf
+54 154 Td () Tj
+-54 -154 Td
+/F2 9 Tf
+68 140 Td (cd C:\\app) Tj
+-68 -140 Td
+/F2 9 Tf
+68 126 Td (npm test) Tj
+-68 -126 Td
+/F1 10 Tf
+54 112 Td () Tj
+-54 -112 Td
+/F1 10 Tf
+54 98 Td () Tj
+-54 -98 Td
+/F1 10 Tf
+64 84 Td (5. Verifique lint solo sobre codigo fuente:) Tj
+-64 -84 Td
+/F1 10 Tf
+54 70 Td () Tj
+-54 -70 Td
+ET
+BT /F1 8 Tf
+508 28 Td (1/6) Tj
+ET
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 15 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 3 0 R >>
+endobj
+5 0 obj
+<< /Length 2730 >>
+stream
+BT
+/F1 10 Tf
+54 738 Td () Tj
+-54 -738 Td
+/F2 9 Tf
+68 724 Td (cd C:\\app) Tj
+-68 -724 Td
+/F2 9 Tf
+68 710 Td (npm run lint) Tj
+-68 -710 Td
+/F1 10 Tf
+54 696 Td () Tj
+-54 -696 Td
+/F1 10 Tf
+54 682 Td () Tj
+-54 -682 Td
+/F1 10 Tf
+54 668 Td (Nota: el lint del proyecto debe revisar `App.tsx`, `src` y `scripts`. No debe revisar) Tj
+-54 -668 Td
+/F1 10 Tf
+54 654 Td (carpetas generadas como `dist`, `android`, `node_modules` o respaldos.) Tj
+-54 -654 Td
+/F1 10 Tf
+54 640 Td () Tj
+-54 -640 Td
+/F1 15 Tf
+54 616 Td (2. Cambiar version de la app) Tj
+-54 -616 Td
+/F1 10 Tf
+54 600 Td () Tj
+-54 -600 Td
+/F1 10 Tf
+54 586 Td (La version se cambia con el script del proyecto. Este script actualiza:) Tj
+-54 -586 Td
+/F1 10 Tf
+54 572 Td () Tj
+-54 -572 Td
+/F1 10 Tf
+64 558 Td (- `app.json` -> `expo.version`) Tj
+-64 -558 Td
+/F1 10 Tf
+64 544 Td (- `app.json` -> `expo.android.versionCode`) Tj
+-64 -544 Td
+/F1 10 Tf
+64 530 Td (- `src/constants/branding.ts` -> `APP_VERSION`) Tj
+-64 -530 Td
+/F1 10 Tf
+54 516 Td () Tj
+-54 -516 Td
+/F1 10 Tf
+54 502 Td (Ejemplo para pasar a version `1.0.5`:) Tj
+-54 -502 Td
+/F1 10 Tf
+54 488 Td () Tj
+-54 -488 Td
+/F1 10 Tf
+54 474 Td () Tj
+-54 -474 Td
+/F2 9 Tf
+68 460 Td (cd C:\\app) Tj
+-68 -460 Td
+/F2 9 Tf
+68 446 Td (npm run version:bump -- 1.0.5) Tj
+-68 -446 Td
+/F1 10 Tf
+54 432 Td () Tj
+-54 -432 Td
+/F1 10 Tf
+54 418 Td () Tj
+-54 -418 Td
+/F1 10 Tf
+54 404 Td (Si solo quiere probar sin escribir cambios:) Tj
+-54 -404 Td
+/F1 10 Tf
+54 390 Td () Tj
+-54 -390 Td
+/F1 10 Tf
+54 376 Td () Tj
+-54 -376 Td
+/F2 9 Tf
+68 362 Td (cd C:\\app) Tj
+-68 -362 Td
+/F2 9 Tf
+68 348 Td (npm run version:bump -- 1.0.5 check) Tj
+-68 -348 Td
+/F1 10 Tf
+54 334 Td () Tj
+-54 -334 Td
+/F1 10 Tf
+54 320 Td () Tj
+-54 -320 Td
+/F1 10 Tf
+54 306 Td (Importante:) Tj
+-54 -306 Td
+/F1 10 Tf
+54 292 Td () Tj
+-54 -292 Td
+/F1 10 Tf
+64 278 Td (- Google Play no permite subir dos AAB con el mismo `versionCode`.) Tj
+-64 -278 Td
+/F1 10 Tf
+64 264 Td (- Cada nueva subida debe tener version nueva o al menos `versionCode` mayor.) Tj
+-64 -264 Td
+/F1 10 Tf
+64 250 Td (- No edite solo el nombre de version en Google Play; debe cambiarse en el proyecto) Tj
+-64 -250 Td
+/F1 10 Tf
+64 236 Td (antes de generar el AAB.) Tj
+-64 -236 Td
+/F1 10 Tf
+54 222 Td () Tj
+-54 -222 Td
+/F1 15 Tf
+54 198 Td (3. Generar AAB para Play Store con EAS) Tj
+-54 -198 Td
+/F1 10 Tf
+54 182 Td () Tj
+-54 -182 Td
+/F1 10 Tf
+54 168 Td (Comando principal:) Tj
+-54 -168 Td
+/F1 10 Tf
+54 154 Td () Tj
+-54 -154 Td
+/F1 10 Tf
+54 140 Td () Tj
+-54 -140 Td
+/F2 9 Tf
+68 126 Td (cd C:\\app) Tj
+-68 -126 Td
+/F2 9 Tf
+68 112 Td (npm run build:android:aab) Tj
+-68 -112 Td
+/F1 10 Tf
+54 98 Td () Tj
+-54 -98 Td
+/F1 10 Tf
+54 84 Td () Tj
+-54 -84 Td
+/F1 10 Tf
+54 70 Td (Equivale a:) Tj
+-54 -70 Td
+ET
+BT /F1 8 Tf
+508 28 Td (2/6) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 15 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 2563 >>
+stream
+BT
+/F1 10 Tf
+54 738 Td () Tj
+-54 -738 Td
+/F1 10 Tf
+54 724 Td () Tj
+-54 -724 Td
+/F2 9 Tf
+68 710 Td (npx eas-cli build --platform android --profile production) Tj
+-68 -710 Td
+/F1 10 Tf
+54 696 Td () Tj
+-54 -696 Td
+/F1 10 Tf
+54 682 Td () Tj
+-54 -682 Td
+/F1 10 Tf
+54 668 Td (Cuando termine, Expo/EAS dara un enlace para descargar el archivo `.aab`.) Tj
+-54 -668 Td
+/F1 10 Tf
+54 654 Td () Tj
+-54 -654 Td
+/F1 10 Tf
+54 640 Td (El AAB es el archivo correcto para Google Play Console.  ) Tj
+-54 -640 Td
+/F1 10 Tf
+54 626 Td (El APK sirve para pruebas manuales, pero Google Play normalmente solicita AAB.) Tj
+-54 -626 Td
+/F1 10 Tf
+54 612 Td () Tj
+-54 -612 Td
+/F1 15 Tf
+54 588 Td (4. Generar APK para prueba manual) Tj
+-54 -588 Td
+/F1 10 Tf
+54 572 Td () Tj
+-54 -572 Td
+/F1 10 Tf
+54 558 Td (Si necesita una APK para instalar en telefono:) Tj
+-54 -558 Td
+/F1 10 Tf
+54 544 Td () Tj
+-54 -544 Td
+/F1 10 Tf
+54 530 Td () Tj
+-54 -530 Td
+/F2 9 Tf
+68 516 Td (cd C:\\app) Tj
+-68 -516 Td
+/F2 9 Tf
+68 502 Td (npm run build:android:apk) Tj
+-68 -502 Td
+/F1 10 Tf
+54 488 Td () Tj
+-54 -488 Td
+/F1 10 Tf
+54 474 Td () Tj
+-54 -474 Td
+/F1 10 Tf
+54 460 Td (Equivale a:) Tj
+-54 -460 Td
+/F1 10 Tf
+54 446 Td () Tj
+-54 -446 Td
+/F1 10 Tf
+54 432 Td () Tj
+-54 -432 Td
+/F2 9 Tf
+68 418 Td (npx eas-cli build --platform android --profile preview) Tj
+-68 -418 Td
+/F1 10 Tf
+54 404 Td () Tj
+-54 -404 Td
+/F1 10 Tf
+54 390 Td () Tj
+-54 -390 Td
+/F1 15 Tf
+54 366 Td (5. Subir AAB a Google Play Console) Tj
+-54 -366 Td
+/F1 10 Tf
+54 350 Td () Tj
+-54 -350 Td
+/F1 10 Tf
+64 336 Td (1. Entrar a Google Play Console.) Tj
+-64 -336 Td
+/F1 10 Tf
+64 322 Td (2. Seleccionar la app `FactuDarwin`.) Tj
+-64 -322 Td
+/F1 10 Tf
+64 308 Td (3. Ir a:) Tj
+-64 -308 Td
+/F1 10 Tf
+54 294 Td () Tj
+-54 -294 Td
+/F1 10 Tf
+54 280 Td () Tj
+-54 -280 Td
+/F2 9 Tf
+68 266 Td (Probar y publicar -> Pruebas -> Prueba interna) Tj
+-68 -266 Td
+/F1 10 Tf
+54 252 Td () Tj
+-54 -252 Td
+/F1 10 Tf
+54 238 Td () Tj
+-54 -238 Td
+/F1 10 Tf
+54 224 Td (o si ya va a produccion:) Tj
+-54 -224 Td
+/F1 10 Tf
+54 210 Td () Tj
+-54 -210 Td
+/F1 10 Tf
+54 196 Td () Tj
+-54 -196 Td
+/F2 9 Tf
+68 182 Td (Probar y publicar -> Produccion) Tj
+-68 -182 Td
+/F1 10 Tf
+54 168 Td () Tj
+-54 -168 Td
+/F1 10 Tf
+54 154 Td () Tj
+-54 -154 Td
+/F1 10 Tf
+64 140 Td (4. Crear nueva version.) Tj
+-64 -140 Td
+/F1 10 Tf
+64 126 Td (5. Subir el archivo `.aab`.) Tj
+-64 -126 Td
+/F1 10 Tf
+64 112 Td (6. Agregar notas de version.) Tj
+-64 -112 Td
+/F1 10 Tf
+54 98 Td () Tj
+-54 -98 Td
+/F1 10 Tf
+54 84 Td (Ejemplo de notas:) Tj
+-54 -84 Td
+/F1 10 Tf
+54 70 Td () Tj
+-54 -70 Td
+ET
+BT /F1 8 Tf
+508 28 Td (3/6) Tj
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 15 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Length 2547 >>
+stream
+BT
+/F1 10 Tf
+54 738 Td () Tj
+-54 -738 Td
+/F2 9 Tf
+68 724 Td (<es-419>) Tj
+-68 -724 Td
+/F2 9 Tf
+68 710 Td (Mejoras de estabilidad, sincronizacion, creditos, ventas e impresion de comprobantes.) Tj
+-68 -710 Td
+/F2 9 Tf
+68 696 Td (Correcciones en flujo de ventas, cobros y experiencia PWA.) Tj
+-68 -696 Td
+/F2 9 Tf
+68 682 Td (</es-419>) Tj
+-68 -682 Td
+/F1 10 Tf
+54 668 Td () Tj
+-54 -668 Td
+/F1 10 Tf
+54 654 Td () Tj
+-54 -654 Td
+/F1 10 Tf
+64 640 Td (7. Guardar.) Tj
+-64 -640 Td
+/F1 10 Tf
+64 626 Td (8. Revisar advertencias.) Tj
+-64 -626 Td
+/F1 10 Tf
+64 612 Td (9. Enviar a revision o publicar en prueba interna.) Tj
+-64 -612 Td
+/F1 10 Tf
+54 598 Td () Tj
+-54 -598 Td
+/F1 15 Tf
+54 574 Td (6. Si Google Play dice que el codigo de version ya fue usado) Tj
+-54 -574 Td
+/F1 10 Tf
+54 558 Td () Tj
+-54 -558 Td
+/F1 10 Tf
+54 544 Td (Significa que el `versionCode` del AAB ya existe en Play Console.) Tj
+-54 -544 Td
+/F1 10 Tf
+54 530 Td () Tj
+-54 -530 Td
+/F1 10 Tf
+54 516 Td (Solucion:) Tj
+-54 -516 Td
+/F1 10 Tf
+54 502 Td () Tj
+-54 -502 Td
+/F1 10 Tf
+54 488 Td () Tj
+-54 -488 Td
+/F2 9 Tf
+68 474 Td (cd C:\\app) Tj
+-68 -474 Td
+/F2 9 Tf
+68 460 Td (npm run version:bump -- 1.0.6) Tj
+-68 -460 Td
+/F2 9 Tf
+68 446 Td (npm run check:production) Tj
+-68 -446 Td
+/F2 9 Tf
+68 432 Td (npm run build:android:aab) Tj
+-68 -432 Td
+/F1 10 Tf
+54 418 Td () Tj
+-54 -418 Td
+/F1 10 Tf
+54 404 Td () Tj
+-54 -404 Td
+/F1 10 Tf
+54 390 Td (Luego subir el nuevo `.aab`.) Tj
+-54 -390 Td
+/F1 10 Tf
+54 376 Td () Tj
+-54 -376 Td
+/F1 15 Tf
+54 352 Td (7. Archivos donde se ve la version) Tj
+-54 -352 Td
+/F1 10 Tf
+54 336 Td () Tj
+-54 -336 Td
+/F1 10 Tf
+54 322 Td (`C:\\app\\app.json`) Tj
+-54 -322 Td
+/F1 10 Tf
+54 308 Td () Tj
+-54 -308 Td
+/F1 10 Tf
+54 294 Td (Campos importantes:) Tj
+-54 -294 Td
+/F1 10 Tf
+54 280 Td () Tj
+-54 -280 Td
+/F1 10 Tf
+54 266 Td () Tj
+-54 -266 Td
+/F2 9 Tf
+68 252 Td ({) Tj
+-68 -252 Td
+/F2 9 Tf
+68 238 Td (  "expo": {) Tj
+-68 -238 Td
+/F2 9 Tf
+68 224 Td (    "version": "1.0.5",) Tj
+-68 -224 Td
+/F2 9 Tf
+68 210 Td (    "android": {) Tj
+-68 -210 Td
+/F2 9 Tf
+68 196 Td (      "package": "com.facturasri.mobile",) Tj
+-68 -196 Td
+/F2 9 Tf
+68 182 Td (      "versionCode": 9) Tj
+-68 -182 Td
+/F2 9 Tf
+68 168 Td (    }) Tj
+-68 -168 Td
+/F2 9 Tf
+68 154 Td (  }) Tj
+-68 -154 Td
+/F2 9 Tf
+68 140 Td (}) Tj
+-68 -140 Td
+/F1 10 Tf
+54 126 Td () Tj
+-54 -126 Td
+/F1 10 Tf
+54 112 Td () Tj
+-54 -112 Td
+/F1 10 Tf
+54 98 Td (`C:\\app\\src\\constants\\branding.ts`) Tj
+-54 -98 Td
+/F1 10 Tf
+54 84 Td () Tj
+-54 -84 Td
+/F1 10 Tf
+54 70 Td (Campo importante:) Tj
+-54 -70 Td
+ET
+BT /F1 8 Tf
+508 28 Td (4/6) Tj
+ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 15 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 9 0 R >>
+endobj
+11 0 obj
+<< /Length 2756 >>
+stream
+BT
+/F1 10 Tf
+54 738 Td () Tj
+-54 -738 Td
+/F1 10 Tf
+54 724 Td () Tj
+-54 -724 Td
+/F2 9 Tf
+68 710 Td (export const APP_VERSION = "1.0.5";) Tj
+-68 -710 Td
+/F1 10 Tf
+54 696 Td () Tj
+-54 -696 Td
+/F1 10 Tf
+54 682 Td () Tj
+-54 -682 Td
+/F1 15 Tf
+54 658 Td (8. Checklist antes de subir) Tj
+-54 -658 Td
+/F1 10 Tf
+54 642 Td () Tj
+-54 -642 Td
+/F1 10 Tf
+64 628 Td (- Backend activo en `https://api.factudarwin.com`.) Tj
+-64 -628 Td
+/F1 10 Tf
+64 614 Td (- `npm run smoke:production` correcto.) Tj
+-64 -614 Td
+/F1 10 Tf
+64 600 Td (- `npm run check:production` correcto.) Tj
+-64 -600 Td
+/F1 10 Tf
+64 586 Td (- `npm run typecheck` correcto.) Tj
+-64 -586 Td
+/F1 10 Tf
+64 572 Td (- `npm test` correcto.) Tj
+-64 -572 Td
+/F1 10 Tf
+64 558 Td (- Version nueva aplicada con `npm run version:bump -- X.X.X`.) Tj
+-64 -558 Td
+/F1 10 Tf
+64 544 Td (- AAB generado con `npm run build:android:aab`.) Tj
+-64 -544 Td
+/F1 10 Tf
+64 530 Td (- El archivo subido a Play Console es `.aab`, no `.apk`.) Tj
+-64 -530 Td
+/F1 10 Tf
+64 516 Td (- Notas de version agregadas.) Tj
+-64 -516 Td
+/F1 10 Tf
+64 502 Td (- Politica de privacidad configurada.) Tj
+-64 -502 Td
+/F1 10 Tf
+64 488 Td (- Datos de acceso demo actualizados.) Tj
+-64 -488 Td
+/F1 10 Tf
+54 474 Td () Tj
+-54 -474 Td
+/F1 15 Tf
+54 450 Td (9. Comandos resumidos) Tj
+-54 -450 Td
+/F1 10 Tf
+54 434 Td () Tj
+-54 -434 Td
+/F1 10 Tf
+54 420 Td (Flujo recomendado completo:) Tj
+-54 -420 Td
+/F1 10 Tf
+54 406 Td () Tj
+-54 -406 Td
+/F1 10 Tf
+54 392 Td () Tj
+-54 -392 Td
+/F2 9 Tf
+68 378 Td (cd C:\\app) Tj
+-68 -378 Td
+/F2 9 Tf
+68 364 Td (npm run smoke:production) Tj
+-68 -364 Td
+/F2 9 Tf
+68 350 Td (npm run check:production) Tj
+-68 -350 Td
+/F2 9 Tf
+68 336 Td (npm run typecheck) Tj
+-68 -336 Td
+/F2 9 Tf
+68 322 Td (npm run lint) Tj
+-68 -322 Td
+/F2 9 Tf
+68 308 Td (npm test) Tj
+-68 -308 Td
+/F2 9 Tf
+68 294 Td (npm run version:bump -- 1.0.5) Tj
+-68 -294 Td
+/F2 9 Tf
+68 280 Td (npm run build:android:aab) Tj
+-68 -280 Td
+/F1 10 Tf
+54 266 Td () Tj
+-54 -266 Td
+/F1 10 Tf
+54 252 Td () Tj
+-54 -252 Td
+/F1 10 Tf
+54 238 Td (Si ya cambió version y solo quiere generar:) Tj
+-54 -238 Td
+/F1 10 Tf
+54 224 Td () Tj
+-54 -224 Td
+/F1 10 Tf
+54 210 Td () Tj
+-54 -210 Td
+/F2 9 Tf
+68 196 Td (cd C:\\app) Tj
+-68 -196 Td
+/F2 9 Tf
+68 182 Td (npm run check:production) Tj
+-68 -182 Td
+/F2 9 Tf
+68 168 Td (npm run build:android:aab) Tj
+-68 -168 Td
+/F1 10 Tf
+54 154 Td () Tj
+-54 -154 Td
+/F1 10 Tf
+54 140 Td () Tj
+-54 -140 Td
+/F1 15 Tf
+54 116 Td (10. Nota importante) Tj
+-54 -116 Td
+/F1 10 Tf
+54 100 Td () Tj
+-54 -100 Td
+/F1 10 Tf
+54 86 Td (Cuando se sube una nueva version a Google Play, los usuarios no reciben los cambios) Tj
+-54 -86 Td
+/F1 10 Tf
+54 72 Td (inmediatamente hasta que Google apruebe la version y se publique en el canal) Tj
+-54 -72 Td
+ET
+BT /F1 8 Tf
+508 28 Td (5/6) Tj
+ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 15 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 11 0 R >>
+endobj
+13 0 obj
+<< /Length 257 >>
+stream
+BT
+/F1 10 Tf
+54 738 Td (correspondiente.) Tj
+-54 -738 Td
+/F1 10 Tf
+54 724 Td () Tj
+-54 -724 Td
+/F1 10 Tf
+54 710 Td (Para pruebas rapidas use primero `Prueba interna`.) Tj
+-54 -710 Td
+/F1 10 Tf
+54 696 Td () Tj
+-54 -696 Td
+ET
+BT /F1 8 Tf
+508 28 Td (6/6) Tj
+ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 15 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> /Contents 13 0 R >>
+endobj
+15 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R 10 0 R 12 0 R 14 0 R] /Count 6 >>
+endobj
+16 0 obj
+<< /Type /Catalog /Pages 15 0 R >>
+endobj
+xref
+0 17
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000000147 00000 n 
+0000002661 00000 n 
+0000002798 00000 n 
+0000005580 00000 n 
+0000005717 00000 n 
+0000008332 00000 n 
+0000008469 00000 n 
+0000011068 00000 n 
+0000011206 00000 n 
+0000014015 00000 n 
+0000014154 00000 n 
+0000014463 00000 n 
+0000014602 00000 n 
+0000014693 00000 n 
+trailer
+<< /Size 17 /Root 16 0 R >>
+startxref
+14744
+%%EOF

@@ -1,4 +1,4 @@
-import { buildCreditNoteXml, buildInvoiceXml, calculateLineSubtotal, calculateLineTax, calculateLineTotal, money } from "../services/sri";
+import { buildCreditNoteXml, buildInvoiceXml, calculateLineSubtotal, calculateLineTax, calculateLineTotal, money } from "../sri";
 import { Client, Issuer, ReceivedRetention, Sale } from "../types";
 import { documentNumber, getRetryInfo, MAX_DAILY_RETRIES } from "./documents";
 import { formatShortDate } from "./format";
@@ -14,6 +14,7 @@ export function formatSaleDetail(sale: Sale, client: Client, issuer: Issuer) {
     `Estado: ${sale.status}`,
     `Cliente: ${client.name}`,
     `Total: $${money(sale.total)}`,
+    sale.paymentCondition === "credito" ? `Credito pendiente: $${money(sale.creditBalance ?? sale.total)}${sale.creditDueDate ? ` | vence ${sale.creditDueDate}` : ""}` : "Condicion de cobro: contado",
     isInvoiceSale(sale) || isCreditNote ? `Clave de acceso: ${sale.accessKey}` : `Secuencia interna: ${sale.sequence}`,
     isCreditNote && sale.supportDocumentNumber ? `Factura modificada: ${sale.supportDocumentNumber}` : "",
     isCreditNote && sale.creditReason ? `Motivo nota credito: ${sale.creditReason}` : "",

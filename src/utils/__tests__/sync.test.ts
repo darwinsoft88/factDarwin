@@ -1,4 +1,4 @@
-import { initialData } from "../../storage";
+import { initialData } from "../../database";
 import { syncPatchToBackend } from "../sync";
 
 jest.mock("../../services/backend", () => ({

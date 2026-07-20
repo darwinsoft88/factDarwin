@@ -6,8 +6,8 @@ export function normalizeTaxRegime(value: unknown): TaxRegime {
 
 export function taxRegimeLabel(value: unknown) {
   const regime = normalizeTaxRegime(value);
-  if (regime === "rimpe_emprendedor") return "Contribuyente Régimen RIMPE";
-  if (regime === "rimpe_negocio_popular") return "Contribuyente Negocio Popular - Régimen RIMPE";
+  if (regime === "rimpe_emprendedor") return "Contribuyente Regimen RIMPE";
+  if (regime === "rimpe_negocio_popular") return "Contribuyente Negocio Popular - Regimen RIMPE";
   return "";
 }
 

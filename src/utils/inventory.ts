@@ -1,4 +1,5 @@
 import { InventoryMovement, InventoryMovementType, Product, Sale } from "../types";
+import { isInventoryProduct } from "./catalogItems";
 import { saleStatusReducesStock } from "./sales";
 
 export function buildStockCredits(sale?: Sale) {
@@ -6,6 +7,7 @@ export function buildStockCredits(sale?: Sale) {
   if (!sale || !saleStatusReducesStock(sale.status)) return credits;
 
   sale.items.forEach((item) => {
+    if (!isInventoryProduct(item)) return;
     credits.set(item.productId, (credits.get(item.productId) || 0) + item.quantity);
   });
 
@@ -13,6 +15,7 @@ export function buildStockCredits(sale?: Sale) {
 }
 
 export function getAvailableStockForSale(product: Product, editingSale?: Sale) {
+  if (!isInventoryProduct(product)) return Number.POSITIVE_INFINITY;
   return product.stock + (buildStockCredits(editingSale).get(product.id) || 0);
 }
 
@@ -20,6 +23,7 @@ export function restoreSaleStock(products: Product[], sale: Sale) {
   const credits = buildStockCredits(sale);
 
   return products.map((product) => {
+    if (!isInventoryProduct(product)) return product;
     const quantity = credits.get(product.id) || 0;
     return quantity > 0 ? { ...product, stock: product.stock + quantity } : product;
   });
@@ -44,10 +48,12 @@ export function createInventoryMovement(product: Product, type: InventoryMovemen
 export function buildStockMovements(products: Product[], sale: Sale, type: InventoryMovementType, reason: string, userId: string, createdAt: string, createId: () => string) {
   const quantities = new Map<string, number>();
   sale.items.forEach((item) => {
+    if (!isInventoryProduct(item)) return;
     quantities.set(item.productId, (quantities.get(item.productId) || 0) + item.quantity);
   });
 
   return products.flatMap((product) => {
+    if (!isInventoryProduct(product)) return [];
     const quantity = quantities.get(product.id) || 0;
     if (quantity <= 0) return [];
     const stockAfter = type === "entrada" ? product.stock + quantity : product.stock - quantity;
