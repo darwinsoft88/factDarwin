@@ -131,6 +131,9 @@ export function useSaleIssueFlow({
     const documentEstablishment = activeEstablishment(data.issuer);
     const legacyScopeId = normalizedEstablishments(data.issuer)[0]?.id || documentEstablishment.id;
     const sequence = editingSale?.sequence || nextInternalSequence(data.sales, documentEstablishment.id, legacyScopeId);
+    const internalSaleCreditBalance = paymentCondition === "credito"
+      ? Math.max(0, salePaymentBalance(totals.total, resolvedPayments))
+      : 0;
     const sale: Sale = {
       id: editingSale?.id || uid(),
       documentType: "nota_venta",
@@ -147,7 +150,10 @@ export function useSaleIssueFlow({
       total: totals.total,
       paymentMethod: resolvedPaymentMethod,
       payments: resolvedPayments,
-      ...creditFields,
+      paymentCondition,
+      creditDueDate: paymentCondition === "credito" ? creditDueDate.trim() : undefined,
+      creditBalance: internalSaleCreditBalance,
+      creditStatus: internalSaleCreditBalance > 0 ? "pendiente" : "pagado",
       additionalInfo,
       status: "TICKET_OFFLINE",
       autoInvoiceOnSync: Boolean(options?.offlineFallback),

@@ -6,6 +6,7 @@ import { isTicketOffline } from "./invoiceStatus";
 import { isInvoiceSale } from "./sales";
 import { roundMoney } from "./numbers";
 import { documentScopeId } from "./documents";
+import { salePaymentTotal } from "./salePayments";
 
 export type CreditClientSummary = {
   clientId: string;
@@ -19,7 +20,8 @@ export type CreditClientSummary = {
 
 export function creditBalance(sale: Sale) {
   if (sale.paymentCondition !== "credito") return 0;
-  return Math.max(0, roundMoney(Number.isFinite(Number(sale.creditBalance)) ? Number(sale.creditBalance) : sale.total));
+  const storedBalance = sale.creditBalance;
+  return Math.max(0, roundMoney(storedBalance !== undefined && Number.isFinite(Number(storedBalance)) ? Number(storedBalance) : sale.total));
 }
 
 export function reconcileCreditBalancesFromPayments(data: AppData): AppData {
@@ -32,7 +34,10 @@ export function reconcileCreditBalancesFromPayments(data: AppData): AppData {
   const sales = (data.sales || []).map((sale) => {
     if (sale.paymentCondition !== "credito") return sale;
     const paidAmount = paidBySale.get(sale.id) || 0;
-    const nextBalance = Math.max(0, roundMoney(Number(sale.total || 0) - paidAmount));
+    const originalCreditBalance = Array.isArray(sale.payments)
+      ? Math.max(0, roundMoney(Number(sale.total || 0) - salePaymentTotal(sale.payments)))
+      : Math.max(0, roundMoney(Number(sale.total || 0)));
+    const nextBalance = Math.max(0, roundMoney(originalCreditBalance - paidAmount));
     return {
       ...sale,
       creditBalance: nextBalance,
