@@ -462,7 +462,8 @@ const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "") =
     sales: patch.sales?.length || 0,
     products: patch.products?.length || 0,
     inventoryMovements: patch.inventoryMovements?.length || 0,
-    auditLogs: patch.auditLogs?.length || 0
+    auditLogs: patch.auditLogs?.length || 0,
+    creditAdjustments: patch.creditAdjustments?.length || 0
   });
   return summary;
 });

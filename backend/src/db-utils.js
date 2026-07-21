@@ -11,6 +11,11 @@ function validateSnapshot(data) {
     throwBadSnapshot("Respaldo invalido: falta configuracion del emisor.");
   }
 
+  validateInitialPayments(data.sales);
+  validateCreditPayments(data.creditPayments);
+  validateCreditAdjustments(data.creditAdjustments);
+  assertNoCreditOverpayments(data);
+
   assertNoDuplicateValues(data.clients, "identification", "cliente", normalizeClientIdentification);
   assertNoDuplicateValues(data.products, "code", "producto", normalizeProductCode);
   assertNoDuplicateValues(data.users, "email", "usuario", normalizeUserEmail);
@@ -65,6 +70,7 @@ function summarizeSnapshot(data) {
     establishments: data.issuer?.establishments?.length || 0,
     documentScopes: scopeCounts,
     creditPayments: data.creditPayments?.length || 0,
+    creditAdjustments: data.creditAdjustments?.length || 0,
     receivedRetentions: data.receivedRetentions?.length || 0,
     inventoryMovements: data.inventoryMovements?.length || 0,
     auditLogs: data.auditLogs?.length || 0,
@@ -86,14 +92,22 @@ function compactSnapshotForStorage(data, options = {}) {
   const cashClosingDays = Math.max(30, Number(options.cashClosingDays || process.env.SNAPSHOT_RECENT_CASH_CLOSING_DAYS || 730));
   const cashClosingLimit = Math.max(100, Number(options.cashClosingLimit || process.env.SNAPSHOT_RECENT_CASH_CLOSING_LIMIT || 800));
 
+  const referencedDocumentIds = new Set();
+  for (const adjustment of Array.isArray(data.creditAdjustments) ? data.creditAdjustments : []) {
+    if (adjustment?.sourceSaleId) referencedDocumentIds.add(adjustment.sourceSaleId);
+    if (adjustment?.sourceCreditNoteId) referencedDocumentIds.add(adjustment.sourceCreditNoteId);
+  }
+  const keepReferencedOrOperationalSale = (sale) => isOperationalDocument(sale) || referencedDocumentIds.has(sale?.id);
+
   return {
     ...data,
-    sales: compactDocuments(data.sales || [], salesDays, salesLimit, now, isOperationalDocument),
+    sales: compactDocuments(data.sales || [], salesDays, salesLimit, now, keepReferencedOrOperationalSale),
     guides: compactDocuments(data.guides || [], guideDays, guideLimit, now, isOperationalDocument),
     inventoryMovements: newestItems(data.inventoryMovements || [], movementLimit),
     auditLogs: newestItems(data.auditLogs || [], auditLimit),
     cashClosings: compactDocuments(data.cashClosings || [], cashClosingDays, cashClosingLimit, now),
     creditPayments: compactDocuments(data.creditPayments || [], cashClosingDays, cashClosingLimit, now),
+    creditAdjustments: data.creditAdjustments || [],
     historyPolicy: {
       mode: "compact-local-snapshot",
       salesDays,
@@ -156,6 +170,9 @@ function applySnapshotPatch(currentData, patch = {}) {
   }
 
   const data = JSON.parse(JSON.stringify(source));
+  validateCreditAdjustments(patch.creditAdjustments);
+  validateCreditPayments(patch.creditPayments);
+  validateInitialPayments(patch.sales);
   data.deletedIds = mergeDeletedIds(data.deletedIds, patch.deletedIds, patch.deletions);
   if (patch.issuer && typeof patch.issuer === "object") {
     const sameSequenceScope = sameIssuerSequenceScope(data.issuer, patch.issuer);
@@ -190,15 +207,7 @@ function applySnapshotPatch(currentData, patch = {}) {
     };
   }
 
-  if (Array.isArray(patch.creditPayments) && patch.creditPayments.length > 0) {
-    assertNoCreditOverpayments({
-      ...data,
-      sales: mergeById(data.sales || [], patch.sales || []),
-      creditPayments: mergeById(data.creditPayments || [], patch.creditPayments || [])
-    });
-  }
-
-  for (const field of ["users", "sales", "guides", "receivedRetentions", "cashClosings", "creditPayments"]) {
+  for (const field of ["users", "sales", "guides", "receivedRetentions", "cashClosings", "creditPayments", "creditAdjustments"]) {
     data[field] = mergeById(data[field] || [], patch[field] || []);
   }
   data.clients = mergeByLatestUpdatedAt(data.clients || [], patch.clients || []);
@@ -209,6 +218,11 @@ function applySnapshotPatch(currentData, patch = {}) {
 
   data.inventoryMovements = prependUniqueById(data.inventoryMovements || [], patch.inventoryMovements || []);
   data.auditLogs = prependUniqueById(data.auditLogs || [], patch.auditLogs || []);
+
+  validateInitialPayments(data.sales);
+  validateCreditPayments(data.creditPayments);
+  validateCreditAdjustments(data.creditAdjustments);
+  validateIncomingCreditAdjustmentReferences(data, patch.creditAdjustments);
 
   return normalizeDocumentScopes(data);
 }
@@ -273,21 +287,43 @@ function normalizeDocumentScopes(data) {
   };
 
   applyDeletedIdFilters(normalized);
-  return reconcileCreditBalancesFromPayments(normalized);
+  validateInitialPayments(normalized.sales);
+  validateCreditPayments(normalized.creditPayments);
+  validateCreditAdjustments(normalized.creditAdjustments);
+  const reconciled = reconcileCreditBalancesFromPayments(normalized);
+  assertNoCreditOverpayments(reconciled);
+  return reconciled;
 }
 
 function reconcileCreditBalancesFromPayments(data) {
   if (!data || typeof data !== "object") return data;
+  validateInitialPayments(data.sales);
+  validateCreditPayments(data.creditPayments);
+  validateCreditAdjustments(data.creditAdjustments);
   const paidBySale = new Map();
   for (const payment of Array.isArray(data.creditPayments) ? data.creditPayments : []) {
     if (!payment?.saleId || payment.voidedAt) continue;
     paidBySale.set(payment.saleId, roundMoney((paidBySale.get(payment.saleId) || 0) + Number(payment.amount || 0)));
   }
 
+  const adjustmentsBySale = new Map();
+  for (const adjustment of Array.isArray(data.creditAdjustments) ? data.creditAdjustments : []) {
+    if (!adjustment?.sourceSaleId || adjustment.state !== "APPLIED") continue;
+    adjustmentsBySale.set(
+      adjustment.sourceSaleId,
+      roundMoney((adjustmentsBySale.get(adjustment.sourceSaleId) || 0) + Number(adjustment.amount || 0))
+    );
+  }
+
   const sales = (Array.isArray(data.sales) ? data.sales : []).map((sale) => {
     if (sale?.paymentCondition !== "credito") return sale;
+    const initialPayments = Array.isArray(sale.payments)
+      ? sale.payments.reduce((sum, payment) => sum + Number(payment?.amount || 0), 0)
+      : 0;
+    const originalCredit = Math.max(0, roundMoney(Number(sale.total || 0) - initialPayments));
     const paidAmount = paidBySale.get(sale.id) || 0;
-    const nextBalance = Math.max(0, roundMoney(Number(sale.total || 0) - paidAmount));
+    const adjustmentAmount = adjustmentsBySale.get(sale.id) || 0;
+    const nextBalance = Math.max(0, roundMoney(originalCredit - paidAmount - adjustmentAmount));
     return {
       ...sale,
       creditBalance: nextBalance,
@@ -307,12 +343,113 @@ function assertNoCreditOverpayments(data) {
 
   for (const sale of Array.isArray(data.sales) ? data.sales : []) {
     if (sale?.paymentCondition !== "credito") continue;
-    const total = roundMoney(Number(sale.total || 0));
+    const initialPayments = Array.isArray(sale.payments)
+      ? sale.payments.reduce((sum, payment) => sum + Number(payment?.amount || 0), 0)
+      : 0;
+    const originalCredit = Math.max(0, roundMoney(Number(sale.total || 0) - initialPayments));
     const paid = paidBySale.get(sale.id) || 0;
-    if (paid > total + 0.009) {
+    if (paid > originalCredit + 0.009) {
       throwBadSnapshot(`El abono supera el saldo real de ${sale.sequence || "la factura"}. Sincronice datos antes de cobrar nuevamente.`);
     }
   }
+}
+
+function validateCreditAdjustments(adjustments) {
+  if (adjustments === undefined) return;
+  if (!Array.isArray(adjustments)) {
+    throwBadSnapshot("Respaldo invalido: creditAdjustments debe ser una lista.");
+  }
+  const seenIds = new Set();
+  for (const adjustment of adjustments) {
+    if (!adjustment || typeof adjustment !== "object" || Array.isArray(adjustment)) {
+      throwBadSnapshot("Ajuste de cartera invalido: cada elemento debe ser un objeto.");
+    }
+    if (!isNonEmptyString(adjustment.id) || !isNonEmptyString(adjustment.operationId)
+      || !isNonEmptyString(adjustment.sourceCreditNoteId) || !isNonEmptyString(adjustment.sourceSaleId)
+      || !isNonEmptyString(adjustment.clientId) || !isNonEmptyString(adjustment.userId)) {
+      throwBadSnapshot("Ajuste de cartera invalido: faltan identificadores obligatorios.");
+    }
+    if (seenIds.has(adjustment.id)) {
+      throwBadSnapshot(`Ajuste de cartera duplicado: ${adjustment.id}.`);
+    }
+    seenIds.add(adjustment.id);
+    if (adjustment.type !== "CREDIT_NOTE" || !["UNKNOWN", "APPLIED", "REVERSED"].includes(adjustment.state)) {
+      throwBadSnapshot("Ajuste de cartera invalido: tipo o estado no reconocido.");
+    }
+    if (typeof adjustment.amount !== "number" || !Number.isFinite(adjustment.amount) || adjustment.amount <= 0) {
+      throwBadSnapshot("Ajuste de cartera invalido: el importe debe ser mayor que cero.");
+    }
+  }
+}
+
+function validateCreditPayments(payments) {
+  if (payments === undefined) return;
+  if (!Array.isArray(payments)) {
+    throwBadSnapshot("Respaldo invalido: creditPayments debe ser una lista.");
+  }
+  for (const payment of payments) {
+    if (!payment || typeof payment !== "object" || Array.isArray(payment)) {
+      throwBadSnapshot("Abono invalido: cada elemento debe ser un objeto.");
+    }
+    if (!isNonEmptyString(payment.id) || !isNonEmptyString(payment.saleId)
+      || !isNonEmptyString(payment.clientId) || !isNonEmptyString(payment.userId)
+      || !isNonEmptyString(payment.userName) || !isNonEmptyString(payment.paymentMethod)
+      || !isNonEmptyString(payment.createdAt)) {
+      throwBadSnapshot("Abono invalido: faltan campos obligatorios.");
+    }
+    if (typeof payment.amount !== "number" || !Number.isFinite(payment.amount) || payment.amount <= 0) {
+      throwBadSnapshot("Abono invalido: el importe debe ser numerico, finito y mayor que cero.");
+    }
+  }
+}
+
+function validateInitialPayments(sales) {
+  if (sales === undefined) return;
+  if (!Array.isArray(sales)) {
+    throwBadSnapshot("Respaldo invalido: sales debe ser una lista.");
+  }
+  for (const sale of sales) {
+    if (sale?.payments === undefined) continue;
+    if (!Array.isArray(sale.payments)) {
+      throwBadSnapshot(`Pago inicial invalido en ${sale?.sequence || sale?.id || "la venta"}: payments debe ser una lista.`);
+    }
+    for (const payment of sale.payments) {
+      if (!payment || typeof payment !== "object" || Array.isArray(payment)) {
+        throwBadSnapshot(`Pago inicial invalido en ${sale?.sequence || sale?.id || "la venta"}: cada elemento debe ser un objeto.`);
+      }
+      if (!isNonEmptyString(payment.id) || !isNonEmptyString(payment.paymentMethod)) {
+        throwBadSnapshot(`Pago inicial invalido en ${sale?.sequence || sale?.id || "la venta"}: faltan campos obligatorios.`);
+      }
+      if (typeof payment.amount !== "number" || !Number.isFinite(payment.amount) || payment.amount <= 0) {
+        throwBadSnapshot(`Pago inicial invalido en ${sale?.sequence || sale?.id || "la venta"}: el importe debe ser numerico, finito y mayor que cero.`);
+      }
+    }
+  }
+}
+
+function validateIncomingCreditAdjustmentReferences(data, incomingAdjustments) {
+  if (incomingAdjustments === undefined) return;
+  const salesById = new Map((data.sales || []).filter((sale) => sale?.id).map((sale) => [sale.id, sale]));
+  for (const adjustment of incomingAdjustments) {
+    const sourceSale = salesById.get(adjustment.sourceSaleId);
+    if (!sourceSale || sourceSale.paymentCondition !== "credito") {
+      throwBadSnapshot(`Ajuste de cartera invalido: no existe la venta a credito ${adjustment.sourceSaleId}.`);
+    }
+    const creditNote = salesById.get(adjustment.sourceCreditNoteId);
+    if (!creditNote || creditNote.documentType !== "nota_credito") {
+      throwBadSnapshot(`Ajuste de cartera invalido: no existe la nota de credito ${adjustment.sourceCreditNoteId}.`);
+    }
+    if (creditNote.sourceSaleId !== sourceSale.id || adjustment.clientId !== sourceSale.clientId) {
+      throwBadSnapshot("Ajuste de cartera invalido: la nota de credito no pertenece a la venta indicada.");
+    }
+    if (adjustment.state === "APPLIED" && creditNote.status !== "AUTORIZADA") {
+      throwBadSnapshot("Ajuste de cartera invalido: la nota de credito aplicada no esta autorizada.");
+    }
+  }
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function normalizeScopedItems(items, issuer) {

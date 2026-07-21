@@ -676,7 +676,7 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
     }
 
     const patch = req.body || {};
-    const hasChanges = ["sales", "products", "inventoryMovements", "auditLogs", "guides", "cashClosings", "creditPayments", "clients", "users", "receivedRetentions"].some((field) => Array.isArray(patch[field]) && patch[field].length > 0);
+    const hasChanges = ["sales", "products", "inventoryMovements", "auditLogs", "guides", "cashClosings", "creditPayments", "creditAdjustments", "clients", "users", "receivedRetentions"].some((field) => Array.isArray(patch[field]) && patch[field].length > 0);
     const hasDeletions = Object.values(patch.deletions || {}).some((ids) => Array.isArray(ids) && ids.length > 0);
     if (!hasChanges && !hasDeletions && !patch.issuer && !patch.license) {
       res.status(400).json({ error: "Debe enviar al menos un cambio incremental." });
@@ -690,6 +690,7 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
       sales: patch.sales?.length || 0,
       guides: patch.guides?.length || 0,
       creditPayments: patch.creditPayments?.length || 0,
+      creditAdjustments: patch.creditAdjustments?.length || 0,
       receivedRetentions: patch.receivedRetentions?.length || 0,
       cashClosings: patch.cashClosings?.length || 0,
       summary: result.summary || null
