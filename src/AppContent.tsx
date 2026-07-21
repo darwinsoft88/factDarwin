@@ -2,7 +2,9 @@ import { StatusBar as ExpoStatusBar } from "expo-status-bar";
 import React, { useEffect, useRef, useState } from "react";
 import {
   AppState,
+  Linking,
   Platform,
+  Pressable,
   SafeAreaView,
   StyleSheet,
   StatusBar as NativeStatusBar,
@@ -12,6 +14,7 @@ import { AppAuthGate } from "./components/AppAuthGate";
 import { AppGlobalModals } from "./components/AppGlobalModals";
 import { AppMainShell } from "./components/AppMainShell";
 import { initialData } from "./database";
+import { SUPPORT_WHATSAPP_NUMBER } from "./constants/branding";
 import { useAppBootstrap } from "./hooks/useAppBootstrap";
 import { useAppRuntimeRefs } from "./hooks/useAppRuntimeRefs";
 import { useAppShellState } from "./hooks/useAppShellState";
@@ -73,7 +76,7 @@ export function AppContent() {
     setOnboardingVisible
   });
 
-  const ready = useAppBootstrap({
+  const { ready, recoveryError, retryBootstrap, retrying, status: bootstrapStatus } = useAppBootstrap({
     backendTokenRef,
     dataRef,
     sessionRef,
@@ -84,6 +87,15 @@ export function AppContent() {
     setPasswordChangeVisible: authState.setPasswordChangeVisible,
     setSession
   });
+
+  const contactRecoverySupport = () => {
+    const phone = SUPPORT_WHATSAPP_NUMBER.replace(/\D/g, "");
+    if (!phone) return;
+    const message = recoveryError
+      ? `Necesito soporte para recuperar los datos locales de FactuDarwin. Codigo: ${recoveryError.code}. Etapa: ${recoveryError.stage}. Intento: ${recoveryError.attemptedAt}.`
+      : "Necesito soporte para recuperar los datos locales de FactuDarwin.";
+    void Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`);
+  };
 
   useEffect(() => {
     if (!ready || !session) return undefined;
@@ -186,6 +198,21 @@ export function AppContent() {
     return () => clearTimeout(timer);
   }, [data.license, ready, session]);
 
+  if (bootstrapStatus === "recovery-error") {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.title}>No se pudieron cargar los datos locales</Text>
+        <Text style={styles.recoveryDescription}>Tus datos originales fueron conservados. No continues facturando hasta recuperarlos.</Text>
+        <Pressable style={[styles.recoveryPrimaryButton, retrying && styles.recoveryButtonDisabled]} onPress={() => { void retryBootstrap(); }} disabled={retrying}>
+          <Text style={styles.recoveryPrimaryText}>{retrying ? "Reintentando..." : "Reintentar"}</Text>
+        </Pressable>
+        <Pressable style={styles.recoverySecondaryButton} onPress={contactRecoverySupport} disabled={retrying}>
+          <Text style={styles.recoverySecondaryText}>Contactar soporte</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
+
   if (!ready) {
     return (
       <SafeAreaView style={styles.center}>
@@ -284,5 +311,43 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "800",
     color: "#1f2937"
+  },
+  recoveryDescription: {
+    color: "#475569",
+    fontSize: 14,
+    lineHeight: 21,
+    maxWidth: 360,
+    paddingHorizontal: 24,
+    textAlign: "center"
+  },
+  recoveryPrimaryButton: {
+    alignItems: "center",
+    backgroundColor: "#0b6f68",
+    borderRadius: 8,
+    marginTop: 18,
+    minWidth: 220,
+    paddingHorizontal: 18,
+    paddingVertical: 12
+  },
+  recoveryButtonDisabled: {
+    opacity: 0.55
+  },
+  recoveryPrimaryText: {
+    color: "#ffffff",
+    fontWeight: "900"
+  },
+  recoverySecondaryButton: {
+    alignItems: "center",
+    borderColor: "#0b6f68",
+    borderRadius: 8,
+    borderWidth: 1,
+    marginTop: 10,
+    minWidth: 220,
+    paddingHorizontal: 18,
+    paddingVertical: 12
+  },
+  recoverySecondaryText: {
+    color: "#0b6f68",
+    fontWeight: "900"
   }
 });

@@ -1,9 +1,19 @@
-import React, { useEffect, useState } from "react";
-import { clearSession, initialData, loadData, loadSession, saveSession } from "../database";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Alert } from "react-native";
+import { clearSession, isStorageRecoveryError, loadData, loadSession, saveSession } from "../database";
 import { AppData, User } from "../types";
 import { isSessionTokenExpired } from "../utils/sessionToken";
 
 type StatusMessage = { tone: "info" | "error" | "success"; message: string } | null;
+type BootstrapStatus = "loading" | "ready" | "recovery-error";
+
+export type BootstrapRecoveryInfo = {
+  code: "STORAGE_RECOVERY_REQUIRED" | "BOOTSTRAP_FAILED";
+  stage: "read" | "parse" | "normalize" | "bootstrap";
+  snapshotExists: boolean | "unknown";
+  approximateSize: number | null;
+  attemptedAt: string;
+};
 
 type UseAppBootstrapParams = {
   backendTokenRef: React.MutableRefObject<string>;
@@ -28,25 +38,50 @@ export function useAppBootstrap({
   setPasswordChangeVisible,
   setSession
 }: UseAppBootstrapParams) {
-  const [ready, setReady] = useState(false);
+  const [status, setStatus] = useState<BootstrapStatus>("loading");
+  const [recoveryError, setRecoveryError] = useState<BootstrapRecoveryInfo | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const mountedRef = useRef(false);
+  const bootstrapRunningRef = useRef(false);
+  const bootstrapRunIdRef = useRef(0);
 
-  useEffect(() => {
-    const bootstrap = async () => {
-      try {
-        const [storedData, storedSession] = await Promise.all([loadData(), loadSession()]);
-        setData(storedData);
-        dataRef.current = storedData;
-        if (storedSession?.user) {
-          const storedToken = storedSession.token || "";
-          if (!storedToken || isSessionTokenExpired(storedToken)) {
-            if (storedToken) {
-              await saveSession(storedSession.user, "", storedSession.passwordHash || "", storedSession.companyRuc || storedData.issuer.ruc);
-            } else {
-              await clearSession();
-            }
-            setEmail(storedSession.user.email);
-            return;
+  const clearRuntimeSession = useCallback(() => {
+    setSession(null);
+    sessionRef.current = null;
+    setBackendToken("");
+    backendTokenRef.current = "";
+  }, [backendTokenRef, sessionRef, setBackendToken, setSession]);
+
+  const runBootstrap = useCallback(async (isRetry = false) => {
+    if (!mountedRef.current || bootstrapRunningRef.current) return;
+    bootstrapRunningRef.current = true;
+    const runId = ++bootstrapRunIdRef.current;
+    const isCurrentRun = () => mountedRef.current && runId === bootstrapRunIdRef.current;
+    if (isRetry) {
+      setRetrying(true);
+    } else {
+      setStatus("loading");
+    }
+    clearRuntimeSession();
+
+    try {
+      const storedData = await loadData();
+      if (!isCurrentRun()) return;
+      const storedSession = await loadSession();
+      if (!isCurrentRun()) return;
+      setData(storedData);
+      dataRef.current = storedData;
+      if (storedSession?.user) {
+        const storedToken = storedSession.token || "";
+        if (!storedToken || isSessionTokenExpired(storedToken)) {
+          if (storedToken) {
+            await saveSession(storedSession.user, "", storedSession.passwordHash || "", storedSession.companyRuc || storedData.issuer.ruc);
+          } else {
+            await clearSession();
           }
+          if (!isCurrentRun()) return;
+          setEmail(storedSession.user.email);
+        } else {
           setSession(storedSession.user);
           sessionRef.current = storedSession.user;
           if (storedSession.user.mustChangePassword) {
@@ -60,16 +95,69 @@ export function useAppBootstrap({
             void saveSession(storedSession.user, storedToken, storedSession.passwordHash || "", storedData.issuer.ruc);
           }
         }
-      } catch {
-        setData(initialData);
-        dataRef.current = initialData;
-      } finally {
-        setReady(true);
       }
+      setRecoveryError(null);
+      setStatus("ready");
+    } catch (error) {
+      if (!isCurrentRun()) return;
+      clearRuntimeSession();
+      setPasswordChangeVisible(false);
+      if (isStorageRecoveryError(error)) {
+        setRecoveryError({
+          code: error.code,
+          stage: error.stage,
+          snapshotExists: error.snapshotExists,
+          approximateSize: error.approximateSize,
+          attemptedAt: error.attemptedAt
+        });
+        setPasswordChangeStatus({
+          tone: "error",
+          message: "No se pudo cargar la informacion local. Los datos originales se conservaron. No continue facturando y contacte a soporte para recuperarlos."
+        });
+        if (!isRetry) {
+          Alert.alert(
+            "Datos locales protegidos",
+            "No se pudo cargar la informacion guardada. La app conservo el almacenamiento original y bloqueo la sesion para evitar trabajar sobre datos demo. Contacte a soporte."
+          );
+        }
+      } else {
+        setRecoveryError({
+          code: "BOOTSTRAP_FAILED",
+          stage: "bootstrap",
+          snapshotExists: "unknown",
+          approximateSize: null,
+          attemptedAt: new Date().toISOString()
+        });
+        setPasswordChangeStatus({ tone: "error", message: "No se pudo iniciar la aplicacion. Cierre la app e intente nuevamente." });
+        if (!isRetry) Alert.alert("No se pudo iniciar", "Ocurrio un error inesperado al cargar la aplicacion. Cierre la app e intente nuevamente.");
+      }
+      setStatus("recovery-error");
+    } finally {
+      if (runId === bootstrapRunIdRef.current) {
+        bootstrapRunningRef.current = false;
+        if (mountedRef.current) setRetrying(false);
+      }
+    }
+  }, [backendTokenRef, clearRuntimeSession, dataRef, sessionRef, setBackendToken, setData, setEmail, setPasswordChangeStatus, setPasswordChangeVisible, setSession]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    void runBootstrap();
+
+    return () => {
+      mountedRef.current = false;
+      bootstrapRunIdRef.current += 1;
+      bootstrapRunningRef.current = false;
     };
+  }, [runBootstrap]);
 
-    void bootstrap();
-  }, [backendTokenRef, dataRef, sessionRef, setBackendToken, setData, setEmail, setPasswordChangeStatus, setPasswordChangeVisible, setSession]);
+  const retryBootstrap = useCallback(() => runBootstrap(true), [runBootstrap]);
 
-  return ready;
+  return {
+    ready: status === "ready",
+    recoveryError,
+    retryBootstrap,
+    retrying,
+    status
+  };
 }

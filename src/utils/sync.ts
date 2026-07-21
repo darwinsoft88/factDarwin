@@ -1,4 +1,5 @@
 import { mergeBackendData } from "../services/backend";
+import { updateStoredData } from "../database/storage";
 import { AppData } from "../types";
 import { showMessage } from "./dialogs";
 import { appendPendingSync, buildPendingSyncItem } from "./pendingSync";
@@ -13,7 +14,7 @@ export async function syncPatchToBackend(backendUrl: string, backendToken: strin
   } catch (error) {
     const message = userFriendlyActionError(error, "sync");
     if (localData && persist) {
-      await enqueuePendingSync(localData, persist, patch, pendingTitle, message);
+      await enqueuePendingSync(patch, pendingTitle, message);
     }
     showMessage(pendingTitle, message);
     return false;
@@ -28,6 +29,7 @@ export async function syncPatchToBackendStrict(backendUrl: string, backendToken:
   await mergeBackendData(backendUrl, patch, backendToken);
 }
 
-async function enqueuePendingSync(localData: AppData, persist: (data: AppData) => Promise<void>, patch: IncrementalPatch, title: string, errorMessage: string) {
-  await persist(appendPendingSync(localData, buildPendingSyncItem(patch, title, errorMessage)));
+async function enqueuePendingSync(patch: IncrementalPatch, title: string, errorMessage: string) {
+  const pendingItem = buildPendingSyncItem(patch, title, errorMessage);
+  await updateStoredData((current) => appendPendingSync(current, pendingItem));
 }

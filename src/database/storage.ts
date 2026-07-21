@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppData, PendingSyncItem, User } from "../types";
+import { sortPendingSyncFifo } from "../utils/pendingSync";
 import { sanitizeAppData } from "../validation";
 
 // Clave de almacenamiento para AsyncStorage. Cambiar si se necesita mantener varias versiones o entornos.
@@ -37,15 +38,90 @@ const STORAGE_COMPACT_LIMITS = {
   normal: { auditLogs: 500 },
   aggressive: { auditLogs: 150 }
 } as const;
-const PENDING_OUTBOX_LIMITS = {
-  normalMaxItems: 80,
-  emergencyMaxItems: 30,
-  minimumItems: 10,
-  targetChars: 1_500_000,
-  emergencyChars: 650_000
-} as const;
-
 type StorageCompactMode = keyof typeof STORAGE_COMPACT_LIMITS;
+
+export type StorageRecoveryStage = "read" | "parse" | "normalize";
+
+export class StorageRecoveryError extends Error {
+  readonly code = "STORAGE_RECOVERY_REQUIRED" as const;
+  readonly stage: StorageRecoveryStage;
+  readonly snapshotExists: boolean | "unknown";
+  readonly approximateSize: number | null;
+  readonly attemptedAt: string;
+
+  constructor(stage: StorageRecoveryStage, options: { snapshotExists: boolean | "unknown"; approximateSize?: number | null; cause?: unknown }) {
+    super("No se pudo cargar la informacion local. El almacenamiento original fue preservado para recuperacion.");
+    this.name = "StorageRecoveryError";
+    this.stage = stage;
+    this.snapshotExists = options.snapshotExists;
+    this.approximateSize = options.approximateSize ?? null;
+    this.attemptedAt = new Date().toISOString();
+    if (options.cause !== undefined) {
+      Object.defineProperty(this, "cause", { value: options.cause, enumerable: false });
+    }
+  }
+}
+
+export function isStorageRecoveryError(error: unknown): error is StorageRecoveryError {
+  return error instanceof StorageRecoveryError || (
+    Boolean(error) &&
+    typeof error === "object" &&
+    (error as { code?: unknown }).code === "STORAGE_RECOVERY_REQUIRED"
+  );
+}
+
+export type PendingOutboxRecoveryStage = "read" | "parse" | "validate";
+
+export class PendingOutboxRecoveryError extends Error {
+  readonly code = "PENDING_OUTBOX_RECOVERY_REQUIRED" as const;
+  readonly stage: PendingOutboxRecoveryStage;
+  readonly outboxExists: boolean | "unknown";
+  readonly approximateSize: number | null;
+  readonly attemptedAt: string;
+
+  constructor(stage: PendingOutboxRecoveryStage, options: { outboxExists: boolean | "unknown"; approximateSize?: number | null; cause?: unknown }) {
+    super("No se pudo cargar la cola local de sincronizacion. El contenido original fue preservado para recuperacion.");
+    this.name = "PendingOutboxRecoveryError";
+    this.stage = stage;
+    this.outboxExists = options.outboxExists;
+    this.approximateSize = options.approximateSize ?? null;
+    this.attemptedAt = new Date().toISOString();
+    if (options.cause !== undefined) {
+      Object.defineProperty(this, "cause", { value: options.cause, enumerable: false });
+    }
+  }
+}
+
+export class PendingOutboxWriteError extends Error {
+  readonly code = "PENDING_OUTBOX_WRITE_FAILED" as const;
+  readonly attemptedAt: string;
+
+  constructor(cause?: unknown) {
+    super("No se pudo guardar completa la cola local de sincronizacion. La version anterior fue conservada.");
+    this.name = "PendingOutboxWriteError";
+    this.attemptedAt = new Date().toISOString();
+    if (cause !== undefined) {
+      Object.defineProperty(this, "cause", { value: cause, enumerable: false });
+    }
+  }
+}
+
+function assertStoredSnapshotShape(value: unknown): asserts value is AppData {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("Stored snapshot root must be an object.");
+  }
+
+  const snapshot = value as Record<string, unknown>;
+  if (snapshot.issuer !== undefined && (!snapshot.issuer || typeof snapshot.issuer !== "object" || Array.isArray(snapshot.issuer))) {
+    throw new TypeError("Stored snapshot issuer must be an object.");
+  }
+
+  PENDING_PATCH_COLLECTIONS.forEach((key) => {
+    if (snapshot[key] !== undefined && !Array.isArray(snapshot[key])) {
+      throw new TypeError(`Stored snapshot ${key} must be an array.`);
+    }
+  });
+}
 
 function isStorageQuotaError(error: unknown) {
   const detail = error as { code?: unknown; message?: unknown; name?: unknown } | null;
@@ -82,14 +158,6 @@ function compactPendingItemsForStorage(pendingSync: PendingSyncItem[]) {
 
 function serializePendingOutbox(items: PendingSyncItem[]) {
   return JSON.stringify(items);
-}
-
-function compactPendingOutbox(pendingSync: PendingSyncItem[], maxItems: number, maxChars: number) {
-  let compacted = pendingSync.slice(0, maxItems).map(compactPendingItemForStorage);
-  while (compacted.length > PENDING_OUTBOX_LIMITS.minimumItems && serializePendingOutbox(compacted).length > maxChars) {
-    compacted = compacted.slice(0, -1);
-  }
-  return compacted;
 }
 
 function compactDataForStorage(data: AppData, mode: StorageCompactMode) {
@@ -229,24 +297,49 @@ export const initialData: AppData = {
   }
 };
 
+let lastStoredData: AppData | null = null;
+let storedDataRevision = 0;
+let storedDataQueue: Promise<void> = Promise.resolve();
+
+function cloneAppData(data: AppData): AppData {
+  if (typeof structuredClone === "function") {
+    return structuredClone(data);
+  }
+
+  return JSON.parse(JSON.stringify(data)) as AppData;
+}
+
+function publishLoadedData(data: AppData, readRevision: number) {
+  const isolated = cloneAppData(data);
+  if (storedDataRevision === readRevision) lastStoredData = cloneAppData(isolated);
+  return isolated;
+}
+
 export async function loadData() {
+  const readRevision = storedDataRevision;
   let raw: string | null = null;
   let parsed: AppData;
 
   try {
     raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      const pendingSync = await loadPendingOutbox();
-      return pendingSync.length ? buildPendingRecoverySnapshot(initialData, pendingSync) : initialData;
-    }
-    parsed = JSON.parse(raw) as AppData;
-  } catch {
-    if (raw) await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch (error) {
+    throw new StorageRecoveryError("read", { snapshotExists: "unknown", cause: error });
+  }
+
+  if (!raw) {
     const pendingSync = await loadPendingOutbox();
-    return pendingSync.length ? buildPendingRecoverySnapshot(initialData, pendingSync) : initialData;
+    const loaded = pendingSync.length ? buildPendingRecoverySnapshot(initialData, pendingSync) : initialData;
+    return publishLoadedData(loaded, readRevision);
   }
 
   try {
+    parsed = JSON.parse(raw) as AppData;
+  } catch (error) {
+    throw new StorageRecoveryError("parse", { snapshotExists: true, approximateSize: raw.length, cause: error });
+  }
+
+  try {
+    assertStoredSnapshotShape(parsed);
     const pendingOutbox = await loadPendingOutbox();
     const pendingSync = mergePendingSync(parsed.pendingSync || [], pendingOutbox);
     const normalized = {
@@ -275,27 +368,60 @@ export async function loadData() {
         establishmentsUpdatedAt: parsed.issuer?.establishmentsUpdatedAt || ""
       }
     };
-    return sanitizeAppData(materializePendingPatches(normalized, pendingSync));
-  } catch {
-    await AsyncStorage.removeItem(STORAGE_KEY);
-    const pendingSync = await loadPendingOutbox();
-    return pendingSync.length ? buildPendingRecoverySnapshot(initialData, pendingSync) : initialData;
+    return publishLoadedData(sanitizeAppData(materializePendingPatches(normalized, pendingSync)), readRevision);
+  } catch (error) {
+    if (error instanceof PendingOutboxRecoveryError) throw error;
+    throw new StorageRecoveryError("normalize", { snapshotExists: true, approximateSize: raw.length, cause: error });
   }
 }
 
-export async function saveData(data: AppData) {
-  const storageReadyData = data.pendingSync?.length
-    ? { ...data, pendingSync: compactPendingItemsForStorage(data.pendingSync) }
-    : data;
-  const sanitized = sanitizeAppData(storageReadyData);
-  await savePendingOutbox(sanitized.pendingSync || []);
-  await saveMainSnapshotWithQuotaRecovery(sanitized);
+export type AppDataMutation = (current: AppData) => AppData | Promise<AppData>;
+
+function enqueueStoredDataOperation<T>(operation: () => Promise<T>): Promise<T> {
+  const currentOperation = storedDataQueue.then(operation, operation);
+  storedDataQueue = currentOperation.then(() => undefined, () => undefined);
+  return currentOperation;
 }
 
-async function saveMainSnapshotWithQuotaRecovery(data: AppData) {
+async function prepareAppData(data: AppData) {
+  const isolated = cloneAppData(data);
+  const storageReadyData = isolated.pendingSync?.length
+    ? { ...isolated, pendingSync: compactPendingItemsForStorage(sortPendingSyncFifo(isolated.pendingSync)) }
+    : isolated;
+  return sanitizeAppData(storageReadyData);
+}
+
+async function persistPreparedData(data: AppData): Promise<AppData> {
+  await savePendingOutbox(data.pendingSync || []);
+  const persisted = await saveMainSnapshotWithQuotaRecovery(data);
+  storedDataRevision += 1;
+  lastStoredData = cloneAppData(persisted);
+  return persisted;
+}
+
+// Full intentional replacement. Normal state changes must use updateStoredData().
+export async function saveData(data: AppData) {
+  return enqueueStoredDataOperation(async () => persistPreparedData(await prepareAppData(data)));
+}
+
+/**
+ * Serializes read-modify-write mutations against the latest durable AppData.
+ * The mutation runs exactly once and must not persist data or perform side effects.
+ */
+export async function updateStoredData(mutation: AppDataMutation): Promise<AppData> {
+  return enqueueStoredDataOperation(async () => {
+    if (!lastStoredData) await loadData();
+    if (!lastStoredData) throw new Error("No se pudo inicializar el estado local persistido.");
+    const current = cloneAppData(lastStoredData);
+    const next = await mutation(current);
+    return persistPreparedData(await prepareAppData(next));
+  });
+}
+
+async function saveMainSnapshotWithQuotaRecovery(data: AppData): Promise<AppData> {
   try {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    return;
+    return data;
   } catch (error) {
     if (!isStorageQuotaError(error)) throw error;
   }
@@ -303,28 +429,45 @@ async function saveMainSnapshotWithQuotaRecovery(data: AppData) {
   const compacted = compactDataForStorage(data, "normal");
   try {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(compacted));
-    return;
+    return compacted;
   } catch (error) {
     if (!isStorageQuotaError(error)) throw error;
   }
 
   const aggressive = compactDataForStorage(data, "aggressive");
   await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(aggressive));
+  return aggressive;
 }
 
 async function loadPendingOutbox(): Promise<PendingSyncItem[]> {
+  let raw: string | null = null;
   try {
-    const raw = await AsyncStorage.getItem(PENDING_OUTBOX_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as PendingSyncItem[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((item) => Boolean(item?.id && item.createdAt && item.title))
-      .slice(0, 100)
-      .map(compactPendingItemForStorage);
-  } catch {
-    await AsyncStorage.removeItem(PENDING_OUTBOX_KEY);
-    return [];
+    raw = await AsyncStorage.getItem(PENDING_OUTBOX_KEY);
+  } catch (error) {
+    throw new PendingOutboxRecoveryError("read", { outboxExists: "unknown", cause: error });
+  }
+  if (!raw) return [];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new PendingOutboxRecoveryError("parse", { outboxExists: true, approximateSize: raw.length, cause: error });
+  }
+
+  try {
+    if (!Array.isArray(parsed)) throw new TypeError("Pending outbox must be an array.");
+    const validated = parsed.map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) throw new TypeError("Pending outbox item must be an object.");
+      const pending = item as PendingSyncItem;
+      if (!pending.id || !pending.createdAt || !pending.title || !Number.isFinite(Number(pending.attempts))) {
+        throw new TypeError("Pending outbox item is invalid.");
+      }
+      return compactPendingItemForStorage(pending);
+    });
+    return sortPendingSyncFifo(validated);
+  } catch (error) {
+    throw new PendingOutboxRecoveryError("validate", { outboxExists: true, approximateSize: raw.length, cause: error });
   }
 }
 
@@ -334,31 +477,11 @@ async function savePendingOutbox(pendingSync: PendingSyncItem[]) {
     return;
   }
 
-  const normal = compactPendingOutbox(pendingSync, PENDING_OUTBOX_LIMITS.normalMaxItems, PENDING_OUTBOX_LIMITS.targetChars);
   try {
-    await AsyncStorage.setItem(PENDING_OUTBOX_KEY, serializePendingOutbox(normal));
-    return;
+    const completeQueue = compactPendingItemsForStorage(sortPendingSyncFifo(pendingSync));
+    await AsyncStorage.setItem(PENDING_OUTBOX_KEY, serializePendingOutbox(completeQueue));
   } catch (error) {
-    if (!isStorageQuotaError(error)) throw error;
-  }
-
-  const emergency = compactPendingOutbox(pendingSync, PENDING_OUTBOX_LIMITS.emergencyMaxItems, PENDING_OUTBOX_LIMITS.emergencyChars);
-  try {
-    await AsyncStorage.setItem(PENDING_OUTBOX_KEY, serializePendingOutbox(emergency));
-    return;
-  } catch (error) {
-    if (!isStorageQuotaError(error)) throw error;
-  }
-
-  const minimum = compactPendingOutbox(
-    pendingSync,
-    PENDING_OUTBOX_LIMITS.minimumItems,
-    Math.floor(PENDING_OUTBOX_LIMITS.emergencyChars / 2)
-  );
-  try {
-    await AsyncStorage.setItem(PENDING_OUTBOX_KEY, serializePendingOutbox(minimum));
-  } catch (error) {
-    if (!isStorageQuotaError(error)) throw error;
+    throw new PendingOutboxWriteError(error);
   }
 }
 
@@ -367,9 +490,7 @@ function mergePendingSync(primary: PendingSyncItem[], secondary: PendingSyncItem
   [...secondary, ...primary].forEach((item) => {
     if (item?.id) byId.set(item.id, item);
   });
-  return Array.from(byId.values())
-    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
-    .slice(0, 100);
+  return sortPendingSyncFifo(Array.from(byId.values()));
 }
 
 function buildPendingRecoverySnapshot(baseData: AppData, pendingSync: PendingSyncItem[]) {
@@ -385,10 +506,7 @@ function materializePendingPatches(snapshot: AppData, pendingSync: PendingSyncIt
   if (!pendingSync.length) return snapshot;
   const next: AppData = { ...snapshot };
 
-  pendingSync
-    .slice()
-    .reverse()
-    .forEach((item) => {
+  sortPendingSyncFifo(pendingSync).forEach((item) => {
       const patch = (item.patch || {}) as Partial<AppData>;
       if (patch.issuer) next.issuer = { ...next.issuer, ...patch.issuer };
       PENDING_PATCH_COLLECTIONS.forEach((key) => {
@@ -396,7 +514,7 @@ function materializePendingPatches(snapshot: AppData, pendingSync: PendingSyncIt
         if (!Array.isArray(patchItems) || patchItems.length === 0) return;
         (next as Record<string, unknown>)[key] = mergeCollectionById((next as Record<string, unknown>)[key] as Array<{ id?: string }> || [], patchItems as Array<{ id?: string }>);
       });
-    });
+  });
 
   return next;
 }

@@ -10,13 +10,14 @@ import {
 import { backupAppData, checkBackendHealth, loginBackend, mergeBackendData, restoreAppData } from "../services/backend";
 import { hashPassword } from "../services/security";
 import { loadSession, saveData, saveSession } from "../database";
+import { updateStoredData } from "../database/storage";
 import { AppData, PendingSyncItem, User } from "../types";
 import { autoRetrySriDocuments } from "../utils/autoRetrySriDocuments";
 import { autoInvoiceOfflineTickets } from "../utils/autoInvoiceTickets";
 import { mergeAppDataSnapshots } from "../utils/dataMerge";
 import { showMessage } from "../utils/dialogs";
 import { shortText } from "../utils/format";
-import { applyPendingSyncResult, clearPendingSyncItems, markPendingSyncAttempt } from "../utils/pendingSync";
+import { applyPendingSyncResult, clearPendingSyncItems, markPendingSyncAttempt, sortPendingSyncFifo } from "../utils/pendingSync";
 import { isSessionTokenExpired } from "../utils/sessionToken";
 import { sriPendingSendSummary } from "../utils/sriRetryPolicy";
 import {
@@ -132,7 +133,7 @@ export function useSyncAndBackup({
   }, [dataRef, setData, setSyncState]);
 
   const flushPendingSyncQueue = useCallback(async (backendUrl: string, token: string, snapshot: AppData) => {
-    const pending = snapshot.pendingSync || [];
+    const pending = sortPendingSyncFifo(snapshot.pendingSync || []);
     if (pending.length === 0) return snapshot;
 
     const remaining: PendingSyncItem[] = [];
@@ -145,13 +146,23 @@ export function useSyncAndBackup({
       }
     }
 
-    const updated = applyPendingSyncResult(snapshot, remaining);
-    setData((current) => {
-      const merged = { ...current, pendingSync: remaining, autoBackupLastError: updated.autoBackupLastError };
-      dataRef.current = merged;
-      void saveData(merged);
-      return merged;
-    });
+    const batchIds = new Set(pending.map((item) => item.id));
+    const failedById = new Map(remaining.map((item) => [item.id, item]));
+    const applyBatchResult = (current: AppData) => {
+      const nextPending = (current.pendingSync || []).flatMap((item) => {
+        if (!batchIds.has(item.id)) return [item];
+        const failed = failedById.get(item.id);
+        return failed ? [failed] : [];
+      });
+      for (const failed of remaining) {
+        if (!nextPending.some((item) => item.id === failed.id)) nextPending.push(failed);
+      }
+      return applyPendingSyncResult(current, sortPendingSyncFifo(nextPending));
+    };
+
+    const updated = await updateStoredData(applyBatchResult);
+    dataRef.current = updated;
+    setData(updated);
     return updated;
   }, [dataRef, setData]);
 
@@ -184,29 +195,29 @@ export function useSyncAndBackup({
         uploadSnapshot = fullBackupSnapshot;
       }
       const backupResult = await backupAppData(fullBackupSnapshot.backendUrl, uploadSnapshot, token);
-      const updated = { ...fullBackupSnapshot, autoBackupLastAt: backupResult.updatedAt || new Date().toISOString(), autoBackupLastError: "" };
-      setData((current) => {
+      const backupUpdatedAt = backupResult.updatedAt || new Date().toISOString();
+      const persisted = await updateStoredData((current) => {
         const merged = mergeAppDataSnapshots(uploadSnapshot, current);
         if (pendingCoveredByFullBackup.length) {
           const withClearedPending = clearPendingSyncItems(merged, pendingCoveredByFullBackup);
           merged.pendingSync = withClearedPending.pendingSync;
           merged.autoBackupLastError = withClearedPending.autoBackupLastError;
         }
-        merged.autoBackupLastAt = updated.autoBackupLastAt;
+        merged.autoBackupLastAt = backupUpdatedAt;
         if (!merged.pendingSync?.length) merged.autoBackupLastError = "";
-        dataRef.current = merged;
-        void saveData(merged);
         return merged;
       });
+      dataRef.current = persisted;
+      setData(persisted);
       setSyncState("synced");
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo ejecutar el respaldo automatico.";
-      const updated = { ...snapshot, autoBackupLastError: shortText(message, 180) };
-      setData((current) => {
-        const merged = { ...current, autoBackupLastError: updated.autoBackupLastError };
-        void saveData(merged);
-        return merged;
-      });
+      const persisted = await updateStoredData((current) => ({
+        ...current,
+        autoBackupLastError: shortText(message, 180)
+      }));
+      dataRef.current = persisted;
+      setData(persisted);
       setSyncState("error");
     } finally {
       autoBackupRunningRef.current = false;
@@ -235,19 +246,16 @@ export function useSyncAndBackup({
   }, [runAutoBackup]);
 
   const applyRemoteSnapshot = useCallback(async (snapshot: { data: AppData; updatedAt: string }, options?: { notify?: boolean }) => {
-    const current = dataRef.current;
-    const mergedSnapshot = mergeAppDataSnapshots(snapshot.data, current);
-    const restored = sanitizeAppData({
-      ...mergedSnapshot,
+    const restored = await updateStoredData((current) => sanitizeAppData({
+      ...mergeAppDataSnapshots(snapshot.data, current),
       backendUrl: current.backendUrl,
       autoBackupEnabled: current.autoBackupEnabled,
       autoBackupLastAt: snapshot.updatedAt,
       autoBackupLastError: ""
-    });
-    setData(restored);
+    }));
     dataRef.current = restored;
+    setData(restored);
     setSyncState("synced");
-    await saveData(restored);
     if (options?.notify) {
       showMessage("Datos actualizados", `Se cargaron cambios del servidor (${formatAuditDate(snapshot.updatedAt)}).`);
     }
@@ -282,12 +290,12 @@ export function useSyncAndBackup({
       await applyRemoteSnapshot({ data: snapshot.data, updatedAt: snapshot.updatedAt }, { notify: reason === "manual" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo actualizar desde el servidor.";
-      setData((latest) => {
-        const merged = { ...latest, autoBackupLastError: shortText(`Actualizacion servidor: ${message}`, 180) };
-        dataRef.current = merged;
-        void saveData(merged);
-        return merged;
-      });
+      const persisted = await updateStoredData((current) => ({
+        ...current,
+        autoBackupLastError: shortText(`Actualizacion servidor: ${message}`, 180)
+      }));
+      dataRef.current = persisted;
+      setData(persisted);
       setSyncState("error");
     } finally {
       remoteRefreshRunningRef.current = false;
@@ -297,10 +305,13 @@ export function useSyncAndBackup({
   const runManualSync = useCallback(async () => {
     setAppMenuVisible(false);
     if (dataRef.current.autoBackupEnabled === false || !dataRef.current.backendUrl) {
-      const enabled = sanitizeAppData({ ...dataRef.current, autoBackupEnabled: true, autoBackupLastError: "" });
-      setData(enabled);
+      const enabled = await updateStoredData((current) => sanitizeAppData({
+        ...current,
+        autoBackupEnabled: true,
+        autoBackupLastError: ""
+      }));
       dataRef.current = enabled;
-      await saveData(enabled);
+      setData(enabled);
     }
     await flushAutoBackup();
     const current = dataRef.current;
@@ -472,12 +483,18 @@ export function useSyncAndBackup({
 
   useEffect(() => {
     if (!shouldAutoEnableBackup({ data, hasSession: Boolean(session), ready })) return;
-    const enabled = sanitizeAppData({ ...data, autoBackupEnabled: true, autoBackupLastError: "" });
-    setData(enabled);
-    dataRef.current = enabled;
     setSyncState("pending");
-    void saveData(enabled);
-    scheduleAutoBackupRef.current(enabled);
+    void updateStoredData((current) => sanitizeAppData({
+      ...current,
+      autoBackupEnabled: true,
+      autoBackupLastError: ""
+    })).then((enabled) => {
+      dataRef.current = enabled;
+      setData(enabled);
+      scheduleAutoBackupRef.current(enabled);
+    }).catch(() => {
+      setSyncState("error");
+    });
   }, [data, dataRef, ready, session, setData, setSyncState]);
 
   useEffect(() => {
