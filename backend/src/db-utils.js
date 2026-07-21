@@ -1,3 +1,62 @@
+const crypto = require("node:crypto");
+
+const MAX_SYNC_REQUEST_ID_LENGTH = 200;
+
+function normalizeSyncRequestId(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  if (!normalized || normalized.length > MAX_SYNC_REQUEST_ID_LENGTH) return null;
+  return normalized;
+}
+
+function resolveSyncRequestId(headerValue, bodyValue, bodyPresent = false) {
+  const headerPresent = headerValue !== undefined;
+  const headerRequestId = headerPresent ? normalizeSyncRequestId(headerValue) : null;
+  const bodyRequestId = bodyPresent ? normalizeSyncRequestId(bodyValue) : null;
+  if ((headerPresent && !headerRequestId) || (bodyPresent && !bodyRequestId)) {
+    const error = new Error(`requestId debe ser texto no vacio de hasta ${MAX_SYNC_REQUEST_ID_LENGTH} caracteres.`);
+    error.statusCode = 400;
+    error.code = "SYNC_REQUEST_ID_INVALID";
+    throw error;
+  }
+  if (headerRequestId && bodyRequestId && headerRequestId !== bodyRequestId) {
+    const error = new Error("Idempotency-Key y requestId no coinciden.");
+    error.statusCode = 400;
+    error.code = "SYNC_REQUEST_ID_CONFLICT";
+    throw error;
+  }
+  return headerRequestId || bodyRequestId || null;
+}
+
+function stripSyncTransportFields(patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return patch;
+  const semanticPatch = { ...patch };
+  delete semanticPatch.requestId;
+  return semanticPatch;
+}
+
+function canonicalizeSyncPayload(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeSyncPayload);
+  if (!value || typeof value !== "object") return value;
+  return Object.keys(value).sort().reduce((result, key) => {
+    result[key] = canonicalizeSyncPayload(value[key]);
+    return result;
+  }, {});
+}
+
+function hashSyncPayload(patch) {
+  const canonical = canonicalizeSyncPayload(stripSyncTransportFields(patch));
+  return crypto.createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+function createSyncOperationMismatchError(requestId) {
+  const error = new Error("El requestId ya fue utilizado con un payload diferente.");
+  error.statusCode = 409;
+  error.code = "SYNC_OPERATION_MISMATCH";
+  error.requestId = requestId;
+  return error;
+}
+
 function validateSnapshot(data) {
   if (!data || typeof data !== "object") {
     throwBadSnapshot("Debe enviar data como objeto.");
@@ -593,15 +652,21 @@ function applyDeletions(data, deletions) {
 }
 
 module.exports = {
+  MAX_SYNC_REQUEST_ID_LENGTH,
   applySnapshotPatch,
+  createSyncOperationMismatchError,
   compactSnapshotForStorage,
+  hashSyncPayload,
   normalizeClientIdentification,
   normalizeDocumentScopes,
   normalizeProductCode,
   reconcileCreditBalancesFromPayments,
   normalizeTenantKey,
   normalizeUserEmail,
+  normalizeSyncRequestId,
+  resolveSyncRequestId,
   scopeFromDocument,
   summarizeSnapshot,
+  stripSyncTransportFields,
   validateSnapshot
 };

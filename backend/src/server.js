@@ -15,6 +15,7 @@ const { createAccessKey, nextSequence } = require("./sri/access-key");
 const { authorizeInvoice, signInvoice } = require("./sri/invoices");
 const { getTenantAssetStatus, getTenantLogo, saveTenantCertificate, saveTenantLogo } = require("./tenant-assets");
 const { cleanupTechnicalLogs, errorLogger, listTechnicalLogs, logTechnical, requestLogger } = require("./technical-logs");
+const { hashSyncPayload, resolveSyncRequestId, stripSyncTransportFields } = require("./db-utils");
 
 const app = express();
 const sriAuthorizationLocks = new Map();
@@ -675,7 +676,10 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
       return;
     }
 
-    const patch = req.body || {};
+    const rawPatch = req.body || {};
+    const bodyPresent = Object.prototype.hasOwnProperty.call(rawPatch, "requestId");
+    const requestId = resolveSyncRequestId(req.get("Idempotency-Key"), rawPatch.requestId, bodyPresent);
+    const patch = stripSyncTransportFields(rawPatch);
     const hasChanges = ["sales", "products", "inventoryMovements", "auditLogs", "guides", "cashClosings", "creditPayments", "creditAdjustments", "clients", "users", "receivedRetentions"].some((field) => Array.isArray(patch[field]) && patch[field].length > 0);
     const hasDeletions = Object.values(patch.deletions || {}).some((ids) => Array.isArray(ids) && ids.length > 0);
     if (!hasChanges && !hasDeletions && !patch.issuer && !patch.license) {
@@ -683,7 +687,12 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
       return;
     }
 
-    const result = await mergeSnapshotPatch(patch, req.user?.companyId);
+    const result = await mergeSnapshotPatch(patch, req.user?.companyId, requestId ? {
+      requestId,
+      payloadHash: hashSyncPayload(patch),
+      operationType: "SYNC_MERGE",
+      operationId: null
+    } : null);
     logTechnical("info", "sync_merge_applied", {
       companyId: req.user?.companyId || "",
       userId: req.user?.id || "",
@@ -693,10 +702,19 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
       creditAdjustments: patch.creditAdjustments?.length || 0,
       receivedRetentions: patch.receivedRetentions?.length || 0,
       cashClosings: patch.cashClosings?.length || 0,
+      legacySync: !requestId,
       summary: result.summary || null
     });
     res.json(result);
   } catch (error) {
+    if (error?.code === "SYNC_REQUEST_ID_INVALID" || error?.code === "SYNC_REQUEST_ID_CONFLICT") {
+      res.status(400).json({ error: error.message, code: error.code });
+      return;
+    }
+    if (error?.code === "SYNC_OPERATION_MISMATCH") {
+      res.status(409).json({ error: error.message, code: error.code, requestId: error.requestId });
+      return;
+    }
     next(error);
   }
 });

@@ -3,6 +3,7 @@ const config = require("./config");
 const {
   applySnapshotPatch,
   compactSnapshotForStorage,
+  createSyncOperationMismatchError,
   normalizeClientIdentification,
   normalizeDocumentScopes,
   normalizeProductCode,
@@ -345,6 +346,17 @@ async function ensureSchema() {
         ON saas_devices(user_id, last_seen_at DESC);
       CREATE INDEX IF NOT EXISTS idx_saas_snapshot_history_company_created_at
         ON saas_snapshot_history(company_id, created_at DESC);
+      CREATE TABLE IF NOT EXISTS sync_operations (
+        company_id TEXT NOT NULL DEFAULT '',
+        request_id TEXT NOT NULL,
+        operation_type TEXT NOT NULL,
+        operation_id TEXT,
+        payload_hash TEXT NOT NULL,
+        result_json JSONB,
+        http_status INTEGER,
+        processed_at TIMESTAMPTZ NOT NULL,
+        PRIMARY KEY (company_id, request_id)
+      );
     `).then(() => {
       reconcileSaasUsersFromSnapshots().catch((error) => {
         console.error("No se pudo reconciliar usuarios SaaS al iniciar:", error.message);
@@ -552,13 +564,33 @@ async function restoreTenantSnapshot(companyId = "", backup = {}, options = {}) 
   }
 }
 
-async function mergeSnapshotPatch(patch, companyId = "") {
+async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
   await ensureSchema();
 
   const client = await pool.connect();
   const updatedAt = new Date().toISOString();
   try {
     await client.query("BEGIN");
+    if (syncOperation) {
+      const claimed = await client.query(
+        `INSERT INTO sync_operations (company_id, request_id, operation_type, operation_id, payload_hash, processed_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (company_id, request_id) DO NOTHING RETURNING request_id`,
+        [companyId, syncOperation.requestId, syncOperation.operationType, syncOperation.operationId, syncOperation.payloadHash, updatedAt]
+      );
+      if (claimed.rowCount === 0) {
+        const existing = await client.query(
+          `SELECT payload_hash AS "payloadHash", result_json AS "resultJson"
+           FROM sync_operations WHERE company_id = $1 AND request_id = $2`,
+          [companyId, syncOperation.requestId]
+        );
+        if (existing.rows[0]?.payloadHash !== syncOperation.payloadHash) {
+          throw createSyncOperationMismatchError(syncOperation.requestId);
+        }
+        await client.query("COMMIT");
+        return existing.rows[0].resultJson;
+      }
+    }
     const locked = companyId
       ? await client.query("SELECT data FROM saas_snapshots WHERE company_id = $1 FOR UPDATE", [companyId])
       : await client.query("SELECT data FROM app_snapshots WHERE id = 1 FOR UPDATE");
@@ -598,8 +630,16 @@ async function mergeSnapshotPatch(patch, companyId = "") {
       auditLogs: patch.auditLogs?.length || 0,
       creditAdjustments: patch.creditAdjustments?.length || 0
     });
+    const result = { ok: true, updatedAt, summary };
+    if (syncOperation) {
+      await client.query(
+        `UPDATE sync_operations SET result_json = $1::jsonb, http_status = 200, processed_at = $2
+         WHERE company_id = $3 AND request_id = $4`,
+        [JSON.stringify(result), updatedAt, companyId, syncOperation.requestId]
+      );
+    }
     await client.query("COMMIT");
-    return { ok: true, updatedAt, summary };
+    return result;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

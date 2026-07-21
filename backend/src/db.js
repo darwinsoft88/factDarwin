@@ -1,5 +1,5 @@
 const config = require("./config");
-const { applySnapshotPatch, compactSnapshotForStorage, normalizeDocumentScopes, scopeFromDocument } = require("./db-utils");
+const { applySnapshotPatch, compactSnapshotForStorage, createSyncOperationMismatchError, normalizeDocumentScopes, scopeFromDocument } = require("./db-utils");
 
 if (config.databaseUrl) {
   module.exports = require("./db-postgres");
@@ -252,6 +252,18 @@ db.exec(`
     data TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS sync_operations (
+    company_id TEXT NOT NULL DEFAULT '',
+    request_id TEXT NOT NULL,
+    operation_type TEXT NOT NULL,
+    operation_id TEXT,
+    payload_hash TEXT NOT NULL,
+    result_json TEXT,
+    http_status INTEGER,
+    processed_at TEXT NOT NULL,
+    PRIMARY KEY (company_id, request_id)
+  );
 `);
 
 ensureColumn("sales", "company_id", "TEXT NOT NULL DEFAULT ''");
@@ -422,7 +434,17 @@ const saveTenantSnapshotTx = db.transaction((companyId, data, updatedAt) => {
   return { ok: true, updatedAt, summary: { ...summary, historyCount: after, prunedHistory: Math.max(0, before - after) } };
 });
 
-const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "") => {
+const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "", syncOperation = null) => {
+  if (syncOperation) {
+    const existing = db.prepare("SELECT payload_hash AS payloadHash, result_json AS resultJson FROM sync_operations WHERE company_id = @companyId AND request_id = @requestId")
+      .get({ companyId, requestId: syncOperation.requestId });
+    if (existing) {
+      if (existing.payloadHash !== syncOperation.payloadHash) throw createSyncOperationMismatchError(syncOperation.requestId);
+      return { replayResult: JSON.parse(String(existing.resultJson)) };
+    }
+  }
+
+  let summary;
   if (companyId) {
     const row = db.prepare("SELECT data FROM saas_snapshots WHERE company_id = @companyId").get({ companyId });
     const currentData = row?.data ? JSON.parse(String(row.data)) : null;
@@ -439,7 +461,8 @@ const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "") =
     syncNormalizedTables(data, updatedAt, companyId);
     const summary = summarizeSnapshot(data);
     insertBackendAudit("TENANT_INCREMENTAL_MERGE", { companyId, ...summary });
-    return summary;
+    if (syncOperation) return completeSyncOperation(syncOperation, companyId, updatedAt, summary);
+    return { summary };
   }
 
   const row = db.prepare("SELECT data FROM app_snapshots WHERE id = 1").get();
@@ -456,7 +479,7 @@ const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "") =
   db.prepare("INSERT INTO app_snapshot_history (data, created_at) VALUES (@data, @createdAt)")
     .run({ data: JSON.stringify(storedData), createdAt: updatedAt });
   syncNormalizedTables(data, updatedAt);
-  const summary = summarizeSnapshot(data);
+  summary = summarizeSnapshot(data);
   insertBackendAudit("APP_INCREMENTAL_MERGE", {
     ...summary,
     sales: patch.sales?.length || 0,
@@ -465,13 +488,23 @@ const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "") =
     auditLogs: patch.auditLogs?.length || 0,
     creditAdjustments: patch.creditAdjustments?.length || 0
   });
-  return summary;
+  if (syncOperation) return completeSyncOperation(syncOperation, companyId, updatedAt, summary);
+  return { summary };
 });
 
-async function mergeSnapshotPatch(patch, companyId = "") {
+function completeSyncOperation(syncOperation, companyId, updatedAt, summary) {
+  const result = { ok: true, updatedAt, summary };
+  db.prepare(`INSERT INTO sync_operations
+    (company_id, request_id, operation_type, operation_id, payload_hash, result_json, http_status, processed_at)
+    VALUES (@companyId, @requestId, @operationType, @operationId, @payloadHash, @resultJson, 200, @processedAt)`)
+    .run({ companyId, ...syncOperation, resultJson: JSON.stringify(result), processedAt: updatedAt });
+  return { replayResult: result };
+}
+
+async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
   const updatedAt = new Date().toISOString();
-  const summary = mergeSnapshotPatchTx(patch, updatedAt, companyId);
-  return { ok: true, updatedAt, summary };
+  const outcome = mergeSnapshotPatchTx(patch, updatedAt, companyId, syncOperation);
+  return outcome.replayResult || { ok: true, updatedAt, summary: outcome.summary };
 }
 
 async function addAudit(event, payload) {
