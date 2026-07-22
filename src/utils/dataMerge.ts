@@ -13,6 +13,7 @@ export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): 
     issuer: {
       ...remoteData.issuer,
       ...localData.issuer,
+      environment: localData.issuer.environment,
       establishments: mergeIssuerEstablishments(remoteData.issuer, localData.issuer),
       establishmentsUpdatedAt: newerTimestamp(remoteData.issuer?.establishmentsUpdatedAt, localData.issuer?.establishmentsUpdatedAt),
       sequential: mergeIssuerSequence(remoteData.issuer?.sequential, localData.issuer?.sequential, sameSequenceScope),

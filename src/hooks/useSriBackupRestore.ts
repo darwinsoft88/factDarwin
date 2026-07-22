@@ -105,7 +105,15 @@ export function useSriBackupRestore({
         return;
       }
       const restoreSummary = snapshot.summary || summarizeAppData(snapshot.data);
-      const restoredData = sanitizeAppData({ ...snapshot.data, backendUrl, autoBackupEnabled });
+      const restoredData = sanitizeAppData({
+        ...snapshot.data,
+        backendUrl,
+        autoBackupEnabled,
+        issuer: {
+          ...snapshot.data.issuer,
+          environment: data.issuer.environment
+        }
+      });
 
       await persist(appendAudit(restoredData, user, "BACKUP_RESTORED", "backup", undefined, `Base restaurada desde ${snapshot.updatedAt}`));
       setIssuer(restoredData.issuer);
