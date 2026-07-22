@@ -1,26 +1,64 @@
 import React from "react";
 import { Alert } from "react-native";
+import type { PersistMutation } from "./useSyncAndBackup";
 import { authorizeInvoice } from "../services/backend";
 import { buildCreditNoteXml, buildInvoiceXml } from "../sri";
-import { AdditionalInfoField, AppData, Client, DocumentType, InventoryMovement, PaymentCondition, PaymentMethod, Sale, SaleItem, SalePaymentSplit, User } from "../types";
+import { AdditionalInfoField, AppData, Client, DocumentType, PaymentCondition, PaymentMethod, Sale, SaleItem, SalePaymentSplit, User } from "../types";
 import { appendAudit } from "../utils/audit";
 import { expireStaleSriPendingDocuments } from "../utils/autoRetrySriDocuments";
 import { getRetryInfo, MAX_DAILY_RETRIES, resolveInvoiceStatus } from "../utils/documents";
 import { confirmAction, getLocalVoidReason, showMessage } from "../utils/dialogs";
 import { issuerForSale } from "../utils/establishments";
-import { generateId } from "../utils/id";
-import { isSriRejected, isTicketOffline } from "../utils/invoiceStatus";
-import { canEditSale, documentTypeLabel, isCreditNoteSale, isInvoiceSale, saleNeedsStockDiscount, saleStatusReducesStock } from "../utils/sales";
+import { reverseSaleInventoryOnce, SaleInventoryError } from "../utils/inventory";
+import { isTicketOffline } from "../utils/invoiceStatus";
+import { canEditSale, documentTypeLabel, isCreditNoteSale, isInvoiceSale, resolveSaleInventoryState } from "../utils/sales";
 import { explainSriResult, sriUserMessage } from "../utils/sriMessages";
-import { isStaleSriPendingDocument, staleSriPendingMessage } from "../utils/sriRetryPolicy";
-import { isInventoryProduct } from "../utils/catalogItems";
+import { isDocumentCorrectionIssue, isStaleSriPendingDocument, isTransientSriIssue, staleSriPendingMessage } from "../utils/sriRetryPolicy";
 
-const uid = generateId;
+const definitiveFailureStatuses = new Set<Sale["status"]>(["DEVUELTA", "ERROR_SRI", "ANULADA"]);
+
+function retryFingerprint(sale: Sale): string {
+  return JSON.stringify({
+    accessKey: sale.accessKey,
+    clientId: sale.clientId,
+    documentType: sale.documentType,
+    inventoryOperationId: sale.inventoryOperationId,
+    inventoryState: sale.inventoryState,
+    items: sale.items,
+    retryHistory: sale.retryHistory,
+    sequence: sale.sequence,
+    sourceSaleId: sale.sourceSaleId,
+    status: sale.status
+  });
+}
+
+function isDefinitiveFailure(sale: Sale): boolean {
+  if (!definitiveFailureStatuses.has(sale.status)) return false;
+  if (sale.status !== "ERROR_SRI") return true;
+  const message = sale.sriMessage || "";
+  return !isTransientSriIssue(message) || isDocumentCorrectionIssue(message);
+}
+
+function inventoryConsistencyError(sale: Sale): SaleInventoryError {
+  const state = resolveSaleInventoryState(sale);
+  return new SaleInventoryError(
+    state === "UNKNOWN"
+      ? "SALE_INVENTORY_LEGACY_RECONCILIATION_REQUIRED"
+      : "SALE_INVENTORY_OPERATION_MISMATCH",
+    sale.id,
+    sale.inventoryOperationId || sale.id,
+    "APPLY"
+  );
+}
+
+function isClosedSale(sale: Sale) {
+  return sale.status === "AUTORIZADA" || sale.status === "ANULADA" || sale.status === "CONVERTIDA";
+}
 
 type UseSaleDocumentWorkflowActionsParams = {
   backendToken: string;
   data: AppData;
-  persist: (data: AppData) => Promise<void>;
+  persistMutation: PersistMutation;
   user: User;
   setClientId: React.Dispatch<React.SetStateAction<string>>;
   setDocumentType: React.Dispatch<React.SetStateAction<DocumentType>>;
@@ -42,7 +80,7 @@ type UseSaleDocumentWorkflowActionsParams = {
 export function useSaleDocumentWorkflowActions({
   backendToken,
   data,
-  persist,
+  persistMutation,
   setClientId,
   setDocumentType,
   setEditingSaleId,
@@ -72,16 +110,25 @@ export function useSaleDocumentWorkflowActions({
       Alert.alert("Documento interno", "Este documento no se envia al SRI.");
       return;
     }
-    if (sale.status === "ANULADA") {
-      Alert.alert("Documento anulado", "Este documento ya fue anulado localmente y no se puede reintentar.");
+    if (isClosedSale(sale)) {
+      Alert.alert("Documento cerrado", "Este documento ya no se puede reintentar.");
       return;
     }
     if (isStaleSriPendingDocument(sale)) {
       const message = staleSriPendingMessage(sale);
-      const expiredResult = expireStaleSriPendingDocuments(data, user);
-      await persist(expiredResult.data);
-      setNotice(message);
-      Alert.alert("Fuera del dia permitido", `${message}\n\nPor norma operativa, emita un nuevo comprobante con fecha actual.`);
+      let expired = 0;
+      let failed = 0;
+      await persistMutation((current) => {
+        const result = expireStaleSriPendingDocuments(current, user);
+        expired = result.expired;
+        failed = result.failed;
+        return result.data;
+      });
+      const finalMessage = failed > 0 && expired === 0
+        ? "El inventario de este documento requiere reconciliacion antes de anularlo."
+        : message;
+      setNotice(finalMessage);
+      Alert.alert(failed > 0 && expired === 0 ? "Reconciliacion requerida" : "Fuera del dia permitido", failed > 0 && expired === 0 ? finalMessage : `${message}\n\nPor norma operativa, emita un nuevo comprobante con fecha actual.`);
       return;
     }
     const retryInfo = getRetryInfo(sale);
@@ -91,106 +138,108 @@ export function useSaleDocumentWorkflowActions({
       Alert.alert("Limite diario de reintentos", message);
       return;
     }
-    setRetryingSaleId(sale.id);
-    setProcessingMessage(`Reintentando ${documentTypeLabel(sale).toLowerCase()}...`);
+    const saleId = sale.id;
+    const clientId = client.id;
+    const requestFingerprint = retryFingerprint(sale);
+    const sourceSale = sale.sourceSaleId ? data.sales.find((item) => item.id === sale.sourceSaleId) : undefined;
+    const ticketDerived = isInvoiceSale(sale) && sourceSale?.documentType === "nota_venta";
+    if (isInvoiceSale(sale)) {
+      const inventoryState = resolveSaleInventoryState(sale);
+      const sourceInventoryState = sourceSale ? resolveSaleInventoryState(sourceSale) : undefined;
+      if (
+        (ticketDerived && (inventoryState !== "NOT_APPLIED" || sourceInventoryState !== "APPLIED")) ||
+        (!ticketDerived && inventoryState !== "APPLIED")
+      ) {
+        Alert.alert("Reconciliacion requerida", "El inventario del documento no es consistente para reintentar la emision.");
+        return;
+      }
+    }
     const saleIssuer = issuerForSale(data.issuer, sale);
     const unsignedXml = isCreditNoteSale(sale) ? buildCreditNoteXml(sale, client, saleIssuer) : buildInvoiceXml(sale, client, saleIssuer);
     const retryAt = new Date().toISOString();
+    setRetryingSaleId(saleId);
+    setProcessingMessage(`Reintentando ${documentTypeLabel(sale).toLowerCase()}...`);
 
+    let sriResult: Awaited<ReturnType<typeof authorizeInvoice>>;
     try {
-      const sriResult = await authorizeInvoice(data.backendUrl, unsignedXml, backendToken);
-      const updatedSale: Sale = {
-        ...sale,
-        accessKey: sriResult.accessKey || sale.accessKey,
-        authorizationNumber: sriResult.authorizationNumber,
-        authorizationDate: sriResult.authorizationDate,
-        sriEnvironment: sriResult.sriEnvironment,
-        sriMessage: sriResult.sriMessage,
-        signedXml: sriResult.signedXml,
-        authorizedXml: sriResult.authorizedXml,
-        status: resolveInvoiceStatus(sriResult),
-        retryHistory: [...(sale.retryHistory || []), retryAt]
-      };
-      const stockMovements: InventoryMovement[] = [];
-      const sourceSale = sale.sourceSaleId ? data.sales.find((item) => item.id === sale.sourceSaleId) : undefined;
-      const sourceTicketAlreadyDiscountedStock = sourceSale?.documentType === "nota_venta" && isTicketOffline(sourceSale.status);
-      const shouldDiscountStock = isInvoiceSale(sale) && !sourceTicketAlreadyDiscountedStock && saleNeedsStockDiscount(sale.status) && !isSriRejected(updatedSale.status) && updatedSale.status !== "ANULADA";
-      const shouldRestoreCreditStock = isCreditNoteSale(sale) && sale.status !== "AUTORIZADA" && updatedSale.status === "AUTORIZADA";
-      const stockSourceSale = shouldRestoreCreditStock ? data.sales.find((item) => item.id === sale.sourceSaleId) : undefined;
-      const nextProducts = shouldDiscountStock
-        ? data.products.map((product) => {
-            if (!isInventoryProduct(product)) return product;
-            const soldQuantity = sale.items.filter((item) => isInventoryProduct(item) && item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
-            if (soldQuantity <= 0) return product;
-            const stockAfter = product.stock - soldQuantity;
-            stockMovements.push({
-              id: uid(),
-              productId: product.id,
-              productName: product.name,
-              type: "salida",
-              quantity: soldQuantity,
-              stockBefore: product.stock,
-              stockAfter,
-              reason: "Reenvio autorizado",
-              reference: sale.sequence,
-              userId: user.id,
-              createdAt: retryAt
-            });
-            return { ...product, stock: stockAfter, updatedAt: retryAt };
-          })
-        : shouldRestoreCreditStock
-          ? data.products.map((product) => {
-              if (!isInventoryProduct(product)) return product;
-              const returnedQuantity = sale.items.filter((item) => isInventoryProduct(item) && item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
-              if (returnedQuantity <= 0) return product;
-              const stockAfter = product.stock + returnedQuantity;
-              stockMovements.push({
-                id: uid(),
-                productId: product.id,
-                productName: product.name,
-                type: "entrada",
-                quantity: returnedQuantity,
-                stockBefore: product.stock,
-                stockAfter,
-                reason: `Reenvio nota de credito ${sale.sequence}`,
-                reference: stockSourceSale?.sequence || sale.sequence,
-                userId: user.id,
-                createdAt: retryAt
-              });
-              return { ...product, stock: stockAfter, updatedAt: retryAt };
-            })
-          : data.products;
-
-      const convertedAt = new Date().toISOString();
-      await persist(appendAudit({
-        ...data,
-        products: nextProducts,
-        inventoryMovements: [...stockMovements, ...(data.inventoryMovements || [])],
-        sales: data.sales.map((item) => {
-          if (item.id === sale.id) return updatedSale;
-          if (updatedSale.status === "AUTORIZADA" && sourceSale && item.id === sourceSale.id && (isTicketOffline(item.status) || item.status === "PROFORMA")) {
-            return {
-              ...item,
-              status: "CONVERTIDA" as const,
-              voidReason: `Convertida a factura ${updatedSale.sequence}`,
-              voidedAt: convertedAt,
-              convertedAt,
-              convertedToSaleId: updatedSale.id,
-              convertedToSequence: updatedSale.sequence,
-              sriMessage: `Convertida a factura ${updatedSale.sequence}`
-            };
-          }
-          return item;
-        })
-      }, user, isCreditNoteSale(sale) ? "CREDIT_NOTE_RETRIED" : "INVOICE_RETRIED", "sale", sale.id, `Reenvio de ${documentTypeLabel(sale)} ${sale.sequence}: ${updatedSale.status}`, { status: updatedSale.status, accessKey: updatedSale.accessKey }));
-      Alert.alert(explainSriResult(sriResult).title, updatedSale.status === "AUTORIZADA" ? `${documentTypeLabel(sale)} autorizada.` : sriUserMessage(sriResult));
+      sriResult = await authorizeInvoice(data.backendUrl, unsignedXml, backendToken);
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo reintentar el documento.";
-      await persist(appendAudit({
-        ...data,
-        sales: data.sales.map((item) => (item.id === sale.id ? { ...item, status: "ERROR_SRI", sriMessage: message, retryHistory: [...(sale.retryHistory || []), retryAt] } : item))
-      }, user, isCreditNoteSale(sale) ? "CREDIT_NOTE_RETRY_FAILED" : "INVOICE_RETRY_FAILED", "sale", sale.id, `Reenvio fallido de ${documentTypeLabel(sale)} ${sale.sequence}`, { error: message }));
-      Alert.alert("No se pudo reintentar", message);
+      try {
+        await persistMutation((current) => {
+          const currentSale = current.sales.find((item) => item.id === saleId);
+          if (!currentSale || retryFingerprint(currentSale) !== requestFingerprint || isClosedSale(currentSale)) return current;
+          const updatedSale: Sale = { ...currentSale, status: "ERROR_SRI", sriMessage: message, retryHistory: [...(currentSale.retryHistory || []), retryAt] };
+          return appendAudit({ ...current, sales: current.sales.map((item) => item.id === saleId ? updatedSale : item) }, user, isCreditNoteSale(currentSale) ? "CREDIT_NOTE_RETRY_FAILED" : "INVOICE_RETRY_FAILED", "sale", saleId, `Reenvio fallido de ${documentTypeLabel(currentSale)} ${currentSale.sequence}`, { error: message });
+        });
+        Alert.alert("No se pudo reintentar", message);
+      } finally {
+        setRetryingSaleId("");
+        setProcessingMessage("");
+      }
+      return;
+    }
+
+    try {
+      let applied = false;
+      let persistedSale: Sale | undefined;
+      await persistMutation((current) => {
+        const currentSale = current.sales.find((item) => item.id === saleId);
+        if (!currentSale || retryFingerprint(currentSale) !== requestFingerprint || isClosedSale(currentSale)) return current;
+        const currentClient = current.clients.find((item) => item.id === clientId);
+        if (!currentClient) return current;
+        let updatedSale: Sale = {
+          ...currentSale,
+          accessKey: sriResult.accessKey || currentSale.accessKey,
+          authorizationNumber: sriResult.authorizationNumber,
+          authorizationDate: sriResult.authorizationDate,
+          sriEnvironment: sriResult.sriEnvironment,
+          sriMessage: sriResult.sriMessage,
+          signedXml: sriResult.signedXml,
+          authorizedXml: sriResult.authorizedXml,
+          status: resolveInvoiceStatus(sriResult),
+          retryHistory: [...(currentSale.retryHistory || []), retryAt]
+        };
+        let products = current.products;
+        let movements = current.inventoryMovements || [];
+        const currentSource = updatedSale.sourceSaleId ? current.sales.find((item) => item.id === updatedSale.sourceSaleId) : undefined;
+        const currentTicketDerived = isInvoiceSale(updatedSale) && currentSource?.documentType === "nota_venta";
+        if (isInvoiceSale(updatedSale) && !currentTicketDerived) {
+          const inventoryState = resolveSaleInventoryState(currentSale);
+          if (updatedSale.status === "AUTORIZADA" || !isDefinitiveFailure(updatedSale)) {
+            if (inventoryState !== "APPLIED") throw inventoryConsistencyError(currentSale);
+          } else if (inventoryState === "UNKNOWN") {
+            throw inventoryConsistencyError(currentSale);
+          } else if (inventoryState === "APPLIED") {
+            const reversed = reverseSaleInventoryOnce({ products, movements, sale: updatedSale, operationId: currentSale.inventoryOperationId || currentSale.id, userId: user.id, createdAt: retryAt, reason: `Reverso por estado ${updatedSale.status}` });
+            products = reversed.products;
+            movements = reversed.movements;
+            updatedSale = reversed.sale;
+          }
+        } else if (currentTicketDerived) {
+          if (resolveSaleInventoryState(currentSale) !== "NOT_APPLIED" || !currentSource || resolveSaleInventoryState(currentSource) !== "APPLIED") throw inventoryConsistencyError(currentSale);
+          updatedSale = { ...updatedSale, inventoryState: "NOT_APPLIED", inventoryOperationId: undefined };
+        }
+        let sales = current.sales.map((item) => item.id === saleId ? updatedSale : item);
+        if (updatedSale.status === "AUTORIZADA" && currentSource && (currentSource.documentType === "nota_venta" || currentSource.documentType === "proforma")) {
+          if (currentSource.status === "CONVERTIDA" && currentSource.convertedToSaleId && currentSource.convertedToSaleId !== saleId) throw new Error("El documento de origen ya fue convertido a otro comprobante.");
+          const convertedAt = new Date().toISOString();
+          sales = sales.map((item) => item.id === currentSource.id ? { ...item, status: "CONVERTIDA" as const, voidReason: `Convertida a factura ${updatedSale.sequence}`, voidedAt: item.voidedAt || convertedAt, convertedAt: item.convertedAt || convertedAt, convertedToSaleId: updatedSale.id, convertedToSequence: updatedSale.sequence, sriMessage: `Convertida a factura ${updatedSale.sequence}` } : item);
+        }
+        applied = true;
+        persistedSale = updatedSale;
+        return appendAudit({ ...current, products, inventoryMovements: movements, sales }, user, isCreditNoteSale(currentSale) ? "CREDIT_NOTE_RETRIED" : "INVOICE_RETRIED", "sale", saleId, `Reenvio de ${documentTypeLabel(currentSale)} ${currentSale.sequence}: ${updatedSale.status}`, { status: updatedSale.status, accessKey: updatedSale.accessKey });
+      });
+      if (!applied || !persistedSale) {
+        Alert.alert("Documento actualizado", "El documento cambio durante el reintento y la respuesta no se aplico sobre datos obsoletos.");
+        return;
+      }
+      Alert.alert(explainSriResult(sriResult).title, persistedSale.status === "AUTORIZADA" ? `${documentTypeLabel(persistedSale)} autorizada.` : sriUserMessage(sriResult));
+    } catch (error) {
+      const message = error instanceof SaleInventoryError
+        ? "El inventario del documento requiere reconciliacion antes de aplicar la respuesta SRI."
+        : error instanceof Error ? error.message : "No se pudo guardar el resultado del SRI.";
+      Alert.alert("No se pudo aplicar el resultado", message);
     } finally {
       setRetryingSaleId("");
       setProcessingMessage("");
@@ -281,50 +330,49 @@ export function useSaleDocumentWorkflowActions({
     const defaultReason = isInvoiceSale(sale) ? "Anulada localmente antes de autorizacion" : sale.documentType === "proforma" ? "Proforma anulada localmente" : isCreditNoteSale(sale) ? "Nota de credito anulada localmente" : "Nota de venta anulada localmente";
     const reason = getLocalVoidReason(defaultReason);
     if (!reason) return;
-    const restoreStock = saleStatusReducesStock(sale.status);
-    const stockMovements: InventoryMovement[] = [];
-    const nextProducts = restoreStock
-      ? data.products.map((product) => {
-          if (!isInventoryProduct(product)) return product;
-          const soldQuantity = sale.items.filter((item) => isInventoryProduct(item) && item.productId === product.id).reduce((sum, item) => sum + item.quantity, 0);
-          if (soldQuantity <= 0) return product;
-          const stockAfter = product.stock + soldQuantity;
-          stockMovements.push({
-            id: uid(),
-            productId: product.id,
-            productName: product.name,
-            type: "entrada",
-            quantity: soldQuantity,
-            stockBefore: product.stock,
-            stockAfter,
-            reason,
-            reference: sale.sequence,
-            userId: user.id,
-            createdAt: voidedAt
-          });
-          return { ...product, stock: stockAfter, updatedAt: voidedAt };
-        })
-      : data.products;
-
-    await persist(appendAudit({
-      ...data,
-      products: nextProducts,
-      inventoryMovements: [...stockMovements, ...(data.inventoryMovements || [])],
-      sales: data.sales.map((item) =>
-        item.id === sale.id
-          ? {
-              ...item,
-              status: "ANULADA",
-              voidReason: reason,
-              voidedAt,
-              sriMessage: item.sriMessage || reason
-            }
-          : item
-      )
-    }, user, "DOCUMENT_VOIDED", "sale", sale.id, `Documento anulado: ${documentTypeLabel(sale)} ${sale.sequence}`, { reason, restoredStock: restoreStock }));
-    const message = restoreStock ? "Documento anulado localmente y stock devuelto." : "Documento anulado localmente.";
-    setNotice(message);
-    Alert.alert("Documento anulado", message);
+    const saleId = sale.id;
+    try {
+      let changed = false;
+      let restoredStock = false;
+      await persistMutation((current) => {
+        const currentSale = current.sales.find((item) => item.id === saleId);
+        if (!currentSale || currentSale.status === "ANULADA" || currentSale.status === "CONVERTIDA") return current;
+        if (currentSale.status === "AUTORIZADA") throw new Error("Una factura autorizada no puede anularse localmente.");
+        let products = current.products;
+        let movements = current.inventoryMovements || [];
+        let voidedSale = currentSale;
+        const sourceSale = currentSale.sourceSaleId ? current.sales.find((item) => item.id === currentSale.sourceSaleId) : undefined;
+        const ticketDerived = isInvoiceSale(currentSale) && sourceSale?.documentType === "nota_venta";
+        const inventoryAffectingDocument = isInvoiceSale(currentSale) || currentSale.documentType === "nota_venta";
+        if (inventoryAffectingDocument && !ticketDerived) {
+          const inventoryState = resolveSaleInventoryState(currentSale);
+          if (inventoryState === "UNKNOWN") throw inventoryConsistencyError(currentSale);
+          if (inventoryState === "APPLIED") {
+            const reversed = reverseSaleInventoryOnce({ products, movements, sale: currentSale, operationId: currentSale.inventoryOperationId || currentSale.id, userId: user.id, createdAt: voidedAt, reason });
+            products = reversed.products;
+            movements = reversed.movements;
+            voidedSale = reversed.sale;
+            restoredStock = reversed.changed;
+          }
+        }
+        const updatedSale: Sale = { ...voidedSale, status: "ANULADA", voidReason: reason, voidedAt, sriMessage: voidedSale.sriMessage || reason };
+        changed = true;
+        return appendAudit({ ...current, products, inventoryMovements: movements, sales: current.sales.map((item) => item.id === saleId ? updatedSale : item) }, user, "DOCUMENT_VOIDED", "sale", saleId, `Documento anulado: ${documentTypeLabel(currentSale)} ${currentSale.sequence}`, { reason, restoredStock });
+      });
+      if (!changed) {
+        Alert.alert("Documento cerrado", "El documento ya fue anulado o convertido.");
+        return;
+      }
+      const message = restoredStock ? "Documento anulado localmente y stock devuelto." : "Documento anulado localmente.";
+      setNotice(message);
+      Alert.alert("Documento anulado", message);
+    } catch (error) {
+      const message = error instanceof SaleInventoryError
+        ? "El inventario del documento requiere reconciliacion antes de anularlo."
+        : error instanceof Error ? error.message : "No se pudo anular el documento.";
+      setNotice(message);
+      Alert.alert("No se pudo anular", message);
+    }
   };
 
   const voidSale = (sale: Sale) => {

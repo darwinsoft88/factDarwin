@@ -1,16 +1,27 @@
-import { Client, Sale, SaleItem } from "../types";
+import { Client, Sale, SaleInventoryState, SaleItem } from "../types";
 import { dateKey } from "./format";
 import { isTicketOffline } from "./invoiceStatus";
 import { parseDecimal, roundMoney } from "./numbers";
 
 const duplicatePendingStatuses = new Set<Sale["status"]>(["BORRADOR", "FIRMADA", "PENDIENTE_SRI", "ENVIADA", "ENVIADA_SRI"]);
 
+export function saleShouldReduceStock(status: Sale["status"]) {
+  return status === "AUTORIZADA" || status === "ENVIADA" || status === "FIRMADA" || status === "ENVIADA_SRI" || status === "PENDIENTE_SRI" || status === "TICKET_OFFLINE";
+}
+
+/** @deprecated Use saleShouldReduceStock() for commercial intent. */
 export function saleStatusReducesStock(status: Sale["status"]) {
-  return status === "AUTORIZADA" || status === "ENVIADA" || status === "FIRMADA" || status === "ENVIADA_SRI" || status === "PENDIENTE_SRI" || isTicketOffline(status);
+  return saleShouldReduceStock(status);
 }
 
 export function saleNeedsStockDiscount(status: Sale["status"]) {
-  return !saleStatusReducesStock(status);
+  return !saleShouldReduceStock(status);
+}
+
+export function resolveSaleInventoryState(sale: Sale): SaleInventoryState {
+  if (sale.inventoryState) return sale.inventoryState;
+  if (sale.documentType === "proforma" || sale.status === "PROFORMA" || sale.status === "BORRADOR") return "NOT_APPLIED";
+  return "UNKNOWN";
 }
 
 export function canEditSale(sale: Sale) {

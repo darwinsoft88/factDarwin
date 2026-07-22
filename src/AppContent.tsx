@@ -143,6 +143,7 @@ export function AppContent() {
     ensureBackendToken,
     openSyncCenter,
     persist,
+    persistMutation,
     refreshFromBackend,
     retryPendingSync,
     runManualSync,
@@ -260,6 +261,7 @@ export function AppContent() {
         onTabChange={setTab}
         onXml={setXmlPreview}
         persist={persist}
+        persistMutation={persistMutation}
       />
 
       <AppGlobalModals

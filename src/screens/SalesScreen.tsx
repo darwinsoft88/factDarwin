@@ -12,6 +12,7 @@ import { useSaleDerivedState } from "../hooks/useSaleDerivedState";
 import { useSaleDocumentActions } from "../hooks/useSaleDocumentActions";
 import { useSaleDocumentWorkflowActions } from "../hooks/useSaleDocumentWorkflowActions";
 import { useSaleIssueFlow } from "../hooks/useSaleIssueFlow";
+import type { PersistMutation } from "../hooks/useSyncAndBackup";
 import { useSaleLineEditor } from "../hooks/useSaleLineEditor";
 import { useSaleFormState } from "../hooks/useSaleFormState";
 import { useSalesDocumentList } from "../hooks/useSalesDocumentList";
@@ -32,6 +33,7 @@ export function SalesScreen({
   user,
   backendToken,
   persist,
+  persistMutation,
   onXml,
   mode = "sale"
 }: {
@@ -39,6 +41,7 @@ export function SalesScreen({
   user: User;
   backendToken: string;
   persist: (data: AppData) => Promise<void>;
+  persistMutation: PersistMutation;
   onXml: (xml: string) => void;
   mode?: SalesScreenMode;
 }) {
@@ -327,6 +330,7 @@ export function SalesScreen({
     paymentCondition,
     creditDueDate,
     persist,
+    persistMutation,
     resetSaleInputs,
     selectedClient,
     setDocumentType,
@@ -403,7 +407,7 @@ export function SalesScreen({
     creditNoteSource,
     data,
     issuingCreditNote,
-    persist,
+    persistMutation,
     sendSaleEmail,
     setCreditNoteQuantities,
     setCreditNoteReason,
@@ -424,7 +428,7 @@ export function SalesScreen({
   } = useSaleDocumentWorkflowActions({
     backendToken,
     data,
-    persist,
+    persistMutation,
     setClientId,
     setDocumentType,
     setEditingSaleId,

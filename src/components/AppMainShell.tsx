@@ -23,6 +23,7 @@ import { UsersScreen } from "../screens/UsersScreen";
 import { KEYBOARD_AVOIDING_BEHAVIOR } from "../constants/layout";
 import { FloatingOverlayContext } from "../context/FloatingOverlayContext";
 import { AppData, User } from "../types";
+import type { PersistMutation } from "../hooks/useSyncAndBackup";
 import { AppTab } from "../utils/appAccess";
 import { SyncState } from "../utils/support";
 
@@ -50,6 +51,7 @@ type AppMainShellProps = {
   onTabChange: React.Dispatch<React.SetStateAction<AppTab>>;
   onXml: React.Dispatch<React.SetStateAction<string>>;
   persist: (data: AppData) => Promise<void>;
+  persistMutation: PersistMutation;
 };
 
 export function AppMainShell({
@@ -70,6 +72,7 @@ export function AppMainShell({
   onTabChange,
   onXml,
   persist,
+  persistMutation,
   session,
   syncActionLoading,
   syncState,
@@ -120,13 +123,13 @@ export function AppMainShell({
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         >
           {activeTab === "dashboard" && <DashboardScreen data={data} user={session} onNavigate={onTabChange} ListItemComponent={ListItem} />}
-          {activeTab === "ventas" && <SalesScreen mode="sale" data={data} user={session} backendToken={backendToken} persist={persist} onXml={onXml} />}
-          {activeTab === "documentos" && <SalesScreen mode="documents" data={data} user={session} backendToken={backendToken} persist={persist} onXml={onXml} />}
+          {activeTab === "ventas" && <SalesScreen mode="sale" data={data} user={session} backendToken={backendToken} persist={persist} persistMutation={persistMutation} onXml={onXml} />}
+          {activeTab === "documentos" && <SalesScreen mode="documents" data={data} user={session} backendToken={backendToken} persist={persist} persistMutation={persistMutation} onXml={onXml} />}
           {activeTab === "clientes" && <ClientsScreen data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persist={persist} ListItemComponent={ListItem} />}
           {activeTab === "productos" && <ProductsScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} BarcodeScannerModalComponent={BarcodeScannerModal} />}
           {activeTab === "inventario" && <InventoryScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} />}
           {activeTab === "caja" && <CashClosingScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
-          {activeTab === "creditos" && <CreditsScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} />}
+          {activeTab === "creditos" && <CreditsScreen data={data} user={session} backendToken={backendToken} persistMutation={persistMutation} ListItemComponent={ListItem} />}
           {activeTab === "guias" && <GuidesScreen data={data} user={session} backendToken={backendToken} persist={persist} onXml={onXml} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
           {activeTab === "usuarios" && session.role === "admin" && <UsersScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} />}
           {activeTab === "reportes" && <ReportsScreen data={data} onReport={onXml} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
