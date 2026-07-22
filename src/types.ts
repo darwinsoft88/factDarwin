@@ -101,10 +101,14 @@ export type CashClosing = {
 
 export type CreditPayment = {
   id: string;
+  /** Identidad durable de creación. Es obligatoria para pagos modernos y ausente en registros legacy. */
   operationId?: string;
+  /** Identidad durable de la intención de lote. Solo existe en cobros múltiples modernos. */
   batchId?: string;
+  /** Identidad durable de la operación de lote compartida por todos sus pagos. */
   batchOperationId?: string;
   batchSize?: number;
+  /** Identidad durable de una anulación moderna, independiente de operationId. */
   voidOperationId?: string;
   saleId: string;
   clientId: string;
