@@ -715,6 +715,28 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
       res.status(409).json({ error: error.message, code: error.code, requestId: error.requestId });
       return;
     }
+    if (["INVALID_DOMAIN_OPERATION_ID", "INVALID_DOMAIN_OPERATION_TYPE", "INVALID_BATCH_OPERATION_ID"].includes(error?.code)) {
+      res.status(400).json({
+        error: error.message,
+        message: error.message,
+        code: error.code,
+        operationType: error.operationType,
+        operationId: error.operationId,
+        entityId: error.entityId
+      });
+      return;
+    }
+    if (["DOMAIN_OPERATION_MISMATCH", "DOMAIN_ENTITY_OPERATION_CONFLICT"].includes(error?.code)) {
+      res.status(409).json({
+        error: error.message,
+        message: error.message,
+        code: error.code,
+        operationType: error.operationType,
+        operationId: error.operationId,
+        entityId: error.entityId
+      });
+      return;
+    }
     next(error);
   }
 });

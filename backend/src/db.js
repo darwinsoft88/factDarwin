@@ -1,5 +1,5 @@
 const config = require("./config");
-const { applySnapshotPatch, compactSnapshotForStorage, createSyncOperationMismatchError, normalizeDocumentScopes, scopeFromDocument } = require("./db-utils");
+const { applySnapshotPatch, assertDomainOperationReplay, compactSnapshotForStorage, createDomainEntityOperationConflictError, createSyncOperationMismatchError, normalizeDocumentScopes, prepareDomainOperation, scopeFromDocument } = require("./db-utils");
 
 if (config.databaseUrl) {
   module.exports = require("./db-postgres");
@@ -264,6 +264,22 @@ db.exec(`
     processed_at TEXT NOT NULL,
     PRIMARY KEY (company_id, request_id)
   );
+
+  CREATE TABLE IF NOT EXISTS sync_domain_operations (
+    company_id TEXT NOT NULL DEFAULT '',
+    operation_type TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    batch_operation_id TEXT,
+    result_json TEXT,
+    processed_at TEXT NOT NULL,
+    PRIMARY KEY (company_id, operation_type, operation_id),
+    UNIQUE (company_id, operation_type, entity_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sync_domain_operations_batch
+    ON sync_domain_operations (company_id, batch_operation_id);
 `);
 
 ensureColumn("sales", "company_id", "TEXT NOT NULL DEFAULT ''");
@@ -434,6 +450,150 @@ const saveTenantSnapshotTx = db.transaction((companyId, data, updatedAt) => {
   return { ok: true, updatedAt, summary: { ...summary, historyCount: after, prunedHistory: Math.max(0, before - after) } };
 });
 
+function getDomainOperation(companyId, operationType, operationId) {
+  const row = db.prepare(
+    `SELECT operation_type AS operationType, operation_id AS operationId, entity_id AS entityId,
+            payload_hash AS payloadHash, batch_operation_id AS batchOperationId, result_json AS resultJson,
+            processed_at AS processedAt
+     FROM sync_domain_operations
+     WHERE company_id = @companyId AND operation_type = @operationType AND operation_id = @operationId`
+  ).get({ companyId, operationType, operationId });
+  if (!row) return null;
+  return { ...row, resultJson: row.resultJson === null ? null : JSON.parse(String(row.resultJson)) };
+}
+
+function extractDomainOperations(patch = {}) {
+  const operations = [];
+  const byIdentity = new Map();
+  const byEntity = new Map();
+  const add = (descriptor) => {
+    const prepared = prepareDomainOperation(descriptor);
+    const identityKey = `${prepared.operationType}:${prepared.operationId}`;
+    const entityKey = `${prepared.operationType}:${prepared.entityId}`;
+    const previousIdentity = byIdentity.get(identityKey);
+    if (previousIdentity) {
+      assertDomainOperationReplay(previousIdentity.prepared, prepared);
+      return;
+    }
+    const previousEntity = byEntity.get(entityKey);
+    if (previousEntity && previousEntity.prepared.operationId !== prepared.operationId) {
+      throw createDomainEntityOperationConflictError(prepared, previousEntity.prepared.operationId);
+    }
+    const operation = { ...descriptor, prepared };
+    byIdentity.set(identityKey, operation);
+    byEntity.set(entityKey, operation);
+    operations.push(operation);
+  };
+
+  for (const payment of Array.isArray(patch.creditPayments) ? patch.creditPayments : []) {
+    if (!payment || typeof payment !== "object" || Array.isArray(payment)) continue;
+    if (Object.prototype.hasOwnProperty.call(payment, "operationId")) {
+      const { voidOperationId, voidedAt, voidedByUserId, voidedByUserName, voidReason, ...createPayload } = payment;
+      void voidOperationId; void voidedAt; void voidedByUserId; void voidedByUserName; void voidReason;
+      add({ operationType: "CREDIT_PAYMENT_CREATE", operationId: payment.operationId, entityId: payment.id, batchOperationId: payment.batchOperationId, payload: createPayload, collection: "creditPayments", action: "CREATE" });
+    }
+    if (Object.prototype.hasOwnProperty.call(payment, "voidOperationId")) {
+      add({
+        operationType: "CREDIT_PAYMENT_VOID",
+        operationId: payment.voidOperationId,
+        entityId: payment.id,
+        payload: { paymentId: payment.id, saleId: payment.saleId, clientId: payment.clientId, amount: payment.amount, voidedAt: payment.voidedAt, voidedByUserId: payment.voidedByUserId, voidedByUserName: payment.voidedByUserName, voidReason: payment.voidReason },
+        collection: "creditPayments",
+        action: "VOID"
+      });
+    }
+  }
+
+  for (const adjustment of Array.isArray(patch.creditAdjustments) ? patch.creditAdjustments : []) {
+    if (!adjustment || typeof adjustment !== "object" || Array.isArray(adjustment)) continue;
+    if (Object.prototype.hasOwnProperty.call(adjustment, "operationId")) {
+      const { state, reversedAt, reverseOperationId, ...applyPayload } = adjustment;
+      void state; void reversedAt; void reverseOperationId;
+      add({ operationType: "CREDIT_ADJUSTMENT_APPLY", operationId: adjustment.operationId, entityId: adjustment.id, payload: applyPayload, collection: "creditAdjustments", action: "APPLY" });
+    }
+    if (Object.prototype.hasOwnProperty.call(adjustment, "reverseOperationId")) {
+      add({
+        operationType: "CREDIT_ADJUSTMENT_REVERSE",
+        operationId: adjustment.reverseOperationId,
+        entityId: adjustment.id,
+        payload: { adjustmentId: adjustment.id, sourceCreditNoteId: adjustment.sourceCreditNoteId, sourceSaleId: adjustment.sourceSaleId, amount: adjustment.amount, reversedAt: adjustment.reversedAt, state: adjustment.state },
+        collection: "creditAdjustments",
+        action: "REVERSE"
+      });
+    }
+  }
+  return operations;
+}
+
+function effectiveDomainPatch(patch, operations, outcomes) {
+  const descriptorsByEntity = new Map();
+  operations.forEach((operation, index) => {
+    const key = `${operation.collection}:${operation.entityId}`;
+    const current = descriptorsByEntity.get(key) || [];
+    current.push({ operation, status: outcomes[index].status });
+    descriptorsByEntity.set(key, current);
+  });
+  const effective = { ...patch };
+  for (const collection of ["creditPayments", "creditAdjustments"]) {
+    if (!Array.isArray(patch[collection])) continue;
+    const included = new Set();
+    effective[collection] = patch[collection].filter((item) => {
+      const key = `${collection}:${item?.id}`;
+      const descriptors = descriptorsByEntity.get(key);
+      if (!descriptors?.length) return true;
+      const hasLegacyTransition = collection === "creditPayments"
+        ? Boolean(item?.voidedAt) && !Object.prototype.hasOwnProperty.call(item, "voidOperationId")
+        : item?.state === "REVERSED" && !Object.prototype.hasOwnProperty.call(item, "reverseOperationId");
+      if (!hasLegacyTransition && !descriptors.some((entry) => entry.status === "NEW")) return false;
+      if (included.has(item.id)) return false;
+      included.add(item.id);
+      return true;
+    });
+  }
+  return effective;
+}
+
+function domainOperationSummary(operations, outcomes) {
+  const summary = { new: [], replayed: [] };
+  operations.forEach((operation, index) => {
+    const item = { operationType: operation.operationType, operationId: operation.operationId, entityId: operation.entityId };
+    (outcomes[index].status === "NEW" ? summary.new : summary.replayed).push(item);
+  });
+  return summary;
+}
+
+function registerOrReplayDomainOperationInternal(companyId = "", operation) {
+  const prepared = prepareDomainOperation(operation);
+  const processedAt = new Date().toISOString();
+  const inserted = db.prepare(
+    `INSERT OR IGNORE INTO sync_domain_operations
+       (company_id, operation_type, operation_id, entity_id, payload_hash, batch_operation_id, processed_at)
+     VALUES (@companyId, @operationType, @operationId, @entityId, @payloadHash, @batchOperationId, @processedAt)`
+  ).run({ companyId, ...prepared, processedAt });
+  if (inserted.changes === 1) return { status: "NEW", operation: prepared, result: null };
+
+  const existing = getDomainOperation(companyId, prepared.operationType, prepared.operationId);
+  if (existing) return assertDomainOperationReplay(existing, prepared);
+
+  const entity = db.prepare(
+    `SELECT operation_id AS operationId FROM sync_domain_operations
+     WHERE company_id = @companyId AND operation_type = @operationType AND entity_id = @entityId`
+  ).get({ companyId, operationType: prepared.operationType, entityId: prepared.entityId });
+  throw createDomainEntityOperationConflictError(prepared, entity?.operationId);
+}
+
+function completeDomainOperationInternal(companyId = "", operationType, operationId, result) {
+  db.prepare(
+    `UPDATE sync_domain_operations SET result_json = @resultJson
+     WHERE company_id = @companyId AND operation_type = @operationType
+       AND operation_id = @operationId AND result_json IS NULL`
+  ).run({ companyId, operationType, operationId, resultJson: JSON.stringify(result ?? null) });
+  return getDomainOperation(companyId, operationType, operationId);
+}
+
+const registerOrReplayDomainOperation = db.transaction(registerOrReplayDomainOperationInternal);
+const completeDomainOperation = db.transaction(completeDomainOperationInternal);
+
 const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "", syncOperation = null) => {
   if (syncOperation) {
     const existing = db.prepare("SELECT payload_hash AS payloadHash, result_json AS resultJson FROM sync_operations WHERE company_id = @companyId AND request_id = @requestId")
@@ -444,11 +604,26 @@ const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "", s
     }
   }
 
+  const domainOperations = extractDomainOperations(patch);
+  const domainOutcomes = domainOperations.map((operation) => registerOrReplayDomainOperationInternal(companyId, operation));
+  const effectivePatch = effectiveDomainPatch(patch, domainOperations, domainOutcomes);
+  const domainSummary = domainOperationSummary(domainOperations, domainOutcomes);
+  const completeNewDomainOperations = () => {
+    domainOperations.forEach((operation, index) => {
+      if (domainOutcomes[index].status !== "NEW") return;
+      completeDomainOperationInternal(companyId, operation.operationType, operation.operationId, {
+        status: "APPLIED",
+        entityId: operation.entityId,
+        operationType: operation.operationType
+      });
+    });
+  };
+
   let summary;
   if (companyId) {
     const row = db.prepare("SELECT data FROM saas_snapshots WHERE company_id = @companyId").get({ companyId });
     const currentData = row?.data ? JSON.parse(String(row.data)) : null;
-    const data = reconcileProductStockFromMovements(normalizeDocumentScopes(applySnapshotPatch(currentData, patch)));
+    const data = reconcileProductStockFromMovements(normalizeDocumentScopes(applySnapshotPatch(currentData, effectivePatch)));
     validateSnapshot(data);
     const storedData = compactSnapshotForStorage(data);
     db.prepare(`
@@ -461,13 +636,14 @@ const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "", s
     syncNormalizedTables(data, updatedAt, companyId);
     const summary = summarizeSnapshot(data);
     insertBackendAudit("TENANT_INCREMENTAL_MERGE", { companyId, ...summary });
-    if (syncOperation) return completeSyncOperation(syncOperation, companyId, updatedAt, summary);
-    return { summary };
+    completeNewDomainOperations();
+    if (syncOperation) return completeSyncOperation(syncOperation, companyId, updatedAt, summary, domainSummary);
+    return { summary, domainOperations: domainSummary };
   }
 
   const row = db.prepare("SELECT data FROM app_snapshots WHERE id = 1").get();
   const currentData = row?.data ? JSON.parse(String(row.data)) : null;
-  const data = reconcileProductStockFromMovements(normalizeDocumentScopes(applySnapshotPatch(currentData, patch)));
+  const data = reconcileProductStockFromMovements(normalizeDocumentScopes(applySnapshotPatch(currentData, effectivePatch)));
   validateSnapshot(data);
   const storedData = compactSnapshotForStorage(data);
 
@@ -488,12 +664,13 @@ const mergeSnapshotPatchTx = db.transaction((patch, updatedAt, companyId = "", s
     auditLogs: patch.auditLogs?.length || 0,
     creditAdjustments: patch.creditAdjustments?.length || 0
   });
-  if (syncOperation) return completeSyncOperation(syncOperation, companyId, updatedAt, summary);
-  return { summary };
+  completeNewDomainOperations();
+  if (syncOperation) return completeSyncOperation(syncOperation, companyId, updatedAt, summary, domainSummary);
+  return { summary, domainOperations: domainSummary };
 });
 
-function completeSyncOperation(syncOperation, companyId, updatedAt, summary) {
-  const result = { ok: true, updatedAt, summary };
+function completeSyncOperation(syncOperation, companyId, updatedAt, summary, domainOperations) {
+  const result = { ok: true, updatedAt, summary, domainOperations };
   db.prepare(`INSERT INTO sync_operations
     (company_id, request_id, operation_type, operation_id, payload_hash, result_json, http_status, processed_at)
     VALUES (@companyId, @requestId, @operationType, @operationId, @payloadHash, @resultJson, 200, @processedAt)`)
@@ -504,7 +681,7 @@ function completeSyncOperation(syncOperation, companyId, updatedAt, summary) {
 async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
   const updatedAt = new Date().toISOString();
   const outcome = mergeSnapshotPatchTx(patch, updatedAt, companyId, syncOperation);
-  return outcome.replayResult || { ok: true, updatedAt, summary: outcome.summary };
+  return outcome.replayResult || { ok: true, updatedAt, summary: outcome.summary, domainOperations: outcome.domainOperations };
 }
 
 async function addAudit(event, payload) {
@@ -1649,5 +1826,5 @@ async function initialize() {
   return true;
 }
 
-module.exports = { addAudit, authenticateCompanyUser, authenticateSupportUser, changeCompanyUserPassword, createCompanyAccount, engine: "better-sqlite3", findDocumentByAccessKey, getAudit, getSnapshot, initialize, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reconcileSaasUsersFromSnapshots, reserveDocumentSequence, resetCompanyUserPassword, searchClients, searchProducts, saveSnapshot };
+module.exports = { addAudit, authenticateCompanyUser, authenticateSupportUser, changeCompanyUserPassword, completeDomainOperation, createCompanyAccount, engine: "better-sqlite3", findDocumentByAccessKey, getAudit, getDomainOperation, getSnapshot, initialize, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reconcileSaasUsersFromSnapshots, registerOrReplayDomainOperation, reserveDocumentSequence, resetCompanyUserPassword, searchClients, searchProducts, saveSnapshot };
 }

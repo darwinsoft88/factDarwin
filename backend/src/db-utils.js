@@ -1,6 +1,26 @@
 const crypto = require("node:crypto");
 
 const MAX_SYNC_REQUEST_ID_LENGTH = 200;
+const MAX_DOMAIN_OPERATION_ID_LENGTH = 200;
+const DOMAIN_OPERATION_TYPES = Object.freeze([
+  "CREDIT_PAYMENT_CREATE",
+  "CREDIT_PAYMENT_VOID",
+  "CREDIT_ADJUSTMENT_APPLY",
+  "CREDIT_ADJUSTMENT_REVERSE",
+  "CREDIT_NOTE_ISSUE"
+]);
+const DOMAIN_OPERATION_TYPE_SET = new Set(DOMAIN_OPERATION_TYPES);
+const DOMAIN_TRANSPORT_FIELDS = new Set([
+  "requestId",
+  "Idempotency-Key",
+  "idempotencyKey",
+  "receivedAt",
+  "processedAt",
+  "transportMetadata",
+  "result",
+  "resultJson",
+  "httpStatus"
+]);
 
 function normalizeSyncRequestId(value) {
   if (typeof value !== "string") return null;
@@ -47,6 +67,88 @@ function canonicalizeSyncPayload(value) {
 function hashSyncPayload(patch) {
   const canonical = canonicalizeSyncPayload(stripSyncTransportFields(patch));
   return crypto.createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+function createDomainOperationError(code, message, details = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.assign(error, details);
+  return error;
+}
+
+function validateDomainIdentifier(value, code, label) {
+  if (typeof value !== "string" || !value || value !== value.trim() || value.length > MAX_DOMAIN_OPERATION_ID_LENGTH) {
+    throw createDomainOperationError(code, `${label} debe ser texto no vacio, sin espacios externos y de hasta ${MAX_DOMAIN_OPERATION_ID_LENGTH} caracteres.`, { value });
+  }
+  return value;
+}
+
+function validateDomainOperationType(value) {
+  if (!DOMAIN_OPERATION_TYPE_SET.has(value)) {
+    throw createDomainOperationError("INVALID_DOMAIN_OPERATION_TYPE", "El tipo de operacion de dominio no esta permitido.", { operationType: value });
+  }
+  return value;
+}
+
+function stripDomainTransportFields(value) {
+  if (Array.isArray(value)) return value.map(stripDomainTransportFields);
+  if (!value || typeof value !== "object") return value;
+  return Object.keys(value).reduce((result, key) => {
+    if (!DOMAIN_TRANSPORT_FIELDS.has(key)) result[key] = stripDomainTransportFields(value[key]);
+    return result;
+  }, {});
+}
+
+function prepareDomainOperation(operation) {
+  if (!operation || typeof operation !== "object" || Array.isArray(operation)) {
+    throw createDomainOperationError("INVALID_DOMAIN_OPERATION_ID", "La operacion de dominio debe ser un objeto.");
+  }
+  const operationType = validateDomainOperationType(operation.operationType);
+  const operationId = validateDomainIdentifier(operation.operationId, "INVALID_DOMAIN_OPERATION_ID", "operationId");
+  const entityId = validateDomainIdentifier(operation.entityId, "INVALID_DOMAIN_OPERATION_ID", "entityId");
+  const batchOperationId = operation.batchOperationId === undefined
+    ? null
+    : validateDomainIdentifier(operation.batchOperationId, "INVALID_BATCH_OPERATION_ID", "batchOperationId");
+  const materialPayload = stripDomainTransportFields(operation.payload);
+  const canonicalPayload = canonicalizeSyncPayload({
+    operationType,
+    operationId,
+    entityId,
+    ...(batchOperationId ? { batchOperationId } : {}),
+    payload: materialPayload
+  });
+  const payloadHash = crypto.createHash("sha256").update(JSON.stringify(canonicalPayload)).digest("hex");
+  return { operationType, operationId, entityId, batchOperationId, payloadHash, canonicalPayload };
+}
+
+function hashDomainOperation(operation) {
+  return prepareDomainOperation(operation).payloadHash;
+}
+
+function assertDomainOperationReplay(existing, incoming) {
+  if (existing.payloadHash !== incoming.payloadHash
+    || existing.entityId !== incoming.entityId
+    || (existing.batchOperationId || null) !== (incoming.batchOperationId || null)) {
+    throw createDomainOperationError("DOMAIN_OPERATION_MISMATCH", "El operationId ya fue utilizado con un payload de dominio diferente.", {
+      operationType: incoming.operationType,
+      operationId: incoming.operationId,
+      entityId: incoming.entityId
+    });
+  }
+  return {
+    status: "REPLAY",
+    operation: incoming,
+    result: existing.resultJson ?? null
+  };
+}
+
+function createDomainEntityOperationConflictError(incoming, existingOperationId) {
+  return createDomainOperationError("DOMAIN_ENTITY_OPERATION_CONFLICT", "La entidad ya esta asociada a otra identidad de operacion.", {
+    operationType: incoming.operationType,
+    operationId: incoming.operationId,
+    entityId: incoming.entityId,
+    existingOperationId
+  });
 }
 
 function createSyncOperationMismatchError(requestId) {
@@ -423,7 +525,14 @@ function validateCreditAdjustments(adjustments) {
     if (!adjustment || typeof adjustment !== "object" || Array.isArray(adjustment)) {
       throwBadSnapshot("Ajuste de cartera invalido: cada elemento debe ser un objeto.");
     }
-    if (!isNonEmptyString(adjustment.id) || !isNonEmptyString(adjustment.operationId)
+    const hasOperationId = Object.prototype.hasOwnProperty.call(adjustment, "operationId");
+    if (hasOperationId && (typeof adjustment.operationId !== "string"
+      || !adjustment.operationId
+      || adjustment.operationId !== adjustment.operationId.trim()
+      || adjustment.operationId.length > MAX_DOMAIN_OPERATION_ID_LENGTH)) {
+      throwBadSnapshot(`Ajuste de cartera invalido: operationId debe ser texto no vacio, sin espacios externos y de hasta ${MAX_DOMAIN_OPERATION_ID_LENGTH} caracteres.`);
+    }
+    if (!isNonEmptyString(adjustment.id)
       || !isNonEmptyString(adjustment.sourceCreditNoteId) || !isNonEmptyString(adjustment.sourceSaleId)
       || !isNonEmptyString(adjustment.clientId) || !isNonEmptyString(adjustment.userId)) {
       throwBadSnapshot("Ajuste de cartera invalido: faltan identificadores obligatorios.");
@@ -652,11 +761,17 @@ function applyDeletions(data, deletions) {
 }
 
 module.exports = {
+  DOMAIN_OPERATION_TYPES,
+  MAX_DOMAIN_OPERATION_ID_LENGTH,
   MAX_SYNC_REQUEST_ID_LENGTH,
   applySnapshotPatch,
+  assertDomainOperationReplay,
+  createDomainEntityOperationConflictError,
+  createDomainOperationError,
   createSyncOperationMismatchError,
   compactSnapshotForStorage,
   hashSyncPayload,
+  hashDomainOperation,
   normalizeClientIdentification,
   normalizeDocumentScopes,
   normalizeProductCode,
@@ -664,6 +779,7 @@ module.exports = {
   normalizeTenantKey,
   normalizeUserEmail,
   normalizeSyncRequestId,
+  prepareDomainOperation,
   resolveSyncRequestId,
   scopeFromDocument,
   summarizeSnapshot,

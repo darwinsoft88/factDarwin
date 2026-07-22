@@ -2,13 +2,16 @@ const { Pool } = require("pg");
 const config = require("./config");
 const {
   applySnapshotPatch,
+  assertDomainOperationReplay,
   compactSnapshotForStorage,
+  createDomainEntityOperationConflictError,
   createSyncOperationMismatchError,
   normalizeClientIdentification,
   normalizeDocumentScopes,
   normalizeProductCode,
   normalizeTenantKey,
   normalizeUserEmail,
+  prepareDomainOperation,
   scopeFromDocument,
   summarizeSnapshot,
   validateSnapshot
@@ -357,6 +360,23 @@ async function ensureSchema() {
         processed_at TIMESTAMPTZ NOT NULL,
         PRIMARY KEY (company_id, request_id)
       );
+
+      CREATE TABLE IF NOT EXISTS sync_domain_operations (
+        company_id TEXT NOT NULL DEFAULT '',
+        operation_type TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        batch_operation_id TEXT,
+        result_json JSONB,
+        processed_at TIMESTAMPTZ NOT NULL,
+        PRIMARY KEY (company_id, operation_type, operation_id),
+        UNIQUE (company_id, operation_type, entity_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sync_domain_operations_batch
+        ON sync_domain_operations (company_id, batch_operation_id)
+        WHERE batch_operation_id IS NOT NULL;
     `).then(() => {
       reconcileSaasUsersFromSnapshots().catch((error) => {
         console.error("No se pudo reconciliar usuarios SaaS al iniciar:", error.message);
@@ -564,6 +584,152 @@ async function restoreTenantSnapshot(companyId = "", backup = {}, options = {}) 
   }
 }
 
+async function getDomainOperation(client, companyId, operationType, operationId) {
+  const result = await client.query(
+    `SELECT operation_type AS "operationType", operation_id AS "operationId", entity_id AS "entityId",
+            payload_hash AS "payloadHash", batch_operation_id AS "batchOperationId", result_json AS "resultJson",
+            processed_at AS "processedAt"
+     FROM sync_domain_operations
+     WHERE company_id = $1 AND operation_type = $2 AND operation_id = $3`,
+    [companyId, operationType, operationId]
+  );
+  return result.rows[0] || null;
+}
+
+function extractDomainOperations(patch = {}) {
+  const operations = [];
+  const byIdentity = new Map();
+  const byEntity = new Map();
+  const add = (descriptor) => {
+    const prepared = prepareDomainOperation(descriptor);
+    const identityKey = `${prepared.operationType}:${prepared.operationId}`;
+    const entityKey = `${prepared.operationType}:${prepared.entityId}`;
+    const previousIdentity = byIdentity.get(identityKey);
+    if (previousIdentity) {
+      assertDomainOperationReplay(previousIdentity.prepared, prepared);
+      return;
+    }
+    const previousEntity = byEntity.get(entityKey);
+    if (previousEntity && previousEntity.prepared.operationId !== prepared.operationId) {
+      throw createDomainEntityOperationConflictError(prepared, previousEntity.prepared.operationId);
+    }
+    const operation = { ...descriptor, prepared };
+    byIdentity.set(identityKey, operation);
+    byEntity.set(entityKey, operation);
+    operations.push(operation);
+  };
+
+  for (const payment of Array.isArray(patch.creditPayments) ? patch.creditPayments : []) {
+    if (!payment || typeof payment !== "object" || Array.isArray(payment)) continue;
+    if (Object.prototype.hasOwnProperty.call(payment, "operationId")) {
+      const { voidOperationId, voidedAt, voidedByUserId, voidedByUserName, voidReason, ...createPayload } = payment;
+      void voidOperationId; void voidedAt; void voidedByUserId; void voidedByUserName; void voidReason;
+      add({ operationType: "CREDIT_PAYMENT_CREATE", operationId: payment.operationId, entityId: payment.id, batchOperationId: payment.batchOperationId, payload: createPayload, collection: "creditPayments", action: "CREATE" });
+    }
+    if (Object.prototype.hasOwnProperty.call(payment, "voidOperationId")) {
+      add({
+        operationType: "CREDIT_PAYMENT_VOID",
+        operationId: payment.voidOperationId,
+        entityId: payment.id,
+        payload: { paymentId: payment.id, saleId: payment.saleId, clientId: payment.clientId, amount: payment.amount, voidedAt: payment.voidedAt, voidedByUserId: payment.voidedByUserId, voidedByUserName: payment.voidedByUserName, voidReason: payment.voidReason },
+        collection: "creditPayments",
+        action: "VOID"
+      });
+    }
+  }
+
+  for (const adjustment of Array.isArray(patch.creditAdjustments) ? patch.creditAdjustments : []) {
+    if (!adjustment || typeof adjustment !== "object" || Array.isArray(adjustment)) continue;
+    if (Object.prototype.hasOwnProperty.call(adjustment, "operationId")) {
+      const { state, reversedAt, reverseOperationId, ...applyPayload } = adjustment;
+      void state; void reversedAt; void reverseOperationId;
+      add({ operationType: "CREDIT_ADJUSTMENT_APPLY", operationId: adjustment.operationId, entityId: adjustment.id, payload: applyPayload, collection: "creditAdjustments", action: "APPLY" });
+    }
+    if (Object.prototype.hasOwnProperty.call(adjustment, "reverseOperationId")) {
+      add({
+        operationType: "CREDIT_ADJUSTMENT_REVERSE",
+        operationId: adjustment.reverseOperationId,
+        entityId: adjustment.id,
+        payload: { adjustmentId: adjustment.id, sourceCreditNoteId: adjustment.sourceCreditNoteId, sourceSaleId: adjustment.sourceSaleId, amount: adjustment.amount, reversedAt: adjustment.reversedAt, state: adjustment.state },
+        collection: "creditAdjustments",
+        action: "REVERSE"
+      });
+    }
+  }
+  return operations;
+}
+
+function effectiveDomainPatch(patch, operations, outcomes) {
+  const descriptorsByEntity = new Map();
+  operations.forEach((operation, index) => {
+    const key = `${operation.collection}:${operation.entityId}`;
+    const current = descriptorsByEntity.get(key) || [];
+    current.push({ operation, status: outcomes[index].status });
+    descriptorsByEntity.set(key, current);
+  });
+  const effective = { ...patch };
+  for (const collection of ["creditPayments", "creditAdjustments"]) {
+    if (!Array.isArray(patch[collection])) continue;
+    const included = new Set();
+    effective[collection] = patch[collection].filter((item) => {
+      const key = `${collection}:${item?.id}`;
+      const descriptors = descriptorsByEntity.get(key);
+      if (!descriptors?.length) return true;
+      const hasLegacyTransition = collection === "creditPayments"
+        ? Boolean(item?.voidedAt) && !Object.prototype.hasOwnProperty.call(item, "voidOperationId")
+        : item?.state === "REVERSED" && !Object.prototype.hasOwnProperty.call(item, "reverseOperationId");
+      if (!hasLegacyTransition && !descriptors.some((entry) => entry.status === "NEW")) return false;
+      if (included.has(item.id)) return false;
+      included.add(item.id);
+      return true;
+    });
+  }
+  return effective;
+}
+
+function domainOperationSummary(operations, outcomes) {
+  const summary = { new: [], replayed: [] };
+  operations.forEach((operation, index) => {
+    const item = { operationType: operation.operationType, operationId: operation.operationId, entityId: operation.entityId };
+    (outcomes[index].status === "NEW" ? summary.new : summary.replayed).push(item);
+  });
+  return summary;
+}
+
+async function registerOrReplayDomainOperation(client, companyId = "", operation) {
+  const prepared = prepareDomainOperation(operation);
+  const processedAt = new Date().toISOString();
+  const inserted = await client.query(
+    `INSERT INTO sync_domain_operations
+       (company_id, operation_type, operation_id, entity_id, payload_hash, batch_operation_id, processed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT DO NOTHING
+     RETURNING operation_id`,
+    [companyId, prepared.operationType, prepared.operationId, prepared.entityId, prepared.payloadHash, prepared.batchOperationId, processedAt]
+  );
+  if (inserted.rowCount === 1) return { status: "NEW", operation: prepared, result: null };
+
+  const existing = await getDomainOperation(client, companyId, prepared.operationType, prepared.operationId);
+  if (existing) return assertDomainOperationReplay(existing, prepared);
+
+  const entityResult = await client.query(
+    `SELECT operation_id AS "operationId"
+     FROM sync_domain_operations
+     WHERE company_id = $1 AND operation_type = $2 AND entity_id = $3`,
+    [companyId, prepared.operationType, prepared.entityId]
+  );
+  throw createDomainEntityOperationConflictError(prepared, entityResult.rows[0]?.operationId);
+}
+
+async function completeDomainOperation(client, companyId = "", operationType, operationId, result) {
+  await client.query(
+    `UPDATE sync_domain_operations SET result_json = $1::jsonb
+     WHERE company_id = $2 AND operation_type = $3 AND operation_id = $4 AND result_json IS NULL`,
+    [JSON.stringify(result ?? null), companyId, operationType, operationId]
+  );
+  return getDomainOperation(client, companyId, operationType, operationId);
+}
+
 async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
   await ensureSchema();
 
@@ -571,6 +737,7 @@ async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
   const updatedAt = new Date().toISOString();
   try {
     await client.query("BEGIN");
+    const domainOperations = extractDomainOperations(patch);
     if (syncOperation) {
       const claimed = await client.query(
         `INSERT INTO sync_operations (company_id, request_id, operation_type, operation_id, payload_hash, processed_at)
@@ -591,13 +758,18 @@ async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
         return existing.rows[0].resultJson;
       }
     }
+    const domainOutcomes = [];
+    for (const operation of domainOperations) {
+      domainOutcomes.push(await registerOrReplayDomainOperation(client, companyId, operation));
+    }
+    const effectivePatch = effectiveDomainPatch(patch, domainOperations, domainOutcomes);
     const locked = companyId
       ? await client.query("SELECT data FROM saas_snapshots WHERE company_id = $1 FOR UPDATE", [companyId])
       : await client.query("SELECT data FROM app_snapshots WHERE id = 1 FOR UPDATE");
     const currentData = locked.rows[0]?.data
       ? typeof locked.rows[0].data === "string" ? JSON.parse(locked.rows[0].data) : locked.rows[0].data
       : null;
-    const data = reconcileProductStockFromMovements(normalizeDocumentScopes(applySnapshotPatch(currentData, patch)));
+    const data = reconcileProductStockFromMovements(normalizeDocumentScopes(applySnapshotPatch(currentData, effectivePatch)));
     validateSnapshot(data);
     const storedData = compactSnapshotForStorage(data);
 
@@ -630,7 +802,16 @@ async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
       auditLogs: patch.auditLogs?.length || 0,
       creditAdjustments: patch.creditAdjustments?.length || 0
     });
-    const result = { ok: true, updatedAt, summary };
+    for (let index = 0; index < domainOperations.length; index += 1) {
+      if (domainOutcomes[index].status !== "NEW") continue;
+      const operation = domainOperations[index];
+      await completeDomainOperation(client, companyId, operation.operationType, operation.operationId, {
+        status: "APPLIED",
+        entityId: operation.entityId,
+        operationType: operation.operationType
+      });
+    }
+    const result = { ok: true, updatedAt, summary, domainOperations: domainOperationSummary(domainOperations, domainOutcomes) };
     if (syncOperation) {
       await client.query(
         `UPDATE sync_operations SET result_json = $1::jsonb, http_status = 200, processed_at = $2
@@ -1700,11 +1881,13 @@ module.exports = {
   addAudit,
   authenticateCompanyUser,
   authenticateSupportUser,
+  completeDomainOperation,
   close,
   createCompanyAccount,
   engine: "postgres",
   exportTenantSnapshot,
   getAudit,
+  getDomainOperation,
   getSnapshot,
   findDocumentByAccessKey,
   initialize: ensureSchema,
@@ -1713,6 +1896,7 @@ module.exports = {
   listTenantAccounts,
   mergeSnapshotPatch,
   reconcileSaasUsersFromSnapshots,
+  registerOrReplayDomainOperation,
   reserveDocumentSequence,
   resetCompanyUserPassword,
   restoreTenantSnapshot,

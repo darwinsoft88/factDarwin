@@ -201,6 +201,47 @@ test("keeps legacy snapshots without creditAdjustments compatible", () => {
   assert.doesNotThrow(() => validateSnapshot(merged));
 });
 
+test("accepts legacy adjustments only when operationId is truly absent", () => {
+  const legacy = adjustment("legacy-adjustment", 10);
+  delete legacy.operationId;
+  const merged = applySnapshotPatch(baseData(), { creditAdjustments: [legacy] });
+  assert.equal(Object.prototype.hasOwnProperty.call(merged.creditAdjustments[0], "operationId"), false);
+  assert.equal(merged.creditAdjustments[0].id, "legacy-adjustment");
+});
+
+test("accepts a valid modern adjustment and a mixed legacy-modern patch", () => {
+  const legacy = adjustment("legacy-adjustment", 10);
+  delete legacy.operationId;
+  const modern = adjustment("modern-adjustment", 15, "APPLIED", {
+    operationId: "credit-adjustment-operation:modern-adjustment"
+  });
+  const merged = applySnapshotPatch(baseData(), { creditAdjustments: [legacy, modern] });
+  assert.equal(merged.creditAdjustments.length, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(merged.creditAdjustments.find((item) => item.id === legacy.id), "operationId"), false);
+  assert.equal(merged.creditAdjustments.find((item) => item.id === modern.id).operationId, modern.operationId);
+});
+
+test("rejects every explicitly present invalid adjustment operationId", () => {
+  const invalidOperationIds = [undefined, null, "", "   ", 123, "x".repeat(201), " op-1 "];
+  invalidOperationIds.forEach((operationId, index) => {
+    assert.throws(
+      () => applySnapshotPatch(baseData(), {
+        creditAdjustments: [adjustment(`invalid-operation-${index}`, 10, "APPLIED", { operationId })]
+      }),
+      /operationId debe ser texto no vacio, sin espacios externos y de hasta 200 caracteres/
+    );
+  });
+});
+
+test("keeps financial validation strict for legacy adjustments", () => {
+  const invalidLegacy = adjustment("legacy-invalid-amount", 0);
+  delete invalidLegacy.operationId;
+  assert.throws(
+    () => applySnapshotPatch(baseData(), { creditAdjustments: [invalidLegacy] }),
+    /el importe debe ser mayor que cero/
+  );
+});
+
 test("rejects null, undefined, non-object, missing and empty adjustment ids before merge", () => {
   for (const invalid of [null, undefined, "invalid", adjustment("", 10), adjustment("   ", 10), { ...adjustment("adjustment-1", 10), id: undefined }]) {
     assert.throws(
