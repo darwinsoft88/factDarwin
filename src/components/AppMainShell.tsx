@@ -118,8 +118,18 @@ export function AppMainShell({
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         >
           {activeTab === "dashboard" && <DashboardScreen data={data} user={session} onNavigate={onTabChange} ListItemComponent={ListItem} />}
-          {activeTab === "ventas" && <SalesScreen mode="sale" data={data} user={session} backendToken={backendToken} persist={persist} persistMutation={persistMutation} onXml={onXml} />}
-          {activeTab === "documentos" && <SalesScreen mode="documents" data={data} user={session} backendToken={backendToken} persist={persist} persistMutation={persistMutation} onXml={onXml} />}
+          {(activeTab === "ventas" || activeTab === "documentos") && (
+            <SalesScreen
+              mode={activeTab === "ventas" ? "sale" : "documents"}
+              data={data}
+              user={session}
+              backendToken={backendToken}
+              persist={persist}
+              persistMutation={persistMutation}
+              onXml={onXml}
+              onOpenSale={() => onTabChange("ventas")}
+            />
+          )}
           {activeTab === "clientes" && <ClientsScreen data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persist={persist} ListItemComponent={ListItem} />}
           {activeTab === "productos" && <ProductsScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} BarcodeScannerModalComponent={BarcodeScannerModal} />}
           {activeTab === "inventario" && <InventoryScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} />}

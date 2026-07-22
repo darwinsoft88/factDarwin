@@ -35,6 +35,7 @@ export function SalesScreen({
   persist,
   persistMutation,
   onXml,
+  onOpenSale,
   mode = "sale"
 }: {
   data: AppData;
@@ -43,6 +44,7 @@ export function SalesScreen({
   persist: (data: AppData) => Promise<void>;
   persistMutation: PersistMutation;
   onXml: (xml: string) => void;
+  onOpenSale: () => void;
   mode?: SalesScreenMode;
 }) {
   const {
@@ -505,17 +507,26 @@ export function SalesScreen({
         <>
           <SalesDocumentsSection
             cancelDocument={voidSale}
-            convertProforma={convertProforma}
+            convertProforma={(sale, target) => {
+              convertProforma(sale, target);
+              onOpenSale();
+            }}
             createCreditNoteRide={createCreditNoteRide}
             createProforma={createProforma}
             createRide={createRide}
             createTicket={createTicket}
             data={data}
-            editSale={editSale}
+            editSale={(sale) => {
+              editSale(sale);
+              onOpenSale();
+            }}
             emailSale={emailSale}
             endDate={saleEndDate}
             filteredSales={filteredSales}
-            invoiceFromTicket={invoiceFromTicket}
+            invoiceFromTicket={(sale) => {
+              invoiceFromTicket(sale);
+              onOpenSale();
+            }}
             invoiceSearch={invoiceSearch}
             invoiceStats={invoiceStats}
             notice={notice}
