@@ -7,7 +7,6 @@ import { CalendarDateInput } from "./CalendarDateInput";
 import { CommercialSupportButton } from "./CommercialSupportButton";
 import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { ListItem } from "./ListItem";
-import { OperationAlertsBanner } from "./OperationAlertsBanner";
 import { SyncStatusBanner } from "./SyncStatusBanner";
 import { DashboardScreen } from "../screens/DashboardScreen";
 import { ReportsScreen } from "../screens/ReportsScreen";
@@ -39,7 +38,6 @@ type AppMainShellProps = {
   licenseActive: boolean;
   licenseBannerVisible: boolean;
   session: User;
-  syncActionLoading: boolean;
   syncState: SyncState;
   ensureBackendToken: (backendUrl: string) => Promise<string>;
   onOpenLicense: () => void;
@@ -47,7 +45,6 @@ type AppMainShellProps = {
   onOpenSupport: () => void;
   onOpenSyncCenter: () => void;
   onRefreshBackend: () => Promise<void>;
-  onRetryPendingSync: () => Promise<void>;
   onTabChange: React.Dispatch<React.SetStateAction<AppTab>>;
   onXml: React.Dispatch<React.SetStateAction<string>>;
   persist: (data: AppData) => Promise<void>;
@@ -74,10 +71,8 @@ export function AppMainShell({
   persist,
   persistMutation,
   session,
-  syncActionLoading,
   syncState,
   onOpenSyncCenter,
-  onRetryPendingSync,
   ensureBackendToken
 }: AppMainShellProps) {
   const [floatingOverlay, setFloatingOverlay] = useState<React.ReactNode>(null);
@@ -100,15 +95,11 @@ export function AppMainShell({
 
         <SyncStatusBanner
           data={data}
-          loading={syncActionLoading || syncState === "syncing"}
           syncState={syncState}
           onOpen={onOpenSyncCenter}
-          onRetry={() => { void onRetryPendingSync(); }}
         />
 
         <LicenseExpiryBanner license={data.license} onOpenLicense={onOpenLicense} visible={licenseBannerVisible} />
-
-        <OperationAlertsBanner data={data} onNavigate={onTabChange} />
 
         <AppTabs availableTabs={availableTabs} activeTab={activeTab} onChange={onTabChange} />
 

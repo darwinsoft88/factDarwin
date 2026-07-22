@@ -119,6 +119,10 @@ export function AppGlobalModals({
         syncActionLoading={syncActionLoading}
         onClose={() => setSyncCenterVisible(false)}
         onRetryPending={() => { void onRetryPendingSync(); }}
+        onReviewDocuments={() => {
+          setSyncCenterVisible(false);
+          setTab("documentos");
+        }}
         onTestServer={() => { void onTestSyncServer(); }}
       />
 

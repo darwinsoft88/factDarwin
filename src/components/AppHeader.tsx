@@ -44,7 +44,7 @@ export function AppHeader({
         </View>
       </View>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel="Abrir menu" style={styles.headerMenuButton} onPress={onOpenMenu}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Abrir menu" hitSlop={4} style={styles.headerMenuButton} onPress={onOpenMenu}>
         <MenuIcon />
       </Pressable>
     </View>
@@ -53,8 +53,8 @@ export function AppHeader({
 
 const styles = StyleSheet.create({
   header: {
-    paddingHorizontal: 14,
-    paddingBottom: 8,
+    paddingHorizontal: 12,
+    paddingBottom: 5,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -66,7 +66,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
     minWidth: 0
   },
   flex: {
@@ -130,9 +130,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#fee2e2"
   },
   headerMenuButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#f8fafc",

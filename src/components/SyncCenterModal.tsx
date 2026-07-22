@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Empty } from "./common";
 import { OperationTile } from "./metrics";
 import { AppData, PendingSyncItem } from "../types";
 import { displayInvoiceStatus } from "../utils/invoiceStatus";
+import { buildDashboard } from "../utils/dashboard";
 import { documentTypeLabel } from "../utils/sales";
 import { sriPendingSendSummary } from "../utils/sriRetryPolicy";
 import { formatAuditDate, formatSyncStatus, SyncState } from "../utils/support";
@@ -15,12 +16,15 @@ type SyncCenterModalProps = {
   syncActionLoading: boolean;
   onClose: () => void;
   onRetryPending: () => void;
+  onReviewDocuments: () => void;
   onTestServer: () => void;
 };
 
-export function SyncCenterModal({ visible, data, syncState, syncActionLoading, onClose, onRetryPending, onTestServer }: SyncCenterModalProps) {
+export function SyncCenterModal({ visible, data, syncState, syncActionLoading, onClose, onRetryPending, onReviewDocuments, onTestServer }: SyncCenterModalProps) {
   const pendingSync: PendingSyncItem[] = data.pendingSync || [];
   const sriSummary = sriPendingSendSummary(data);
+  const dashboard = useMemo(() => buildDashboard(data), [data]);
+  const reviewCount = dashboard.pendingCount + dashboard.rejectedCount;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -36,6 +40,24 @@ export function SyncCenterModal({ visible, data, syncState, syncActionLoading, o
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.creditModalContent}>
+            <View style={styles.attentionCard}>
+              <View style={styles.attentionCopy}>
+                <Text style={styles.sectionMiniTitle}>Documentos pendientes</Text>
+                <Text style={styles.attentionCount}>{sriSummary.pendingCount}</Text>
+              </View>
+              <Pressable style={[styles.primaryButton, syncActionLoading && styles.disabledButton]} onPress={onRetryPending} disabled={syncActionLoading}>
+                <Text style={styles.primaryButtonText}>{syncActionLoading ? "Procesando..." : "Reintentar"}</Text>
+              </Pressable>
+            </View>
+            <View style={styles.attentionCard}>
+              <View style={styles.attentionCopy}>
+                <Text style={styles.sectionMiniTitle}>Facturas por revisar</Text>
+                <Text style={styles.attentionCount}>{reviewCount}</Text>
+              </View>
+              <Pressable style={styles.secondaryActionButton} onPress={onReviewDocuments}>
+                <Text style={styles.secondaryActionText}>Revisar</Text>
+              </Pressable>
+            </View>
             <View style={styles.operationGrid}>
               <OperationTile title="Pendientes" value={String(pendingSync.length)} detail="Cambios locales sin subir" tone={pendingSync.length ? "warning" : "success"} icon="cloud-upload-outline" />
               <OperationTile title="SRI pendientes" value={String(sriSummary.pendingCount)} detail="Sin enviar o autorizar" tone={sriSummary.pendingCount ? "warning" : "success"} icon="file-clock-outline" />
@@ -143,6 +165,28 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8
+  },
+  attentionCard: {
+    minHeight: 72,
+    borderWidth: 1,
+    borderColor: "#fed7aa",
+    borderRadius: 10,
+    padding: 10,
+    backgroundColor: "#fff7ed",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12
+  },
+  attentionCopy: {
+    flex: 1,
+    minWidth: 0
+  },
+  attentionCount: {
+    marginTop: 2,
+    color: "#92400e",
+    fontSize: 20,
+    fontWeight: "900"
   },
   inlineInfo: {
     color: "#475569",
