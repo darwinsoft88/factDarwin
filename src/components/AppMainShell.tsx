@@ -100,7 +100,10 @@ export function AppMainShell({
         <SyncStatusBanner
           data={data}
           syncState={syncState}
+          retrying={syncActionLoading}
           onOpen={onOpenSyncCenter}
+          onRetry={onRetryPendingSync}
+          onView={() => onTabChange("documentos")}
         />
 
         <LicenseExpiryBanner license={data.license} onOpenLicense={onOpenLicense} visible={licenseBannerVisible} />
