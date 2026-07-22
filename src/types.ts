@@ -44,6 +44,11 @@ export type Product = {
 };
 
 export type InventoryMovementType = "entrada" | "salida" | "ajuste";
+export type SaleInventoryOperationType = "APPLY" | "REVERSE";
+export type CreditNoteInventoryOperationType = "CREDIT_NOTE_RETURN" | "CREDIT_NOTE_RETURN_REVERSE";
+export type InventoryOperationType = SaleInventoryOperationType | CreditNoteInventoryOperationType;
+export type SaleInventoryState = "UNKNOWN" | "NOT_APPLIED" | "APPLIED" | "REVERSED";
+export type CreditNoteInventoryState = "UNKNOWN" | "NOT_APPLIED" | "APPLIED" | "REVERSED";
 
 export type InventoryMovement = {
   id: string;
@@ -55,6 +60,9 @@ export type InventoryMovement = {
   stockAfter: number;
   reason: string;
   reference?: string;
+  saleId?: string;
+  inventoryOperationId?: string;
+  inventoryOperationType?: InventoryOperationType;
   userId: string;
   createdAt: string;
 };
@@ -93,6 +101,11 @@ export type CashClosing = {
 
 export type CreditPayment = {
   id: string;
+  operationId?: string;
+  batchId?: string;
+  batchOperationId?: string;
+  batchSize?: number;
+  voidOperationId?: string;
   saleId: string;
   clientId: string;
   establishment?: string;
@@ -108,6 +121,24 @@ export type CreditPayment = {
   voidedByUserId?: string;
   voidedByUserName?: string;
   voidReason?: string;
+};
+
+export type CreditAdjustmentType = "CREDIT_NOTE";
+export type CreditAdjustmentState = "UNKNOWN" | "APPLIED" | "REVERSED";
+
+export type CreditAdjustment = {
+  id: string;
+  operationId: string;
+  type: CreditAdjustmentType;
+  sourceCreditNoteId: string;
+  sourceSaleId: string;
+  clientId: string;
+  amount: number;
+  state: CreditAdjustmentState;
+  appliedAt?: string;
+  reversedAt?: string;
+  userId: string;
+  reason?: string;
 };
 
 export type Issuer = {
@@ -202,6 +233,10 @@ export type Sale = {
     error?: string;
   }[];
   sourceSaleId?: string;
+  inventoryState?: SaleInventoryState;
+  inventoryOperationId?: string;
+  creditNoteInventoryState?: CreditNoteInventoryState;
+  creditNoteInventoryOperationId?: string;
   autoInvoiceOnSync?: boolean;
   autoInvoiceAttemptedAt?: string;
   autoInvoiceLastError?: string;
@@ -282,12 +317,19 @@ export type RemissionGuide = {
   items: SaleItem[];
 };
 
+export type PendingSyncPatch = {
+  /** Identifica de forma durable una unidad lógica de sincronización y se conserva en todos sus reintentos. */
+  requestId?: string;
+  [key: string]: unknown;
+};
+
 export type PendingSyncItem = {
   id: string;
   createdAt: string;
   attempts: number;
   lastError?: string;
   title: string;
+  /** Payload persistido; los registros nuevos usan PendingSyncPatch y los legacy se validan al cargar. */
   patch: unknown;
 };
 
@@ -318,6 +360,7 @@ export type AppData = {
   auditLogs: AuditLog[];
   sales: Sale[];
   creditPayments: CreditPayment[];
+  creditAdjustments?: CreditAdjustment[];
   receivedRetentions: ReceivedRetention[];
   guides: RemissionGuide[];
   cashClosings: CashClosing[];

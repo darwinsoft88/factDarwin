@@ -10,10 +10,15 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
   })
 }));
 
-import { initialData, loadData, PRODUCTION_BACKEND_URL, resolveStoredBackendUrl, saveData } from "../storage";
+import { initialData, loadData, migrateStoredPendingSyncRequestIds, PRODUCTION_BACKEND_URL, resolveStoredBackendUrl, saveData } from "../storage";
 import { PendingSyncItem, Sale } from "../../types";
 
 const storageKey = "factura-sri-mobile:v1";
+const outboxKey = "factura-sri-mobile:pending-outbox:v1";
+
+function pending(id: string, patch: unknown): PendingSyncItem {
+  return { id, createdAt: "2026-06-29T10:00:00.000Z", attempts: 0, title: "Pendiente", patch };
+}
 
 describe("storage pending outbox", () => {
   beforeEach(() => {
@@ -82,5 +87,60 @@ describe("storage pending outbox", () => {
     const recovered = await loadData();
 
     expect(recovered.pendingSync).toEqual([]);
+  });
+
+  it("migrates a legacy pending immediately and preserves its identity across two restarts", async () => {
+    store.set(outboxKey, JSON.stringify([pending("legacy", { clients: [] })]));
+    const first = await loadData();
+    const firstId = (first.pendingSync?.[0]?.patch as { requestId: string }).requestId;
+    expect(firstId).toMatch(/^sync_/);
+    expect(JSON.parse(store.get(outboxKey) || "[]")[0].patch.requestId).toBe(firstId);
+
+    const second = await loadData();
+    const third = await loadData();
+    expect((second.pendingSync?.[0]?.patch as { requestId: string }).requestId).toBe(firstId);
+    expect((third.pendingSync?.[0]?.patch as { requestId: string }).requestId).toBe(firstId);
+  });
+
+  it("preserves a valid requestId through JSON round trips", async () => {
+    await saveData({ ...initialData, pendingSync: [pending("valid", { requestId: "sync_valid", clients: [] })] });
+    store.delete(storageKey);
+    const restored = await loadData();
+    expect((restored.pendingSync?.[0]?.patch as { requestId: string }).requestId).toBe("sync_valid");
+  });
+
+  it.each([
+    ["invalid-null", { requestId: null }],
+    ["invalid-empty", { requestId: "" }],
+    ["invalid-non-string", { requestId: 42 }]
+  ])("propagates migration error and preserves invalid outbox: %s", async (pendingId, patch) => {
+    const original = JSON.stringify([pending(pendingId, patch)]);
+    store.set(outboxKey, original);
+    await expect(loadData()).rejects.toMatchObject({
+      name: "PendingSyncRequestIdMigrationError",
+      code: "PENDING_SYNC_REQUEST_ID_INVALID",
+      pendingId
+    });
+    expect(store.get(outboxKey)).toBe(original);
+  });
+
+  it("migrateStoredPendingSyncRequestIds is idempotent", async () => {
+    store.set(outboxKey, JSON.stringify([pending("migrate", { clients: [] })]));
+    const loaded = await loadData();
+    const requestId = (loaded.pendingSync?.[0]?.patch as { requestId: string }).requestId;
+    const first = await migrateStoredPendingSyncRequestIds();
+    const second = await migrateStoredPendingSyncRequestIds();
+    expect((first.pendingSync?.[0]?.patch as { requestId: string }).requestId).toBe(requestId);
+    expect((second.pendingSync?.[0]?.patch as { requestId: string }).requestId).toBe(requestId);
+  });
+
+  it("merges snapshot and outbox by pending id without losing durable identity", async () => {
+    const snapshotPending = pending("shared", { clients: [] });
+    const outboxPending = pending("shared", { requestId: "sync_outbox", clients: [] });
+    store.set(storageKey, JSON.stringify({ ...initialData, pendingSync: [snapshotPending] }));
+    store.set(outboxKey, JSON.stringify([outboxPending]));
+    const loaded = await loadData();
+    expect(loaded.pendingSync).toHaveLength(1);
+    expect((loaded.pendingSync?.[0]?.patch as { requestId: string }).requestId).toBe("sync_outbox");
   });
 });

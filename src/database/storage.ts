@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { AppData, PendingSyncItem, User } from "../types";
-import { sortPendingSyncFifo } from "../utils/pendingSync";
+import { AppData, PendingSyncItem, PendingSyncPatch, User } from "../types";
+import { identifyIncrementalPatch, normalizeSyncRequestId, sortPendingSyncFifo } from "../utils/pendingSync";
 import { sanitizeAppData } from "../validation";
 
 // Clave de almacenamiento para AsyncStorage. Cambiar si se necesita mantener varias versiones o entornos.
@@ -106,6 +106,17 @@ export class PendingOutboxWriteError extends Error {
   }
 }
 
+export class PendingSyncRequestIdMigrationError extends Error {
+  readonly code = "PENDING_SYNC_REQUEST_ID_INVALID" as const;
+  readonly pendingId: string;
+
+  constructor(pendingId: string) {
+    super("Un pendiente contiene un identificador de sincronizacion invalido. El registro original fue preservado.");
+    this.name = "PendingSyncRequestIdMigrationError";
+    this.pendingId = pendingId;
+  }
+}
+
 function assertStoredSnapshotShape(value: unknown): asserts value is AppData {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Stored snapshot root must be an object.");
@@ -136,8 +147,8 @@ function isStorageQuotaError(error: unknown) {
     message.includes("exceeded");
 }
 
-function compactPatchForPendingStorage(patch: unknown) {
-  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return patch;
+function compactPatchForPendingStorage(patch: unknown): PendingSyncPatch {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return {};
   const compacted: Record<string, unknown> = {};
   Object.entries(patch as Record<string, unknown>).forEach(([key, value]) => {
     if (key !== "baseData") compacted[key] = value;
@@ -341,7 +352,10 @@ export async function loadData() {
   try {
     assertStoredSnapshotShape(parsed);
     const pendingOutbox = await loadPendingOutbox();
-    const pendingSync = mergePendingSync(parsed.pendingSync || [], pendingOutbox);
+    const mergedPendingSync = mergePendingSync(parsed.pendingSync || [], pendingOutbox);
+    const migratedPending = migratePendingSyncItems(mergedPendingSync);
+    if (migratedPending.changed) await savePendingOutbox(migratedPending.items);
+    const pendingSync = migratedPending.items;
     const normalized = {
       ...initialData,
       ...parsed,
@@ -370,7 +384,7 @@ export async function loadData() {
     };
     return publishLoadedData(sanitizeAppData(materializePendingPatches(normalized, pendingSync)), readRevision);
   } catch (error) {
-    if (error instanceof PendingOutboxRecoveryError) throw error;
+    if (error instanceof PendingOutboxRecoveryError || error instanceof PendingSyncRequestIdMigrationError) throw error;
     throw new StorageRecoveryError("normalize", { snapshotExists: true, approximateSize: raw.length, cause: error });
   }
 }
@@ -465,10 +479,47 @@ async function loadPendingOutbox(): Promise<PendingSyncItem[]> {
       }
       return compactPendingItemForStorage(pending);
     });
-    return sortPendingSyncFifo(validated);
+    const migrated = migratePendingSyncItems(validated);
+    const ordered = sortPendingSyncFifo(migrated.items);
+    if (migrated.changed) await savePendingOutbox(ordered);
+    return ordered;
   } catch (error) {
+    if (error instanceof PendingSyncRequestIdMigrationError) throw error;
     throw new PendingOutboxRecoveryError("validate", { outboxExists: true, approximateSize: raw.length, cause: error });
   }
+}
+
+function migratePendingSyncRequestId(pending: PendingSyncItem) {
+  if (!pending.patch || typeof pending.patch !== "object" || Array.isArray(pending.patch)) {
+    throw new PendingSyncRequestIdMigrationError(pending.id);
+  }
+  const patch = pending.patch as PendingSyncPatch;
+  const hasRequestId = Object.prototype.hasOwnProperty.call(patch, "requestId");
+  if (hasRequestId) {
+    const rawRequestId = patch.requestId;
+    const requestId = normalizeSyncRequestId(rawRequestId);
+    if (!requestId) throw new PendingSyncRequestIdMigrationError(pending.id);
+    return pending;
+  }
+  const identified = identifyIncrementalPatch(patch as never);
+  return { ...pending, patch: identified };
+}
+
+function migratePendingSyncItems(items: PendingSyncItem[]) {
+  let changed = false;
+  const migrated = items.map((pending) => {
+    const item = migratePendingSyncRequestId(pending);
+    if (item !== pending) changed = true;
+    return item;
+  });
+  return { items: migrated, changed };
+}
+
+export async function migrateStoredPendingSyncRequestIds() {
+  return updateStoredData((current) => {
+    const migrated = migratePendingSyncItems(current.pendingSync || []);
+    return migrated.changed ? { ...current, pendingSync: migrated.items } : current;
+  });
 }
 
 async function savePendingOutbox(pendingSync: PendingSyncItem[]) {
@@ -486,11 +537,25 @@ async function savePendingOutbox(pendingSync: PendingSyncItem[]) {
 }
 
 function mergePendingSync(primary: PendingSyncItem[], secondary: PendingSyncItem[]) {
-  const byId = new Map<string, PendingSyncItem>();
-  [...secondary, ...primary].forEach((item) => {
-    if (item?.id) byId.set(item.id, item);
+  const secondaryById = new Map<string, PendingSyncItem>();
+  secondary.forEach((item) => {
+    if (item?.id && !secondaryById.has(item.id)) secondaryById.set(item.id, item);
   });
-  return sortPendingSyncFifo(Array.from(byId.values()));
+
+  const mergedIds = new Set<string>();
+  const merged = primary.flatMap((item) => {
+    if (!item?.id || mergedIds.has(item.id)) return [];
+    mergedIds.add(item.id);
+    return [secondaryById.get(item.id) || item];
+  });
+
+  secondary.forEach((item) => {
+    if (!item?.id || mergedIds.has(item.id)) return;
+    mergedIds.add(item.id);
+    merged.push(item);
+  });
+
+  return sortPendingSyncFifo(merged);
 }
 
 function buildPendingRecoverySnapshot(baseData: AppData, pendingSync: PendingSyncItem[]) {

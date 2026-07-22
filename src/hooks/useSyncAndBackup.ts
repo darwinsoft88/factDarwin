@@ -10,14 +10,15 @@ import {
 import { backupAppData, checkBackendHealth, loginBackend, mergeBackendData, restoreAppData } from "../services/backend";
 import { hashPassword } from "../services/security";
 import { loadSession, saveData, saveSession } from "../database";
-import { updateStoredData } from "../database/storage";
-import { AppData, PendingSyncItem, User } from "../types";
+import { migrateStoredPendingSyncRequestIds, updateStoredData } from "../database/storage";
+import type { AppDataMutation } from "../database/storage";
+import { AppData, PendingSyncItem, PendingSyncPatch, User } from "../types";
 import { autoRetrySriDocuments } from "../utils/autoRetrySriDocuments";
 import { autoInvoiceOfflineTickets } from "../utils/autoInvoiceTickets";
 import { mergeAppDataSnapshots } from "../utils/dataMerge";
 import { showMessage } from "../utils/dialogs";
 import { shortText } from "../utils/format";
-import { applyPendingSyncResult, clearPendingSyncItems, markPendingSyncAttempt, sortPendingSyncFifo } from "../utils/pendingSync";
+import { applyPendingSyncResult, clearPendingSyncItems, markPendingSyncAttempt, normalizeSyncRequestId, sortPendingSyncFifo } from "../utils/pendingSync";
 import { isSessionTokenExpired } from "../utils/sessionToken";
 import { sriPendingSendSummary } from "../utils/sriRetryPolicy";
 import {
@@ -31,10 +32,15 @@ import { sanitizeAppData } from "../validation";
 
 type RefreshReason = "login" | "active" | "manual";
 type ConnectivityReason = "network" | "active" | "pending";
-type PersistOptions = {
+export type PersistOptions = {
   skipAutoBackup?: boolean;
   syncState?: SyncState;
 };
+
+export type PersistMutation = (
+  mutation: AppDataMutation,
+  options?: PersistOptions
+) => Promise<AppData>;
 
 type UseSyncAndBackupParams = {
   backendTokenRef: React.MutableRefObject<string>;
@@ -132,9 +138,28 @@ export function useSyncAndBackup({
     }
   }, [dataRef, setData, setSyncState]);
 
+  const persistMutation = useCallback<PersistMutation>(async (mutation, options = {}) => {
+    const persisted = await updateStoredData(mutation);
+
+    dataRef.current = persisted;
+    setData(persisted);
+    setSyncState(
+      options.syncState ??
+        (persisted.autoBackupEnabled === false ? "synced" : "pending")
+    );
+
+    if (!options.skipAutoBackup) {
+      scheduleAutoBackupRef.current(persisted);
+    }
+
+    return persisted;
+  }, [dataRef, setData, setSyncState]);
+
   const flushPendingSyncQueue = useCallback(async (backendUrl: string, token: string, snapshot: AppData) => {
-    const pending = sortPendingSyncFifo(snapshot.pendingSync || []);
-    if (pending.length === 0) return snapshot;
+    const requiresMigration = (snapshot.pendingSync || []).some((item) => !normalizeSyncRequestId((item.patch as PendingSyncPatch)?.requestId));
+    const durableSnapshot = requiresMigration ? await migrateStoredPendingSyncRequestIds() : snapshot;
+    const pending = sortPendingSyncFifo(durableSnapshot.pendingSync || []);
+    if (pending.length === 0) return durableSnapshot;
 
     const remaining: PendingSyncItem[] = [];
     for (const item of pending) {
@@ -351,25 +376,29 @@ export function useSyncAndBackup({
       const current = dataRef.current;
       if (activeUser && current.backendUrl && current.autoBackupEnabled !== false) {
         const token = await ensureBackendToken(current.backendUrl);
-        const autoInvoiceResult = await autoInvoiceOfflineTickets({ backendToken: token, data: current, user: activeUser });
+        const autoInvoiceResult = await autoInvoiceOfflineTickets({
+          backendToken: token,
+          initialData: current,
+          getCurrentData: () => dataRef.current,
+          persistMutation,
+          user: activeUser
+        });
         if (autoInvoiceResult.processed > 0) {
-          const sanitized = sanitizeAppData(autoInvoiceResult.data);
-          setData(sanitized);
-          dataRef.current = sanitized;
-          await saveData(sanitized);
-          await runAutoBackup(sanitized);
+          await runAutoBackup(dataRef.current);
           if (autoInvoiceResult.authorized > 0) {
             showMessage("Tickets facturados", `${autoInvoiceResult.authorized} ticket(s) offline fueron facturados automaticamente.`);
           }
         }
         const retryBaseData = dataRef.current;
-        const autoRetryResult = await autoRetrySriDocuments({ backendToken: token, data: retryBaseData, user: activeUser });
+        const autoRetryResult = await autoRetrySriDocuments({
+          backendToken: token,
+          initialData: retryBaseData,
+          getCurrentData: () => dataRef.current,
+          persistMutation,
+          user: activeUser
+        });
         if (autoRetryResult.processed > 0 || autoRetryResult.expired > 0) {
-          const sanitized = sanitizeAppData(autoRetryResult.data);
-          setData(sanitized);
-          dataRef.current = sanitized;
-          await saveData(sanitized);
-          await runAutoBackup(sanitized);
+          await runAutoBackup(dataRef.current);
           if (autoRetryResult.expired > 0) {
             showMessage("SRI fuera de fecha", `${autoRetryResult.expired} documento(s) se marcaron como anulados por estar fuera del dia permitido.`);
           }
@@ -384,7 +413,7 @@ export function useSyncAndBackup({
     } finally {
       connectivitySyncRunningRef.current = false;
     }
-  }, [dataRef, ensureBackendToken, flushAutoBackup, refreshFromBackend, runAutoBackup, sessionRef, setData, syncStateRef]);
+  }, [dataRef, ensureBackendToken, flushAutoBackup, persistMutation, refreshFromBackend, runAutoBackup, sessionRef, syncStateRef]);
 
   const openSyncCenter = useCallback(() => {
     setAppMenuVisible(false);
@@ -513,6 +542,7 @@ export function useSyncAndBackup({
     ensureBackendToken,
     openSyncCenter,
     persist,
+    persistMutation,
     refreshFromBackend,
     retryPendingSync,
     runManualSync,
