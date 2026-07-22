@@ -38,8 +38,15 @@ describe("autoRetrySriDocuments", () => {
 
   it("anula documentos SRI vencidos y no los deja para reintento", () => {
     const data = {
-      ...initialData,
-      sales: [{ ...baseSale, id: "old", status: "PENDIENTE_SRI" as const }]
+  ...initialData,
+  sales: [
+    {
+      ...baseSale,
+      id: "old",
+      status: "PENDIENTE_SRI" as const,
+      inventoryState: "NOT_APPLIED" as const
+    }
+  ]
     };
     const result = expireStaleSriPendingDocuments(data, testUser, new Date("2026-06-02T10:00:00.000Z"));
 
