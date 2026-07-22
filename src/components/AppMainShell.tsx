@@ -38,12 +38,14 @@ type AppMainShellProps = {
   licenseActive: boolean;
   licenseBannerVisible: boolean;
   session: User;
+  syncActionLoading: boolean;
   syncState: SyncState;
   ensureBackendToken: (backendUrl: string) => Promise<string>;
   onOpenLicense: () => void;
   onOpenMenu: () => void;
   onOpenSupport: () => void;
   onOpenSyncCenter: () => void;
+  onRetryPendingSync: () => void;
   onRefreshBackend: () => Promise<void>;
   onTabChange: React.Dispatch<React.SetStateAction<AppTab>>;
   onXml: React.Dispatch<React.SetStateAction<string>>;
@@ -71,8 +73,10 @@ export function AppMainShell({
   persist,
   persistMutation,
   session,
+  syncActionLoading,
   syncState,
   onOpenSyncCenter,
+  onRetryPendingSync,
   ensureBackendToken
 }: AppMainShellProps) {
   const [floatingOverlay, setFloatingOverlay] = useState<React.ReactNode>(null);

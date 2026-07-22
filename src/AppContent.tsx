@@ -249,12 +249,14 @@ export function AppContent() {
         licenseActive={licenseState.active}
         licenseBannerVisible={licenseBannerVisible}
         session={session}
+        syncActionLoading={syncActionLoading}
         syncState={syncState}
         ensureBackendToken={ensureBackendToken}
         onOpenLicense={() => setLicenseVisible(true)}
         onOpenMenu={() => setAppMenuVisible(true)}
         onOpenSupport={supportDiagnostics.open}
         onOpenSyncCenter={openSyncCenter}
+        onRetryPendingSync={() => { void retryPendingSync(); }}
         onRefreshBackend={() => refreshFromBackend("manual")}
         onTabChange={setTab}
         onXml={setXmlPreview}
