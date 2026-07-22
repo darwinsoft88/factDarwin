@@ -1,6 +1,7 @@
 import { initialData } from "../../database";
-import { CreditPayment, InventoryMovement, Product, Sale } from "../../types";
-import { mergeAppDataSnapshots } from "../dataMerge";
+import { AppData, CreditAdjustment, CreditPayment, InventoryMovement, Product, Sale } from "../../types";
+import { CreditAdjustmentMergeError, mergeAppDataSnapshots, mergeCreditAdjustments } from "../dataMerge";
+import type { IncrementalPatch } from "../sync";
 import { normalizedEstablishments } from "../establishments";
 
 function sale(id: string, sequence: string, createdAt: string): Sale {
@@ -58,6 +59,22 @@ function creditPayment(id: string, saleId: string, amount: number, createdAt: st
     paymentMethod: "01",
     note: "",
     createdAt
+  };
+}
+
+function creditAdjustment(id: string, overrides: Partial<CreditAdjustment> = {}): CreditAdjustment {
+  return {
+    id,
+    operationId: `credit-adjustment-operation:${id}`,
+    type: "CREDIT_NOTE",
+    sourceCreditNoteId: `note-${id}`,
+    sourceSaleId: `sale-${id}`,
+    clientId: "client-1",
+    amount: 10,
+    state: "APPLIED",
+    appliedAt: "2026-05-01T00:00:00.000Z",
+    userId: "user-1",
+    ...overrides
   };
 }
 
@@ -271,5 +288,73 @@ describe("dataMerge", () => {
     expect(merged.creditPayments.map((payment) => payment.id)).toEqual(["remote-payment"]);
     expect(merged.sales.find((item) => item.id === "sale-credit")?.creditBalance).toBe(0);
     expect(merged.sales.find((item) => item.id === "sale-credit")?.creditStatus).toBe("pagado");
+  });
+
+  it("keeps exclusive remote and local adjustments without deduplicating by note or amount", () => {
+    const remote = creditAdjustment("remote", { sourceCreditNoteId: "same-note", amount: 10 });
+    const local = creditAdjustment("local", { sourceCreditNoteId: "same-note", amount: 10 });
+    expect(mergeCreditAdjustments([remote], [local]).map((item) => item.id)).toEqual(["remote", "local"]);
+  });
+
+  it("merges the same id and operation once while preserving unknown fields", () => {
+    const remote = creditAdjustment("shared", { operationId: "shared-operation", remoteField: true } as Partial<CreditAdjustment>);
+    const local = creditAdjustment("shared", { operationId: "shared-operation", localField: true } as Partial<CreditAdjustment>);
+    const [merged] = mergeCreditAdjustments([remote], [local]);
+    expect(merged).toMatchObject({ id: "shared", operationId: "shared-operation", remoteField: true, localField: true });
+  });
+
+  it("never revives a reversed adjustment with an applied version", () => {
+    const reversed = creditAdjustment("shared", {
+      state: "REVERSED",
+      reverseOperationId: "reverse-operation:shared",
+      reversedAt: "2026-05-02T00:00:00.000Z"
+    });
+    const applied = creditAdjustment("shared");
+    expect(mergeCreditAdjustments([reversed], [applied])[0]).toMatchObject({
+      state: "REVERSED",
+      reverseOperationId: "reverse-operation:shared",
+      reversedAt: "2026-05-02T00:00:00.000Z"
+    });
+    expect(mergeCreditAdjustments([applied], [reversed])[0]?.state).toBe("REVERSED");
+  });
+
+  it.each([
+    ["operation conflict", [creditAdjustment("shared", { operationId: "operation-1" })], [creditAdjustment("shared", { operationId: "operation-2" })], "CREDIT_ADJUSTMENT_OPERATION_CONFLICT"],
+    ["operation identity conflict", [creditAdjustment("one", { operationId: "same-operation" })], [creditAdjustment("two", { operationId: "same-operation" })], "CREDIT_ADJUSTMENT_IDENTITY_CONFLICT"],
+    ["reverse conflict", [creditAdjustment("shared", { reverseOperationId: "reverse-1" })], [creditAdjustment("shared", { reverseOperationId: "reverse-2" })], "CREDIT_ADJUSTMENT_REVERSE_OPERATION_CONFLICT"],
+    ["reverse identity conflict", [creditAdjustment("one", { reverseOperationId: "same-reverse" })], [creditAdjustment("two", { reverseOperationId: "same-reverse" })], "CREDIT_ADJUSTMENT_IDENTITY_CONFLICT"]
+  ])("rejects %s", (_label, remote, local, code) => {
+    expect(() => mergeCreditAdjustments(remote as CreditAdjustment[], local as CreditAdjustment[])).toThrow(expect.objectContaining({ code }));
+  });
+
+  it.each([
+    ["invalid operation", { operationId: " invalid" }],
+    ["invalid reverse operation", { reverseOperationId: "" }],
+    ["overlong operation", { operationId: "x".repeat(201) }]
+  ])("rejects %s without normalizing identities", (_label, overrides) => {
+    expect(() => mergeCreditAdjustments([creditAdjustment("invalid", overrides)], [])).toThrow(CreditAdjustmentMergeError);
+    try {
+      mergeCreditAdjustments([creditAdjustment("invalid", overrides)], []);
+    } catch (error) {
+      expect(error).toMatchObject({ code: "INVALID_CREDIT_ADJUSTMENT_SNAPSHOT" });
+    }
+  });
+
+  it("keeps legacy and modern adjustments together in deterministic order", () => {
+    const legacy = creditAdjustment("legacy", { createdAt: "2026-05-02T00:00:00.000Z" } as Partial<CreditAdjustment>);
+    delete legacy.operationId;
+    const modern = creditAdjustment("modern", { createdAt: "2026-05-01T00:00:00.000Z" } as Partial<CreditAdjustment>);
+    expect(mergeCreditAdjustments([legacy], [modern]).map((item) => item.id)).toEqual(["modern", "legacy"]);
+  });
+
+  it("preserves adjustments through complete reconstruction and incremental patch typing", () => {
+    const remoteAdjustment = creditAdjustment("remote");
+    const localAdjustment = creditAdjustment("local");
+    const remote: AppData = { ...initialData, creditAdjustments: [remoteAdjustment] };
+    const local: AppData = { ...initialData, creditAdjustments: [localAdjustment] };
+    const merged = mergeAppDataSnapshots(remote, local);
+    const patch: IncrementalPatch = { baseData: merged, creditAdjustments: merged.creditAdjustments };
+    expect(merged.creditAdjustments?.map((item) => item.id)).toEqual(["remote", "local"]);
+    expect(patch.creditAdjustments).toEqual(merged.creditAdjustments);
   });
 });

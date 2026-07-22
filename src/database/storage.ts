@@ -28,6 +28,7 @@ const PENDING_PATCH_COLLECTIONS = [
   "products",
   "sales",
   "creditPayments",
+  "creditAdjustments",
   "receivedRetentions",
   "guides",
   "cashClosings",
@@ -130,6 +131,43 @@ function assertStoredSnapshotShape(value: unknown): asserts value is AppData {
   PENDING_PATCH_COLLECTIONS.forEach((key) => {
     if (snapshot[key] !== undefined && !Array.isArray(snapshot[key])) {
       throw new TypeError(`Stored snapshot ${key} must be an array.`);
+    }
+  });
+  assertStoredCreditAdjustments(snapshot.creditAdjustments);
+}
+
+type CreditAdjustmentIdentityErrorCode =
+  | "CREDIT_ADJUSTMENT_IDENTITY_CONFLICT"
+  | "CREDIT_ADJUSTMENT_OPERATION_CONFLICT"
+  | "CREDIT_ADJUSTMENT_REVERSE_OPERATION_CONFLICT"
+  | "INVALID_CREDIT_ADJUSTMENT_SNAPSHOT";
+
+function storedCreditAdjustmentError(code: CreditAdjustmentIdentityErrorCode) {
+  return Object.assign(new Error("Los ajustes de cartera almacenados requieren revision."), { code });
+}
+
+function validStoredIdentity(value: unknown) {
+  return typeof value === "string" && value.length > 0 && value.length <= 200 && value === value.trim();
+}
+
+function assertStoredCreditAdjustments(value: unknown) {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) throw storedCreditAdjustmentError("INVALID_CREDIT_ADJUSTMENT_SNAPSHOT");
+  const operationIds = new Map<string, string>();
+  const reverseOperationIds = new Map<string, string>();
+  value.forEach((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw storedCreditAdjustmentError("INVALID_CREDIT_ADJUSTMENT_SNAPSHOT");
+    }
+    const adjustment = entry as Record<string, unknown>;
+    if (!validStoredIdentity(adjustment.id)) throw storedCreditAdjustmentError("INVALID_CREDIT_ADJUSTMENT_SNAPSHOT");
+    for (const [field, identities] of [["operationId", operationIds], ["reverseOperationId", reverseOperationIds]] as const) {
+      if (!Object.prototype.hasOwnProperty.call(adjustment, field)) continue;
+      const identity = adjustment[field];
+      if (!validStoredIdentity(identity)) throw storedCreditAdjustmentError("INVALID_CREDIT_ADJUSTMENT_SNAPSHOT");
+      const existingId = identities.get(identity as string);
+      if (existingId && existingId !== adjustment.id) throw storedCreditAdjustmentError("CREDIT_ADJUSTMENT_IDENTITY_CONFLICT");
+      identities.set(identity as string, adjustment.id as string);
     }
   });
 }
@@ -273,6 +311,7 @@ export const initialData: AppData = {
   auditLogs: [],
   sales: [],
   creditPayments: [],
+  creditAdjustments: [],
   receivedRetentions: [],
   guides: [],
   cashClosings: [],
@@ -399,6 +438,7 @@ function enqueueStoredDataOperation<T>(operation: () => Promise<T>): Promise<T> 
 
 async function prepareAppData(data: AppData) {
   const isolated = cloneAppData(data);
+  assertStoredCreditAdjustments(isolated.creditAdjustments);
   const storageReadyData = isolated.pendingSync?.length
     ? { ...isolated, pendingSync: compactPendingItemsForStorage(sortPendingSyncFifo(isolated.pendingSync)) }
     : isolated;
@@ -577,11 +617,38 @@ function materializePendingPatches(snapshot: AppData, pendingSync: PendingSyncIt
       PENDING_PATCH_COLLECTIONS.forEach((key) => {
         const patchItems = (patch as Record<string, unknown>)[key];
         if (!Array.isArray(patchItems) || patchItems.length === 0) return;
+        if (key === "creditAdjustments") {
+          (next as Record<string, unknown>)[key] = mergePendingCreditAdjustments(
+            (next as Record<string, unknown>)[key] as Array<Record<string, unknown>> || [],
+            patchItems as Array<Record<string, unknown>>
+          );
+          return;
+        }
         (next as Record<string, unknown>)[key] = mergeCollectionById((next as Record<string, unknown>)[key] as Array<{ id?: string }> || [], patchItems as Array<{ id?: string }>);
       });
   });
 
   return next;
+}
+
+function mergePendingCreditAdjustments(currentItems: Array<Record<string, unknown>>, patchItems: Array<Record<string, unknown>>) {
+  assertStoredCreditAdjustments(currentItems);
+  assertStoredCreditAdjustments(patchItems);
+  const byId = new Map<string, Record<string, unknown>>();
+  currentItems.forEach((item) => byId.set(item.id as string, item));
+  patchItems.forEach((item) => {
+    const id = item.id as string;
+    const current = byId.get(id);
+    if (current?.operationId && item.operationId && current.operationId !== item.operationId) {
+      throw storedCreditAdjustmentError("CREDIT_ADJUSTMENT_OPERATION_CONFLICT");
+    }
+    if (current?.reverseOperationId && item.reverseOperationId && current.reverseOperationId !== item.reverseOperationId) {
+      throw storedCreditAdjustmentError("CREDIT_ADJUSTMENT_REVERSE_OPERATION_CONFLICT");
+    }
+    byId.set(id, item);
+  });
+  assertStoredCreditAdjustments(Array.from(byId.values()));
+  return Array.from(byId.values());
 }
 
 function mergeCollectionById<T extends { id?: string }>(currentItems: T[], patchItems: T[]) {

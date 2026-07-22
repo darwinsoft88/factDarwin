@@ -132,7 +132,8 @@ export type CreditAdjustmentState = "UNKNOWN" | "APPLIED" | "REVERSED";
 
 export type CreditAdjustment = {
   id: string;
-  operationId: string;
+  operationId?: string;
+  reverseOperationId?: string;
   type: CreditAdjustmentType;
   sourceCreditNoteId: string;
   sourceSaleId: string;

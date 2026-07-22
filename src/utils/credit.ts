@@ -64,9 +64,9 @@ export class CreditPaymentOperationError extends Error {
 export class CreditAdjustmentError extends Error {
   readonly code: CreditAdjustmentErrorCode;
   readonly creditNoteId: string;
-  readonly operationId: string;
+  readonly operationId?: string;
 
-  constructor(code: CreditAdjustmentErrorCode, creditNoteId: string, operationId: string) {
+  constructor(code: CreditAdjustmentErrorCode, creditNoteId: string, operationId?: string) {
     super("El ajuste de cartera requiere revision antes de continuar.");
     this.name = "CreditAdjustmentError";
     this.code = code;

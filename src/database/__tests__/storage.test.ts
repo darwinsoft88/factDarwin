@@ -11,13 +11,29 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
 }));
 
 import { initialData, loadData, migrateStoredPendingSyncRequestIds, PRODUCTION_BACKEND_URL, resolveStoredBackendUrl, saveData } from "../storage";
-import { PendingSyncItem, Sale } from "../../types";
+import { CreditAdjustment, PendingSyncItem, Sale } from "../../types";
 
 const storageKey = "factura-sri-mobile:v1";
 const outboxKey = "factura-sri-mobile:pending-outbox:v1";
 
 function pending(id: string, patch: unknown): PendingSyncItem {
   return { id, createdAt: "2026-06-29T10:00:00.000Z", attempts: 0, title: "Pendiente", patch };
+}
+
+function adjustment(overrides: Partial<CreditAdjustment> = {}): CreditAdjustment {
+  return {
+    id: "adjustment-1",
+    operationId: "credit-adjustment-operation:1",
+    type: "CREDIT_NOTE",
+    sourceCreditNoteId: "note-1",
+    sourceSaleId: "sale-1",
+    clientId: "c-final",
+    amount: 10,
+    state: "APPLIED",
+    appliedAt: "2026-06-29T10:00:00.000Z",
+    userId: "u-admin",
+    ...overrides
+  };
 }
 
 describe("storage pending outbox", () => {
@@ -142,5 +158,52 @@ describe("storage pending outbox", () => {
     const loaded = await loadData();
     expect(loaded.pendingSync).toHaveLength(1);
     expect((loaded.pendingSync?.[0]?.patch as { requestId: string }).requestId).toBe("sync_outbox");
+  });
+
+  it("initializes and loads legacy snapshots without credit adjustments", async () => {
+    expect(initialData.creditAdjustments).toEqual([]);
+    const legacy = { ...initialData };
+    delete legacy.creditAdjustments;
+    store.set(storageKey, JSON.stringify(legacy));
+    expect((await loadData()).creditAdjustments).toEqual([]);
+  });
+
+  it("preserves legacy and modern adjustment identities through JSON round trips", async () => {
+    const legacy = adjustment({ id: "legacy-adjustment" });
+    delete legacy.operationId;
+    const modern = adjustment({
+      id: "modern-adjustment",
+      reverseOperationId: "credit-adjustment-reverse:1",
+      state: "REVERSED",
+      reversedAt: "2026-06-29T11:00:00.000Z"
+    });
+    await saveData({ ...initialData, creditAdjustments: [legacy, modern] });
+    const loaded = await loadData();
+    expect(loaded.creditAdjustments).toEqual([legacy, modern]);
+    expect(loaded.creditAdjustments?.[0]?.operationId).toBeUndefined();
+    expect(loaded.creditAdjustments?.[1]?.reverseOperationId).toBe("credit-adjustment-reverse:1");
+  });
+
+  it("materializes an adjustment that exists only in the durable outbox", async () => {
+    const pendingAdjustment = adjustment({ id: "outbox-adjustment" });
+    store.set(outboxKey, JSON.stringify([pending("adjustment-only", { requestId: "sync_adjustment", creditAdjustments: [pendingAdjustment] })]));
+    const loaded = await loadData();
+    expect(loaded.creditAdjustments).toEqual([pendingAdjustment]);
+  });
+
+  it("uses the complete outbox adjustment for the same material id", async () => {
+    const applied = adjustment();
+    const reversed = adjustment({
+      state: "REVERSED",
+      reverseOperationId: "credit-adjustment-reverse:1",
+      reversedAt: "2026-06-29T11:00:00.000Z",
+      reason: "Reverso durable",
+      extraField: "preserved"
+    } as Partial<CreditAdjustment>);
+    store.set(storageKey, JSON.stringify({ ...initialData, creditAdjustments: [applied] }));
+    store.set(outboxKey, JSON.stringify([pending("adjustment-reverse", { requestId: "sync_reverse", creditAdjustments: [reversed] })]));
+    const loaded = await loadData();
+    expect(loaded.creditAdjustments).toHaveLength(1);
+    expect(loaded.creditAdjustments?.[0]).toEqual(reversed);
   });
 });

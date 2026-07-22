@@ -1,6 +1,7 @@
 import { initialData } from "../../database";
 import { AppData, CreditPayment, Sale } from "../../types";
 import {
+  CreditAdjustmentError,
   CreditPaymentOperationError,
   createCreditOperationId,
   creditBalance,
@@ -61,6 +62,11 @@ function secondSale(overrides: Partial<Sale> = {}): Sale {
 }
 
 describe("credit payments", () => {
+  it("preserves an absent operation id in legacy credit-adjustment errors", () => {
+    const error = new CreditAdjustmentError("CREDIT_ADJUSTMENT_UNKNOWN", "legacy-note", undefined);
+    expect(error.operationId).toBeUndefined();
+  });
+
   it("registers a payment with a deterministic id and reconciles the balance", () => {
     const nextData = individual();
 

@@ -1,5 +1,5 @@
 import { initialData } from "../database";
-import { AppData, CreditPayment, Issuer, IssuerEstablishment, Sale } from "../types";
+import { AppData, CreditAdjustment, CreditPayment, Issuer, IssuerEstablishment, Sale } from "../types";
 import { sanitizeAppData } from "../validation";
 import { isInventoryProduct } from "./catalogItems";
 import { reconcileCreditBalancesFromPayments } from "./credit";
@@ -24,6 +24,11 @@ export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): 
     products: mergeByLatestUpdatedAt(remoteData.products || [], localData.products || []),
     sales: prependUniqueById(remoteData.sales || [], localData.sales || []),
     creditPayments: mergeCreditPaymentsWithinBalances(remoteData.sales || [], localData.sales || [], remoteData.creditPayments || [], localData.creditPayments || []),
+    creditAdjustments: mergeCreditAdjustments(
+      remoteData.creditAdjustments || [],
+      localData.creditAdjustments || [],
+      pendingCreditAdjustmentIds(localData)
+    ),
     guides: prependUniqueById(remoteData.guides || [], localData.guides || []),
     receivedRetentions: prependUniqueById(remoteData.receivedRetentions || [], localData.receivedRetentions || []),
     cashClosings: prependUniqueById(remoteData.cashClosings || [], localData.cashClosings || []),
@@ -38,6 +43,130 @@ export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): 
     historyPolicy: remoteData.historyPolicy || localData.historyPolicy
   };
   return sanitizeAppData(reconcileProductStockFromMovements(reconcileCreditBalancesFromPayments(merged)));
+}
+
+export type CreditAdjustmentMergeErrorCode =
+  | "CREDIT_ADJUSTMENT_IDENTITY_CONFLICT"
+  | "CREDIT_ADJUSTMENT_OPERATION_CONFLICT"
+  | "CREDIT_ADJUSTMENT_REVERSE_OPERATION_CONFLICT"
+  | "INVALID_CREDIT_ADJUSTMENT_SNAPSHOT";
+
+export class CreditAdjustmentMergeError extends Error {
+  readonly code: CreditAdjustmentMergeErrorCode;
+
+  constructor(code: CreditAdjustmentMergeErrorCode) {
+    super("Los ajustes de cartera no se pueden mezclar de forma segura.");
+    this.name = "CreditAdjustmentMergeError";
+    this.code = code;
+  }
+}
+
+function pendingCreditAdjustmentIds(data: AppData) {
+  const ids = new Set<string>();
+  (data.pendingSync || []).forEach((pending) => {
+    const patch = pending.patch;
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) return;
+    const adjustments = (patch as { creditAdjustments?: unknown }).creditAdjustments;
+    if (!Array.isArray(adjustments)) return;
+    adjustments.forEach((adjustment) => {
+      if (adjustment && typeof adjustment === "object" && !Array.isArray(adjustment) && typeof (adjustment as { id?: unknown }).id === "string") {
+        ids.add((adjustment as { id: string }).id);
+      }
+    });
+  });
+  return ids;
+}
+
+function validAdjustmentIdentity(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 200 && value === value.trim();
+}
+
+function adjustmentIdentity(adjustment: CreditAdjustment, field: "operationId" | "reverseOperationId") {
+  if (!Object.prototype.hasOwnProperty.call(adjustment, field)) return undefined;
+  const value = adjustment[field];
+  if (!validAdjustmentIdentity(value)) throw new CreditAdjustmentMergeError("INVALID_CREDIT_ADJUSTMENT_SNAPSHOT");
+  return value;
+}
+
+function assertAdjustment(adjustment: CreditAdjustment) {
+  if (!adjustment || typeof adjustment !== "object" || Array.isArray(adjustment) || !validAdjustmentIdentity(adjustment.id)) {
+    throw new CreditAdjustmentMergeError("INVALID_CREDIT_ADJUSTMENT_SNAPSHOT");
+  }
+  adjustmentIdentity(adjustment, "operationId");
+  adjustmentIdentity(adjustment, "reverseOperationId");
+}
+
+const MATERIAL_ADJUSTMENT_FIELDS = ["type", "sourceCreditNoteId", "sourceSaleId", "clientId", "amount"] as const;
+
+function mergeSameAdjustment(remote: CreditAdjustment, local: CreditAdjustment, localPending: boolean) {
+  const remoteOperationId = adjustmentIdentity(remote, "operationId");
+  const localOperationId = adjustmentIdentity(local, "operationId");
+  if (remoteOperationId && localOperationId && remoteOperationId !== localOperationId) {
+    throw new CreditAdjustmentMergeError("CREDIT_ADJUSTMENT_OPERATION_CONFLICT");
+  }
+  const remoteReverseOperationId = adjustmentIdentity(remote, "reverseOperationId");
+  const localReverseOperationId = adjustmentIdentity(local, "reverseOperationId");
+  if (remoteReverseOperationId && localReverseOperationId && remoteReverseOperationId !== localReverseOperationId) {
+    throw new CreditAdjustmentMergeError("CREDIT_ADJUSTMENT_REVERSE_OPERATION_CONFLICT");
+  }
+  MATERIAL_ADJUSTMENT_FIELDS.forEach((field) => {
+    const remoteValue = remote[field];
+    const localValue = local[field];
+    if (remoteValue !== undefined && localValue !== undefined && remoteValue !== localValue) {
+      throw new CreditAdjustmentMergeError("INVALID_CREDIT_ADJUSTMENT_SNAPSHOT");
+    }
+  });
+
+  const reversed = remote.state === "REVERSED" ? remote : local.state === "REVERSED" ? local : undefined;
+  const remoteCompleteness = Object.values(remote).filter((value) => value !== undefined).length;
+  const localCompleteness = Object.values(local).filter((value) => value !== undefined).length;
+  const preferred = reversed || (localPending || localCompleteness >= remoteCompleteness ? local : remote);
+  const other = preferred === local ? remote : local;
+  const merged = { ...other } as CreditAdjustment & Record<string, unknown>;
+  Object.entries(preferred as CreditAdjustment & Record<string, unknown>).forEach(([key, value]) => {
+    if (value !== undefined) merged[key] = value;
+  });
+  if (remoteOperationId || localOperationId) merged.operationId = localOperationId || remoteOperationId;
+  if (remoteReverseOperationId || localReverseOperationId) merged.reverseOperationId = localReverseOperationId || remoteReverseOperationId;
+  if (reversed) {
+    merged.state = "REVERSED";
+    for (const field of ["reversedAt", "reversalReason", "reverseOperationId"] as const) {
+      const value = (reversed as CreditAdjustment & Record<string, unknown>)[field];
+      if (value !== undefined) (merged as Record<string, unknown>)[field] = value;
+    }
+  }
+  return merged as CreditAdjustment;
+}
+
+export function mergeCreditAdjustments(remoteItems: CreditAdjustment[], localItems: CreditAdjustment[], localPendingIds = new Set<string>()) {
+  const orderedIds: string[] = [];
+  const byId = new Map<string, CreditAdjustment>();
+  [...remoteItems, ...localItems].forEach((adjustment) => {
+    assertAdjustment(adjustment);
+    if (!byId.has(adjustment.id)) orderedIds.push(adjustment.id);
+    const existing = byId.get(adjustment.id);
+    byId.set(adjustment.id, existing ? mergeSameAdjustment(existing, adjustment, localPendingIds.has(adjustment.id)) : adjustment);
+  });
+
+  const operationIds = new Map<string, string>();
+  const reverseOperationIds = new Map<string, string>();
+  byId.forEach((adjustment, id) => {
+    for (const [field, identities] of [["operationId", operationIds], ["reverseOperationId", reverseOperationIds]] as const) {
+      const identity = adjustmentIdentity(adjustment, field);
+      if (!identity) continue;
+      const existingId = identities.get(identity);
+      if (existingId && existingId !== id) throw new CreditAdjustmentMergeError("CREDIT_ADJUSTMENT_IDENTITY_CONFLICT");
+      identities.set(identity, id);
+    }
+  });
+
+  const indexed = orderedIds.map((id, index) => ({ adjustment: byId.get(id)!, index }));
+  return indexed.sort((left, right) => {
+    const leftTime = new Date((left.adjustment as CreditAdjustment & { createdAt?: string }).createdAt || "").getTime();
+    const rightTime = new Date((right.adjustment as CreditAdjustment & { createdAt?: string }).createdAt || "").getTime();
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) return leftTime - rightTime;
+    return left.index - right.index || left.adjustment.id.localeCompare(right.adjustment.id);
+  }).map(({ adjustment }) => adjustment);
 }
 
 export function addedEstablishmentIds(previousIssuer: Issuer, nextIssuer: Issuer) {
