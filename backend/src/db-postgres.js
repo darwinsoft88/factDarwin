@@ -22,6 +22,7 @@ const {
 const { verifyPassword } = require("./auth");
 const { buildInitialTenantData, uid } = require("./saas");
 const documentEmailMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "001-document-email-operations.sql"), "utf8");
+const documentEmailSimulationMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "002-document-email-simulation.sql"), "utf8");
 
 const pool = new Pool({
   connectionString: config.databaseUrl,
@@ -383,6 +384,7 @@ async function ensureSchema() {
         WHERE batch_operation_id IS NOT NULL;
 
       ${documentEmailMigrationSql}
+      ${documentEmailSimulationMigrationSql}
     `).then(() => {
       reconcileSaasUsersFromSnapshots().catch((error) => {
         console.error("No se pudo reconciliar usuarios SaaS al iniciar:", error.message);

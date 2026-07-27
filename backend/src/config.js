@@ -30,6 +30,11 @@ const supportAdmin = {
   password: process.env.SUPPORT_ADMIN_PASSWORD || "",
   passwordHash: process.env.SUPPORT_ADMIN_PASSWORD_HASH || ""
 };
+function resolveAutomaticEmailMode(value) {
+  return String(value || "off").trim().toLowerCase() === "simulate" ? "simulate" : "off";
+}
+
+const automaticAuthorizationEmailMode = resolveAutomaticEmailMode(process.env.AUTOMATIC_AUTHORIZATION_EMAIL_MODE);
 
 function assertProductionConfig() {
   if (!isProduction) return;
@@ -94,8 +99,8 @@ module.exports = {
   dbPath: resolveBackendPath(process.env.DB_PATH || "./data/factura-sri-main.db"),
   uploadsDir: resolveBackendPath(process.env.UPLOADS_DIR || "./uploads"),
   publicUrl: process.env.PUBLIC_BACKEND_URL || "",
-  // Fase 1: la infraestructura registra operaciones, pero ningun proceso puede enviarlas.
-  automaticAuthorizationEmailMode: "off",
+  // Fase 2: solo off/simulate. El valor send se bloquea deliberadamente.
+  automaticAuthorizationEmailMode,
   allowedOrigins,
   requireHttps: process.env.REQUIRE_HTTPS === "true" || isProduction,
   sriEnv: env,
@@ -107,6 +112,7 @@ module.exports = {
   jwtExpiresInHours: Number(process.env.JWT_EXPIRES_HOURS || 12),
   masterAdminKey: process.env.MASTER_ADMIN_KEY || "",
   supportAdmin,
+  resolveAutomaticEmailMode,
   assertProductionConfig,
   certPath: resolveBackendPath(process.env.SRI_CERT_PATH || "./certs/firma.p12"),
   certPassword: process.env.SRI_CERT_PASSWORD || "",

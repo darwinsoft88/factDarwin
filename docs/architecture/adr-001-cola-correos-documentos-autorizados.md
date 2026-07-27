@@ -227,6 +227,50 @@ del correo se registran solamente en la cola.
 7. Mantener auditables las operaciones con datos incompletos.
 8. Activar el trabajador gradualmente mediante feature flags.
 
+## Fase 2: trabajador en simulación
+
+La Fase 2 incorpora un trabajador backend, pero todavía no permite enviar
+correo. El modo global acepta solamente `off` y `simulate`; cualquier intento
+de configurar `send` se convierte en `off`.
+
+No se agregó un estado `simulated`. Una simulación correcta conserva
+`status = pending` y registra separadamente:
+
+- `simulated_at`
+- `simulation_result`
+- `simulation_worker_id`
+
+El reclamo excluye operaciones que ya tienen `simulated_at`. De este modo la
+simulación se ejecuta una sola vez, permanece auditable y nunca se confunde con
+la aceptación SMTP representada por `accepted`.
+
+Cada proceso utiliza un `workerId` único. Reclama lotes pequeños dentro de una
+transacción mediante `FOR UPDATE SKIP LOCKED`, cambia las filas a `processing`,
+incrementa `attempts` y registra el lease. La transacción se confirma antes de
+validar la operación, por lo que el trabajo simulado no mantiene bloqueos de
+PostgreSQL.
+
+El lease inicial dura diez minutos. Otro ciclo recupera operaciones abandonadas
+con `PROCESSING_LEASE_EXPIRED`, limpia el propietario y permite reintento
+mientras `attempts < max_attempts`.
+
+La espera después de un error temporal depende del intento:
+
+```text
+1: 1 minuto
+2: 5 minutos
+3: 15 minutos
+4: 1 hora
+5: 6 horas
+```
+
+Los datos estructurales ausentes no alteran el documento tributario ni crean
+otra operación. La misma fila pasa a `failed`, conserva su ID y registra el
+código específico. Los logs enmascaran el destinatario y nunca incluyen el XML.
+
+El trabajador arranca y se detiene con el backend. Un merge puede despertarlo,
+pero nunca procesa la cola dentro de la petición HTTP.
+
 ## Consecuencias
 
 La solución añade una tabla, estados operativos y un futuro proceso trabajador,

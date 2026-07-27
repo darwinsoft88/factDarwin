@@ -26,6 +26,12 @@ function startBackupScheduler() {
   scheduleNextBackup();
 }
 
+function stopBackupScheduler() {
+  if (schedulerTimer) clearTimeout(schedulerTimer);
+  schedulerTimer = null;
+  nextBackupAt = null;
+}
+
 function scheduleNextBackup() {
   if (schedulerTimer) clearTimeout(schedulerTimer);
   nextBackupAt = calculateNextRun(config.backups.time);
@@ -295,5 +301,6 @@ function formatStamp(date) {
 module.exports = {
   getBackupStatus,
   runPostgresBackup,
-  startBackupScheduler
+  startBackupScheduler,
+  stopBackupScheduler
 };

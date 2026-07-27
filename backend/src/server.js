@@ -9,15 +9,18 @@ const { authenticateUser, hashPassword, requireAuth, signToken } = require("./au
 const { sendInvoiceEmail, sendPasswordResetEmail, sendTestEmail } = require("./email");
 const { licenseStatus, normalizeLicense, requireActiveLicense } = require("./license");
 const { renderMasterPanel } = require("./master-panel");
-const { getBackupStatus, runPostgresBackup, startBackupScheduler } = require("./postgres-backup");
+const { getBackupStatus, runPostgresBackup, startBackupScheduler, stopBackupScheduler } = require("./postgres-backup");
 const { lookupIdentification } = require("./datos-service");
 const { createAccessKey, nextSequence } = require("./sri/access-key");
 const { authorizeInvoice, signInvoice } = require("./sri/invoices");
 const { getTenantAssetStatus, getTenantLogo, saveTenantCertificate, saveTenantLogo } = require("./tenant-assets");
 const { cleanupTechnicalLogs, errorLogger, listTechnicalLogs, logTechnical, requestLogger } = require("./technical-logs");
 const { hashSyncPayload, resolveSyncRequestId, stripSyncTransportFields } = require("./db-utils");
+const { createDocumentEmailWorker } = require("./document-email-worker");
 
 const app = express();
+let documentEmailWorker = null;
+let shutdownPromise = null;
 const sriAuthorizationLocks = new Map();
 const sriAuthorizationCache = new Map();
 const SRI_AUTHORIZATION_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -705,6 +708,7 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
       legacySync: !requestId,
       summary: result.summary || null
     });
+    if (result.automaticEmailOperations?.created > 0) documentEmailWorker?.wake();
     res.json(result);
   } catch (error) {
     if (error?.code === "SYNC_REQUEST_ID_INVALID" || error?.code === "SYNC_REQUEST_ID_CONFLICT") {
@@ -1031,8 +1035,44 @@ async function getCompanyEmailContext(user = {}) {
   };
 }
 
-app.listen(config.port, () => {
+const httpServer = app.listen(config.port, async () => {
   console.log(`Backend SRI listo en http://localhost:${config.port}`);
   cleanupTechnicalLogs();
   startBackupScheduler();
+  try {
+    if (db.initialize) await db.initialize();
+    if (db.engine === "postgres") {
+      documentEmailWorker = createDocumentEmailWorker({ connectionString: config.databaseUrl });
+      documentEmailWorker.start();
+    }
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "email_queue_failed",
+      errorCode: "WORKER_START_FAILED",
+      message: String(error?.message || error || "No se pudo iniciar el trabajador.")
+    }));
+  }
 });
+
+function shutdown(signal) {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = (async () => {
+    console.log(JSON.stringify({ event: "backend_shutdown", signal }));
+    stopBackupScheduler();
+    if (documentEmailWorker) await documentEmailWorker.stop();
+    await new Promise((resolve) => httpServer.close(resolve));
+    if (db.close) await db.close();
+  })().catch((error) => {
+    console.error(JSON.stringify({ event: "backend_shutdown_failed", message: String(error?.message || error) }));
+    process.exitCode = 1;
+  });
+  return shutdownPromise;
+}
+
+process.once("SIGINT", () => void shutdown("SIGINT"));
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+if (process.send) {
+  process.once("message", (message) => {
+    if (message === "shutdown") void shutdown("IPC");
+  });
+}
