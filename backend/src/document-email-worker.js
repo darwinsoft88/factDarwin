@@ -3,6 +3,7 @@ const os = require("node:os");
 const config = require("./config");
 const { buildDocumentEmail, EmailBuildError, simulationResult } = require("./document-email-builder");
 const { createDocumentEmailQueueRepository } = require("./document-email-queue");
+const { EmailSendError, deterministicMessageId, sendDocumentEmail } = require("./document-email-sender");
 
 const DEFAULT_BATCH_SIZE = 5;
 const DEFAULT_POLL_MS = 45 * 1000;
@@ -63,6 +64,7 @@ function createDocumentEmailWorker(options = {}) {
   const schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay));
   const cancelSchedule = options.cancelSchedule || clearTimeout;
   const buildEmail = options.buildEmail || buildDocumentEmail;
+  const sendEmail = options.sendEmail || sendDocumentEmail;
   let stopped = true;
   let timer = null;
   let activeCycle = null;
@@ -74,6 +76,10 @@ function createDocumentEmailWorker(options = {}) {
           queueLog(event, operation, workerId, details);
         }
       });
+      if (config.automaticAuthorizationEmailMode === "send") {
+        await processSend(operation, built);
+        return;
+      }
       const simulation = simulationResult(built);
       await repository.completeSimulation(operation, workerId, simulation);
       queueLog("email_queue_simulated", operation, workerId, { resultCode: simulation.resultCode });
@@ -86,9 +92,24 @@ function createDocumentEmailWorker(options = {}) {
           errorCode: error.code,
           errorMessage: error.message
         };
-        await repository.completeSimulation(operation, workerId, result);
+        if (config.automaticAuthorizationEmailMode === "send") {
+          await repository.failSend(operation, workerId, {
+            code: error.code,
+            message: error.message,
+            retryable: error.retryable
+          });
+        } else {
+          await repository.completeSimulation(operation, workerId, result);
+        }
         queueLog("email_queue_failed", operation, workerId, { errorCode: error.code, retryable: error.retryable });
         if (error.retryable) queueLog("email_queue_requeued", operation, workerId, { retryable: true });
+        return;
+      }
+      if (config.automaticAuthorizationEmailMode === "send") {
+        queueLog("email_send_persistence_uncertain", operation, workerId, {
+          errorCode: "SMTP_ACCEPTED_PERSISTENCE_UNCERTAIN",
+          stage: "persistence"
+        });
         return;
       }
       const failed = await repository.failTemporary(operation, workerId, error);
@@ -99,9 +120,69 @@ function createDocumentEmailWorker(options = {}) {
     }
   }
 
+  async function processSend(operation, built) {
+    const messageId = operation.smtpMessageId || deterministicMessageId(operation);
+    const prepared = await repository.prepareSend(operation, workerId, messageId);
+    if (!prepared) {
+      queueLog("email_send_failed", operation, workerId, { errorCode: "COMPANY_SEND_NOT_ENABLED", stage: "prepare" });
+      return;
+    }
+    queueLog("email_send_started", prepared, workerId, { messageId, stage: "transmit" });
+    try {
+      const smtp = await sendEmail({ operation: prepared, built, messageId });
+      try {
+        const accepted = await repository.completeAccepted(prepared, workerId, smtp);
+        if (!accepted) throw new Error("La aceptacion SMTP no pudo persistirse.");
+        queueLog("email_send_accepted", accepted, workerId, {
+          messageId,
+          durationMs: smtp.elapsedMs,
+          stage: "response"
+        });
+      } catch {
+        queueLog("email_send_persistence_uncertain", prepared, workerId, {
+          errorCode: "SMTP_ACCEPTED_PERSISTENCE_UNCERTAIN",
+          messageId,
+          durationMs: smtp.elapsedMs,
+          stage: "persistence"
+        });
+        await repository.markUncertain(
+          prepared,
+          workerId,
+          "SMTP_ACCEPTED_PERSISTENCE_UNCERTAIN",
+          "SMTP acepto el mensaje, pero no fue posible persistir la aceptacion."
+        );
+      }
+    } catch (error) {
+      const sendError = error instanceof EmailSendError
+        ? error
+        : new EmailSendError("SMTP_CONNECTION_FAILED", "Fallo tecnico del transporte SMTP.", { retryable: true });
+      if (sendError.uncertain) {
+        await repository.markUncertain(prepared, workerId, sendError.code, sendError.message);
+        queueLog("email_send_uncertain", prepared, workerId, {
+          errorCode: sendError.code, smtpCode: sendError.smtpCode, messageId, stage: sendError.stage
+        });
+        return;
+      }
+      const failed = await repository.failSend(prepared, workerId, sendError);
+      queueLog(sendError.code === "SMTP_RECIPIENT_REJECTED" ? "email_send_rejected" : "email_send_failed", prepared, workerId, {
+        errorCode: sendError.code, smtpCode: sendError.smtpCode, messageId, stage: sendError.stage
+      });
+      if (failed?.retryable) {
+        queueLog("email_send_retry_scheduled", failed, workerId, { errorCode: sendError.code, messageId });
+      }
+    }
+  }
+
   async function cycle() {
     if (stopped || activeCycle) return activeCycle;
     activeCycle = (async () => {
+      const blocked = await repository.markBlockedSendOperations?.();
+      blocked?.forEach((operation) => {
+        queueLog("email_send_failed", operation, workerId, {
+          errorCode: operation.lastErrorCode || "COMPANY_SEND_NOT_ENABLED",
+          stage: "eligibility"
+        });
+      });
       const recovered = await repository.recoverExpiredLeases(workerId);
       recovered.forEach((operation) => {
         queueLog("email_queue_lease_recovered", operation, workerId, { errorCode: "PROCESSING_LEASE_EXPIRED" });

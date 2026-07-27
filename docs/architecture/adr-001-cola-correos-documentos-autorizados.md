@@ -333,3 +333,34 @@ frontend.
 La entrega definitiva al buzón no puede garantizarse solamente con la
 aceptación SMTP. El estado `accepted` significará que el servidor de correo
 aceptó el mensaje, no que el destinatario lo leyó o recibió definitivamente.
+# Adición Fase 4: aceptación SMTP controlada
+
+El estado `accepted` significa exclusivamente que el servidor SMTP aceptó el
+destinatario esperado para procesar el mensaje. No acredita entrega en bandeja,
+lectura ni ausencia de rebote.
+
+El modo real exige simultáneamente `AUTOMATIC_AUTHORIZATION_EMAIL_MODE=send`,
+la bandera empresarial `automatic_authorized_document_email_send_enabled=send`
+y la confirmación durable `legacy_automatic_credit_note_email=off`. La ausencia
+de cualquiera mantiene a la empresa bloqueada. Ninguna migración activa empresas.
+
+Cada operación usa un `Message-ID` determinístico derivado de su identidad
+durable. Esto ayuda a los servidores SMTP a reconocer reintentos, pero SMTP no
+ofrece idempotencia absoluta. Por ello, si la transmisión pudo completarse y la
+respuesta se pierde, o si la aceptación no puede persistirse, la operación pasa
+a `uncertain` y no se reintenta automáticamente. Un lease vencido después de
+`send_started_at` recibe el mismo tratamiento.
+
+El envío se prepara y persiste antes de abrir SMTP, y la transacción se libera
+antes de transmitir. La evidencia guardada está sanitizada y limitada. Las
+credenciales viven únicamente en el entorno del backend; nunca en snapshots,
+operaciones, logs o respuestas SMTP.
+
+El canary futuro debe usar una empresa interna, confirmar que el envío legacy
+está apagado, verificar SMTP, habilitar la bandera empresarial, activar `send`,
+emitir un solo documento, comprobar operación, `Message-ID` y aceptación, volver
+a `simulate` u `off` y revisar logs. El legacy solo podrá retirarse después de
+probar ausencia de duplicados en facturas y notas de crédito.
+
+En ningún estado de correo —incluidos `failed`, `uncertain` y `accepted`— se
+modifica ni degrada el estado tributario del documento.

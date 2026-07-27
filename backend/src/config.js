@@ -31,7 +31,8 @@ const supportAdmin = {
   passwordHash: process.env.SUPPORT_ADMIN_PASSWORD_HASH || ""
 };
 function resolveAutomaticEmailMode(value) {
-  return String(value || "off").trim().toLowerCase() === "simulate" ? "simulate" : "off";
+  const mode = String(value || "off").trim().toLowerCase();
+  return ["off", "simulate", "send"].includes(mode) ? mode : "off";
 }
 
 const automaticAuthorizationEmailMode = resolveAutomaticEmailMode(process.env.AUTOMATIC_AUTHORIZATION_EMAIL_MODE);
@@ -134,7 +135,10 @@ module.exports = {
     secure: process.env.SMTP_SECURE === "true",
     user: process.env.SMTP_USER || "",
     pass: process.env.SMTP_PASS || "",
-    from: process.env.SMTP_FROM || process.env.SMTP_USER || ""
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || "",
+    connectionTimeoutMs: boundedPositiveInteger(process.env.SMTP_CONNECTION_TIMEOUT_MS, 30 * 1000),
+    greetingTimeoutMs: boundedPositiveInteger(process.env.SMTP_GREETING_TIMEOUT_MS, 30 * 1000),
+    socketTimeoutMs: boundedPositiveInteger(process.env.SMTP_SOCKET_TIMEOUT_MS, 60 * 1000)
   },
   datosApi: {
     url: (process.env.DATOS_API_URL || "https://webservices.ec").replace(/\/$/, ""),
