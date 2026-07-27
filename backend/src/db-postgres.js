@@ -1,5 +1,8 @@
 const { Pool } = require("pg");
+const fs = require("node:fs");
+const path = require("node:path");
 const config = require("./config");
+const { createAutomaticEmailOperations } = require("./document-email-operations");
 const {
   applySnapshotPatch,
   assertDomainOperationReplay,
@@ -18,6 +21,7 @@ const {
 } = require("./db-utils");
 const { verifyPassword } = require("./auth");
 const { buildInitialTenantData, uid } = require("./saas");
+const documentEmailMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "001-document-email-operations.sql"), "utf8");
 
 const pool = new Pool({
   connectionString: config.databaseUrl,
@@ -377,6 +381,8 @@ async function ensureSchema() {
       CREATE INDEX IF NOT EXISTS idx_sync_domain_operations_batch
         ON sync_domain_operations (company_id, batch_operation_id)
         WHERE batch_operation_id IS NOT NULL;
+
+      ${documentEmailMigrationSql}
     `).then(() => {
       reconcileSaasUsersFromSnapshots().catch((error) => {
         console.error("No se pudo reconciliar usuarios SaaS al iniciar:", error.message);
@@ -793,6 +799,7 @@ async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
       await syncNormalizedTables(client, data, updatedAt);
     }
 
+    const automaticEmailOperations = await createAutomaticEmailOperations(client, companyId, currentData, data, updatedAt);
     const summary = summarizeSnapshot(data);
     await insertBackendAudit(client, "APP_INCREMENTAL_MERGE", {
       ...summary,
@@ -811,7 +818,13 @@ async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
         operationType: operation.operationType
       });
     }
-    const result = { ok: true, updatedAt, summary, domainOperations: domainOperationSummary(domainOperations, domainOutcomes) };
+    const result = {
+      ok: true,
+      updatedAt,
+      summary,
+      domainOperations: domainOperationSummary(domainOperations, domainOutcomes),
+      automaticEmailOperations
+    };
     if (syncOperation) {
       await client.query(
         `UPDATE sync_operations SET result_json = $1::jsonb, http_status = 200, processed_at = $2

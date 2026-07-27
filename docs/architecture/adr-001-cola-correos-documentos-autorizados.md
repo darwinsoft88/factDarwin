@@ -1,0 +1,238 @@
+# ADR-001: Cola durable para correos de documentos autorizados
+
+- Estado: aceptado; Fase 1 implementada
+- Fecha: 2026-07-26
+- Alcance inicial: facturas y notas de crédito
+- Propietario: backend de factuDarwin
+
+## Contexto
+
+factuDarwin debe enviar automáticamente por correo los documentos tributarios
+cuando el SRI los autoriza. También debe conservar el botón Email para que el
+usuario pueda reenviar voluntariamente un documento.
+
+Un envío de correo combina sistemas con garantías distintas:
+
+- El SRI determina el estado tributario del documento.
+- PostgreSQL conserva el documento y la intención de enviar.
+- El servidor de correo acepta o rechaza el mensaje.
+- El destinatario puede recibirlo más tarde o no recibirlo.
+- El frontend puede cerrarse, perder conexión, quedar desactualizado o repetir
+  una petición.
+
+Acoplar directamente estos pasos permitiría perder correos, enviarlos dos veces
+o, peor aún, alterar el estado tributario por un problema ajeno al SRI.
+
+## Decisión
+
+Se utiliza una cola durable en PostgreSQL denominada
+`document_email_operations`. La transición del documento y la creación de la
+operación automática se confirman en la misma transacción de
+`/api/sync/merge`.
+
+La Fase 1 solamente registra operaciones. El feature flag permanece en `off`;
+todavía no existe trabajador y no se llama a SMTP.
+
+## Por qué se creó una cola
+
+El correo no forma parte atómica de una transacción PostgreSQL. Aunque el
+servidor SMTP acepte un mensaje, la base podría fallar antes de registrar el
+resultado; también podría ocurrir lo contrario.
+
+La cola aplica el patrón de salida transaccional:
+
+1. Se persiste el documento.
+2. En la misma transacción se registra la intención durable de enviar.
+3. Un trabajador independiente reclamará y procesará esa intención.
+
+Así, una caída del servidor no borra la intención de envío. Los reintentos,
+errores y resultados permanecen auditables y no dependen de que una pantalla
+continúe abierta.
+
+## Por qué solo se dispara al pasar a `AUTORIZADA`
+
+Un documento pendiente, devuelto o rechazado todavía no constituye un
+comprobante definitivamente autorizado por el SRI. Enviar automáticamente en
+esos estados podría entregar al cliente un documento que después cambie o que
+nunca adquiera validez tributaria.
+
+La condición se calcula sobre datos durables:
+
+```text
+estado anterior en currentData != AUTORIZADA
+estado final fusionado en finalData == AUTORIZADA
+```
+
+No se inspecciona únicamente el patch recibido. El patch puede ser parcial y no
+representar el estado completo que finalmente se almacenará. Esta comparación
+produce el mismo resultado tanto para la emisión inicial como para reintentos
+manuales o automáticos de autorización.
+
+Si el documento ya estaba autorizado, otro merge no crea una nueva operación
+automática.
+
+## Por qué no depende del frontend
+
+El frontend no es una fuente confiable para un efecto durable:
+
+- Puede cerrarse inmediatamente después de autorizar.
+- Puede perder la respuesta por timeout.
+- Pueden coexistir versiones antiguas y nuevas.
+- Android, iOS y web tienen ciclos de vida distintos.
+- Un usuario puede pulsar varias veces o abrir la cuenta en varios dispositivos.
+
+La fuente de verdad es el backend, exactamente en el punto donde persiste la
+transición durable. Por eso cualquier vía que termine autorizando el mismo
+documento genera la misma operación, aunque no exista una pantalla abierta.
+
+## `automatic_authorization` y `manual_resend`
+
+El campo `origin` distingue dos intenciones distintas:
+
+- `automatic_authorization`: primer envío generado por la transición a
+  `AUTORIZADA`. Debe existir como máximo uno por documento y empresa.
+- `manual_resend`: reenvío solicitado expresamente mediante el botón Email.
+  Puede ocurrir varias veces y no consume, sustituye ni bloquea la operación
+  automática.
+
+Esta separación permite auditar quién o qué originó cada correo, aplicar reglas
+de idempotencia distintas y mantener disponible el reenvío manual.
+
+Un envío manual nunca debe cambiar el estado SRI ni marcar como procesada una
+operación automática.
+
+## Idempotencia
+
+La identidad lógica del primer envío automático es:
+
+```text
+company_id + document_type + document_id + origin
+```
+
+PostgreSQL la protege con el índice único parcial
+`uq_document_email_automatic`, aplicable a
+`origin = 'automatic_authorization'`. La inserción utiliza `ON CONFLICT DO
+NOTHING`.
+
+Además, el ID de la operación se deriva de forma determinística de esa misma
+identidad. Los reintentos secuenciales, las peticiones repetidas y dos procesos
+concurrentes convergen en una sola fila.
+
+La idempotencia de un reenvío manual es independiente. No debe reutilizar la
+clave única del envío automático.
+
+## Por qué la clave incluye `document_type`
+
+No se presupone que `document_id` será globalmente único entre todos los tipos
+tributarios actuales y futuros. Una factura y una nota de crédito pueden tener
+identidades de negocio diferentes aunque compartan el mismo valor técnico de
+ID.
+
+Incluir `document_type`:
+
+- Evita que tipos distintos colisionen.
+- Permite agregar nuevos documentos tributarios sin rediseñar la clave.
+- Conserva la intención exacta que deberá renderizar el trabajador.
+
+La Fase 1 admite únicamente `factura` y `nota_credito`. Proformas y tickets no
+crean operaciones.
+
+## Por qué se eligió `FOR UPDATE SKIP LOCKED`
+
+Esta decisión pertenece al diseño del trabajador de una fase posterior; la
+Fase 1 todavía no procesa la cola.
+
+El trabajador reclamará filas elegibles dentro de una transacción mediante
+`FOR UPDATE SKIP LOCKED`. Esta combinación permite que varios procesos trabajen
+en paralelo:
+
+- `FOR UPDATE` entrega la propiedad temporal de una fila a un solo proceso.
+- `SKIP LOCKED` hace que los demás procesos continúen con otras filas, en lugar
+  de esperar o reclamar la misma operación.
+
+Al reclamarla, el trabajador cambiará la operación de `pending` a `processing`
+y registrará un lease. Si el proceso cae, el vencimiento del lease permitirá
+recuperarla. El índice único evita crear otra intención; el bloqueo evita que
+dos trabajadores procesen simultáneamente la misma fila.
+
+`SKIP LOCKED` no sustituye la idempotencia SMTP. Cuando se implemente el envío,
+el trabajador deberá conservar una clave estable por operación ante timeouts o
+respuestas perdidas.
+
+## Por qué el estado tributario nunca depende del correo
+
+La autorización es un hecho emitido por el SRI. El correo es únicamente un
+canal de notificación posterior. Un destinatario inválido, un timeout o un
+rechazo SMTP no puede deshacer ni degradar ese hecho.
+
+Por esta razón:
+
+- Una operación de correo puede quedar `pending`, `processing`, `accepted` o
+  `failed`.
+- El documento permanece `AUTORIZADA` aunque el correo falle.
+- El trabajador nunca escribirá el estado tributario.
+- Un reenvío manual tampoco modifica la autorización.
+
+Confundir ambos estados produciría inconsistencias contables y podría provocar
+reintentos tributarios innecesarios de documentos que el SRI ya autorizó.
+
+## Datos incompletos
+
+Si en el momento de autorización falta correo válido, cliente, emisor, XML
+autorizado o información necesaria para el RIDE, la transición no se pierde.
+Se crea una operación `failed` con:
+
+- Snapshot del momento de autorización.
+- Destinatario disponible en ese momento.
+- Lista de datos faltantes.
+- Código y detalle del error.
+
+La autorización permanece intacta. Una fase posterior podrá corregir solamente
+el destinatario o reactivar la misma operación, sin crear un segundo primer
+envío automático.
+
+## Flujo resumido
+
+```text
+/api/sync/merge
+  ├─ bloquea y lee currentData
+  ├─ aplica el patch y obtiene finalData
+  ├─ valida y persiste el snapshot
+  ├─ detecta transición durable a AUTORIZADA
+  ├─ inserta operación automática idempotente
+  └─ COMMIT conjunto
+
+Trabajador futuro
+  ├─ reclama con FOR UPDATE SKIP LOCKED
+  ├─ prepara XML/RIDE/correo
+  ├─ solicita aceptación SMTP
+  └─ registra accepted o failed
+```
+
+Si cualquier paso previo al `COMMIT` falla, se revierten tanto el snapshot como
+la operación. Una vez confirmado el estado tributario, los fallos posteriores
+del correo se registran solamente en la cola.
+
+## Invariantes que futuras fases deben conservar
+
+1. Nunca crear envío automático para un documento cuyo estado final no sea
+   `AUTORIZADA`.
+2. Crear como máximo un `automatic_authorization` por empresa, tipo y
+   documento.
+3. No enviar SMTP dentro de la transacción de `/api/sync/merge`.
+4. No permitir que el correo modifique el estado tributario.
+5. Mantener el botón Email como reenvío manual independiente.
+6. No afirmar entrega al destinatario cuando SMTP solamente confirmó
+   aceptación.
+7. Mantener auditables las operaciones con datos incompletos.
+8. Activar el trabajador gradualmente mediante feature flags.
+
+## Consecuencias
+
+La solución añade una tabla, estados operativos y un futuro proceso trabajador,
+pero obtiene durabilidad, concurrencia segura, auditoría e independencia del
+frontend.
+
+La entrega definitiva al buzón no puede garantizarse solamente con la
+aceptación SMTP. El estado `accepted` significará que el servidor de correo
+aceptó el mensaje, no que el destinatario lo leyó o recibió definitivamente.

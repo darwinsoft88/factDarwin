@@ -94,6 +94,8 @@ module.exports = {
   dbPath: resolveBackendPath(process.env.DB_PATH || "./data/factura-sri-main.db"),
   uploadsDir: resolveBackendPath(process.env.UPLOADS_DIR || "./uploads"),
   publicUrl: process.env.PUBLIC_BACKEND_URL || "",
+  // Fase 1: la infraestructura registra operaciones, pero ningun proceso puede enviarlas.
+  automaticAuthorizationEmailMode: "off",
   allowedOrigins,
   requireHttps: process.env.REQUIRE_HTTPS === "true" || isProduction,
   sriEnv: env,
