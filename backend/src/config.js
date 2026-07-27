@@ -35,6 +35,17 @@ function resolveAutomaticEmailMode(value) {
 }
 
 const automaticAuthorizationEmailMode = resolveAutomaticEmailMode(process.env.AUTOMATIC_AUTHORIZATION_EMAIL_MODE);
+const emailBuildLimits = {
+  maxXmlBytes: boundedPositiveInteger(process.env.EMAIL_MAX_XML_BYTES, 5 * 1024 * 1024),
+  maxPdfBytes: boundedPositiveInteger(process.env.EMAIL_MAX_PDF_BYTES, 10 * 1024 * 1024),
+  maxTotalAttachmentBytes: boundedPositiveInteger(process.env.EMAIL_MAX_ATTACHMENTS_BYTES, 15 * 1024 * 1024),
+  maxHtmlBytes: boundedPositiveInteger(process.env.EMAIL_MAX_HTML_BYTES, 500 * 1024)
+};
+
+function boundedPositiveInteger(value, maximum) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, maximum) : maximum;
+}
 
 function assertProductionConfig() {
   if (!isProduction) return;
@@ -101,6 +112,7 @@ module.exports = {
   publicUrl: process.env.PUBLIC_BACKEND_URL || "",
   // Fase 2: solo off/simulate. El valor send se bloquea deliberadamente.
   automaticAuthorizationEmailMode,
+  emailBuildLimits,
   allowedOrigins,
   requireHttps: process.env.REQUIRE_HTTPS === "true" || isProduction,
   sriEnv: env,

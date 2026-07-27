@@ -97,6 +97,22 @@ test("la parada espera el lote activo y cierra el repositorio", async () => {
   const worker = createDocumentEmailWorker({
     repository,
     workerId: "worker-test",
+    async buildEmail() {
+      return {
+        recipient: "cliente@example.com",
+        subject: "Factura 001-001-000000001 - Empresa",
+        html: "<p>Mensaje</p>",
+        text: "Mensaje",
+        attachments: [{
+          filename: "RIDE-FACTURA-1.pdf",
+          contentType: "application/pdf",
+          content: Buffer.from("%PDF-1.4"),
+          size: 8,
+          sha256: "a".repeat(64)
+        }],
+        metadata: { totalAttachmentSize: 8 }
+      };
+    },
     schedule() {
       scheduled = true;
       return 1;

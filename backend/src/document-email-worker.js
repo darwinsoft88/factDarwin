@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const os = require("node:os");
 const config = require("./config");
+const { buildDocumentEmail, EmailBuildError, simulationResult } = require("./document-email-builder");
 const { createDocumentEmailQueueRepository } = require("./document-email-queue");
 
 const DEFAULT_BATCH_SIZE = 5;
@@ -61,18 +62,35 @@ function createDocumentEmailWorker(options = {}) {
   const pollMs = Math.max(1000, Number(options.pollMs || DEFAULT_POLL_MS));
   const schedule = options.schedule || ((callback, delay) => setTimeout(callback, delay));
   const cancelSchedule = options.cancelSchedule || clearTimeout;
+  const buildEmail = options.buildEmail || buildDocumentEmail;
   let stopped = true;
   let timer = null;
   let activeCycle = null;
 
   async function processOperation(operation) {
     try {
-      const simulation = validateSimulation(operation);
+      const built = await buildEmail(operation, {
+        onEvent(event, details) {
+          queueLog(event, operation, workerId, details);
+        }
+      });
+      const simulation = simulationResult(built);
       await repository.completeSimulation(operation, workerId, simulation);
-      queueLog(simulation.valid ? "email_queue_simulated" : "email_queue_failed", operation, workerId, simulation.valid
-        ? { resultCode: simulation.resultCode }
-        : { errorCode: simulation.errorCode });
+      queueLog("email_queue_simulated", operation, workerId, { resultCode: simulation.resultCode });
     } catch (error) {
+      if (error instanceof EmailBuildError) {
+        const result = {
+          valid: false,
+          retryable: error.retryable,
+          resultCode: "EMAIL_BUILD_FAILED",
+          errorCode: error.code,
+          errorMessage: error.message
+        };
+        await repository.completeSimulation(operation, workerId, result);
+        queueLog("email_queue_failed", operation, workerId, { errorCode: error.code, retryable: error.retryable });
+        if (error.retryable) queueLog("email_queue_requeued", operation, workerId, { retryable: true });
+        return;
+      }
       const failed = await repository.failTemporary(operation, workerId, error);
       queueLog("email_queue_failed", operation, workerId, { errorCode: "TECHNICAL_TEMPORARY_ERROR" });
       if (failed && failed.attempts < failed.maxAttempts) {

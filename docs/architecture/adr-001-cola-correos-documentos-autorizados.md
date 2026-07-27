@@ -271,6 +271,59 @@ código específico. Los logs enmascaran el destinatario y nunca incluyen el XML
 El trabajador arranca y se detiene con el backend. Un merge puede despertarlo,
 pero nunca procesa la cola dentro de la petición HTTP.
 
+## Fase 3: construcción integral sin envío
+
+La Fase 3 mantiene los únicos modos globales `off` y `simulate`. Después del
+reclamo, el trabajador construye completamente en memoria el mensaje, el XML
+autorizado y el RIDE PDF. No importa el servicio SMTP ni ejecuta transporte.
+
+El XML procede exclusivamente de
+`payload_json.authorizationSnapshot.document.authorizedXml`. No se reconstruye
+desde el snapshot, no se usa el XML firmado y no se aceptan rutas de archivos.
+Además de validar su estructura y tamaño, se comprueba la clave de acceso
+esperada y, cuando existe `codDoc`, el tipo tributario.
+
+El RIDE se genera en backend como `Buffer` PDF mediante un renderizador puro de
+datos tributarios. No depende de React Native, `expo-print`, navegador ni
+archivos temporales. Factura y nota de crédito comparten cálculos, validaciones
+y representación de detalle; la nota de crédito agrega el documento
+modificado, su fecha y el motivo.
+
+Una construcción correcta conserva:
+
+```text
+status = pending
+simulation_result.resultCode = EMAIL_BUILD_VALIDATED
+accepted_at = null
+```
+
+`simulation_result` contiene solamente asunto, destinatario enmascarado,
+nombres, tamaños y hashes de adjuntos. No guarda PDF, XML, HTML, texto ni correo
+completo.
+
+No se añadió migración 003 porque los campos de simulación de la Fase 2 son
+suficientes.
+
+Los límites iniciales son:
+
+```text
+XML: 5 MB
+PDF: 10 MB
+adjuntos totales: 15 MB
+HTML: 500 KB
+```
+
+Los errores de destinatario, inyección de encabezados, tipo no soportado,
+inconsistencia XML, clave diferente, datos RIDE incompletos y tamaño excesivo
+son permanentes. `RIDE_GENERATION_FAILED` y `TECHNICAL_TEMPORARY_ERROR` pueden
+reintentarse con la política de la Fase 2.
+
+`AUTHORIZED_XML_MISSING` es permanente en esta arquitectura: la operación
+conserva el snapshot inmutable del momento de autorización y actualmente no
+existe un flujo que reemplace posteriormente ese XML dentro de la misma
+operación. Cuando se implemente una corrección durable del snapshot de la
+operación, esa decisión deberá revisarse sin crear un nuevo ID.
+
 ## Consecuencias
 
 La solución añade una tabla, estados operativos y un futuro proceso trabajador,

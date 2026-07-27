@@ -90,6 +90,8 @@ function createDocumentEmailQueueRepository(options = {}) {
   }
 
   async function completeSimulation(operation, workerId, result, now = new Date().toISOString()) {
+    const retryable = result.valid ? true : Boolean(result.retryable);
+    const simulatedAt = result.valid || !retryable ? now : null;
     const updated = await pool.query(
       `UPDATE document_email_operations
        SET status = $1,
@@ -100,20 +102,23 @@ function createDocumentEmailQueueRepository(options = {}) {
            failed_at = $6,
            last_error_code = $7,
            last_error_message = $8,
+           next_attempt_at = CASE WHEN $1 = 'failed' AND $2 = TRUE THEN $9 ELSE next_attempt_at END,
            locked_at = NULL,
            locked_by = NULL,
-           updated_at = $3
-       WHERE id = $9 AND status = 'processing' AND locked_by = $5
+           updated_at = $10
+       WHERE id = $11 AND status = 'processing' AND locked_by = $5
        RETURNING ${returningColumns()}`,
       [
         result.valid ? "pending" : "failed",
-        result.valid,
-        now,
+        retryable,
+        simulatedAt,
         JSON.stringify(result),
         workerId,
         result.valid ? null : now,
         result.errorCode || null,
         result.errorMessage || null,
+        nextAttemptAt(now, operation.attempts),
+        now,
         operation.id
       ]
     );

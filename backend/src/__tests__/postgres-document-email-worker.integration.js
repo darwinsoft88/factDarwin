@@ -56,16 +56,35 @@ async function schema() {
 }
 
 function payload(options = {}) {
+  const accessKey = `260720260117900123450011001001${String(options.documentId || "document").length.toString().padStart(9, "0")}1234567813`;
   return {
     delivery: { recipientEmail: options.email ?? "cliente@example.com" },
     authorizationSnapshot: {
       document: {
         id: options.documentId,
         status: "AUTORIZADA",
-        authorizedXml: options.authorizedXml ?? "<autorizacion />",
-        items: options.items ?? [{ id: "line-1" }]
+        accessKey,
+        authorizationNumber: accessKey,
+        authorizationDate: "2026-07-26T12:00:00.000Z",
+        authorizedXml: options.authorizedXml ?? `<factura><infoTributaria><codDoc>01</codDoc><claveAcceso>${accessKey}</claveAcceso></infoTributaria></factura>`,
+        establishment: "001",
+        emissionPoint: "001",
+        sequence: "000000001",
+        createdAt: "2026-07-26T10:00:00.000Z",
+        subtotal: 10,
+        tax: 1.5,
+        total: 11.5,
+        items: options.items ?? [{ id: "line-1", code: "P1", name: "Producto", quantity: 1, unitPrice: 10, ivaRate: 0.15 }]
       },
-      issuer: options.issuer ?? { ruc: "1790012345001", businessName: "Empresa", address: "Quito" }
+      client: { id: "client-1", name: "Cliente", identification: "1712345678", address: "Quito" },
+      issuer: options.issuer ?? {
+        ruc: "1790012345001",
+        businessName: "Empresa",
+        address: "Quito",
+        environment: "1",
+        establishment: "001",
+        emissionPoint: "001"
+      }
     }
   };
 }
