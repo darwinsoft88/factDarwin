@@ -17,6 +17,7 @@ const { getTenantAssetStatus, getTenantLogo, saveTenantCertificate, saveTenantLo
 const { cleanupTechnicalLogs, errorLogger, listTechnicalLogs, logTechnical, requestLogger } = require("./technical-logs");
 const { hashSyncPayload, resolveSyncRequestId, stripSyncTransportFields } = require("./db-utils");
 const { createDocumentEmailWorker } = require("./document-email-worker");
+const { createCorsOptions } = require("./cors-policy");
 
 const app = express();
 let documentEmailWorker = null;
@@ -44,31 +45,11 @@ if (config.requireHttps) {
   });
 }
 
-const corsOptions = {
-  credentials: true,
-  origin(origin, callback) {
-    if (!origin) {
-      callback(null, true);
-      return;
-    }
-
-    const publicOrigin = safeOrigin(config.publicUrl);
-    if (config.allowedOrigins.includes(origin) || (publicOrigin && origin === publicOrigin) || isAllowedPagesPreview(origin)) {
-      callback(null, true);
-      return;
-    }
-
-    if (!config.isProduction && config.allowedOrigins.length === 0) {
-      callback(null, true);
-      return;
-    }
-
-    callback(new Error("Origen no permitido por CORS."));
-  }
-};
-
-// Para simplificar el desarrollo y evitar problemas de CORS, permitimos todas las conexiones. En producción, se recomienda configurar allowedOrigins en config.js para restringir el acceso a dominios específicos.
-app.use(cors(corsOptions));
+app.use((req, res, next) => cors(createCorsOptions(req, {
+  allowedOrigins: config.allowedOrigins,
+  publicUrl: config.publicUrl,
+  isProduction: config.isProduction
+}))(req, res, next));
 
 app.set("etag", false);
 app.use(express.json({ limit: "8mb" }));
@@ -806,23 +787,6 @@ function publicErrorMessage(error, statusCode) {
   }
 
   return "Error interno del backend. Revise los logs tecnicos para soporte.";
-}
-
-function safeOrigin(value) {
-  try {
-    return value ? new URL(value).origin : "";
-  } catch {
-    return "";
-  }
-}
-
-function isAllowedPagesPreview(origin) {
-  try {
-    const { hostname, protocol } = new URL(origin);
-    return protocol === "https:" && hostname.endsWith(".factudarwin-app.pages.dev");
-  } catch {
-    return false;
-  }
 }
 
 function tenantBackupFilename(backup = {}) {

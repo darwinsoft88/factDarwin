@@ -10,6 +10,12 @@ import {
   PendingSyncCapacityError
 } from "../pendingSync";
 
+const mockNativeRandomUuid = jest.fn(() => "123e4567-e89b-42d3-a456-426614174000");
+
+jest.mock("expo-crypto", () => ({
+  randomUUID: mockNativeRandomUuid
+}));
+
 const identified = (requestId: string, value: unknown = 1) => buildPendingSyncItem(
   { baseData: initialData, requestId, clients: [{ id: "client", value } as never] },
   "Pendiente",
@@ -57,6 +63,19 @@ describe("pendingSync identity", () => {
     } finally {
       randomSpy.mockRestore();
       Object.defineProperty(cryptoApi, "randomUUID", { configurable: true, value: original });
+    }
+  });
+
+  it("uses Expo Crypto securely when Hermes does not expose global crypto", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+    try {
+      expect(identifyIncrementalPatch({ baseData: initialData }).requestId)
+        .toBe("sync_123e4567-e89b-42d3-a456-426614174000");
+      expect(mockNativeRandomUuid).toHaveBeenCalledTimes(1);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, "crypto", descriptor);
+      else delete (globalThis as { crypto?: Crypto }).crypto;
     }
   });
 

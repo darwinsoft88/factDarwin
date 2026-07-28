@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppData, PendingSyncItem, PendingSyncPatch, User } from "../types";
 import { identifyIncrementalPatch, normalizeSyncRequestId, sortPendingSyncFifo } from "../utils/pendingSync";
 import { sanitizeAppData } from "../validation";
+import { confirmMainSnapshotMigration, readMainSnapshot, writeMainSnapshot } from "./mainSnapshotStorage";
 
 // Clave de almacenamiento para AsyncStorage. Cambiar si se necesita mantener varias versiones o entornos.
 const STORAGE_KEY = "factura-sri-mobile:v1";
@@ -371,7 +372,7 @@ export async function loadData() {
   let parsed: AppData;
 
   try {
-    raw = await AsyncStorage.getItem(STORAGE_KEY);
+    raw = await readMainSnapshot(STORAGE_KEY);
   } catch (error) {
     throw new StorageRecoveryError("read", { snapshotExists: "unknown", cause: error });
   }
@@ -421,7 +422,9 @@ export async function loadData() {
         establishmentsUpdatedAt: parsed.issuer?.establishmentsUpdatedAt || ""
       }
     };
-    return publishLoadedData(sanitizeAppData(materializePendingPatches(normalized, pendingSync)), readRevision);
+    const loaded = publishLoadedData(sanitizeAppData(materializePendingPatches(normalized, pendingSync)), readRevision);
+    await confirmMainSnapshotMigration(STORAGE_KEY);
+    return loaded;
   } catch (error) {
     if (error instanceof PendingOutboxRecoveryError || error instanceof PendingSyncRequestIdMigrationError) throw error;
     throw new StorageRecoveryError("normalize", { snapshotExists: true, approximateSize: raw.length, cause: error });
@@ -472,9 +475,10 @@ export async function updateStoredData(mutation: AppDataMutation): Promise<AppDa
   });
 }
 
+
 async function saveMainSnapshotWithQuotaRecovery(data: AppData): Promise<AppData> {
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    await writeMainSnapshot(STORAGE_KEY, JSON.stringify(data));
     return data;
   } catch (error) {
     if (!isStorageQuotaError(error)) throw error;
@@ -482,14 +486,14 @@ async function saveMainSnapshotWithQuotaRecovery(data: AppData): Promise<AppData
 
   const compacted = compactDataForStorage(data, "normal");
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(compacted));
+    await writeMainSnapshot(STORAGE_KEY, JSON.stringify(compacted));
     return compacted;
   } catch (error) {
     if (!isStorageQuotaError(error)) throw error;
   }
 
   const aggressive = compactDataForStorage(data, "aggressive");
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(aggressive));
+  await writeMainSnapshot(STORAGE_KEY, JSON.stringify(aggressive));
   return aggressive;
 }
 

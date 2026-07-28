@@ -129,9 +129,26 @@ export function identifyIncrementalPatch(patch: IncrementalPatch): IdentifiedInc
 
 function generateSyncRequestId() {
   const cryptoApi = globalThis.crypto;
-  if (!cryptoApi) throw new Error("No existe una fuente criptografica disponible para identificar la sincronizacion.");
-  const uuid = typeof cryptoApi.randomUUID === "function" ? cryptoApi.randomUUID() : bytesToUuid(randomBytes(cryptoApi));
+  const uuid = typeof cryptoApi?.randomUUID === "function"
+    ? cryptoApi.randomUUID()
+    : typeof cryptoApi?.getRandomValues === "function"
+      ? bytesToUuid(randomBytes(cryptoApi))
+      : nativeRandomUuid();
   return `sync_${uuid}`;
+}
+
+function nativeRandomUuid() {
+  try {
+    // Metro incluye este require estático y Expo Crypto usa la fuente nativa segura
+    // de Android/iOS cuando Hermes no expone globalThis.crypto.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const expoCrypto = require("expo-crypto") as typeof import("expo-crypto");
+    return expoCrypto.randomUUID();
+  } catch (cause) {
+    const error = new Error("No existe una fuente criptografica disponible para identificar la sincronizacion.");
+    Object.defineProperty(error, "cause", { value: cause, enumerable: false });
+    throw error;
+  }
 }
 
 function randomBytes(cryptoApi: Crypto) {

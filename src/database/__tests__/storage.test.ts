@@ -10,6 +10,14 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
   })
 }));
 
+jest.mock("../mainSnapshotStorage", () => ({
+  confirmMainSnapshotMigration: jest.fn(async () => undefined),
+  readMainSnapshot: jest.fn(async (key: string) => store.get(key) ?? null),
+  writeMainSnapshot: jest.fn(async (key: string, value: string) => {
+    store.set(key, value);
+  })
+}));
+
 import { initialData, loadData, migrateStoredPendingSyncRequestIds, PRODUCTION_BACKEND_URL, resolveStoredBackendUrl, saveData } from "../storage";
 import { CreditAdjustment, PendingSyncItem, Sale } from "../../types";
 
