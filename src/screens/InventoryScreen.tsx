@@ -3,6 +3,7 @@ import { Alert, StyleSheet, View } from "react-native";
 import { EntityEditModal } from "../components/EntityEditModal";
 import { InventoryKardexSection, InventoryListItemProps, InventoryMovementSection, InventoryMovementsSection, InventoryStockSection } from "../components/InventorySections";
 import { LIST_BATCH_SIZE } from "../constants/app";
+import { useControlledInventoryMovements } from "../hooks/useControlledInventoryMovements";
 import { calculateLineSubtotal } from "../sri";
 import { AppData, InventoryMovementType, User } from "../types";
 import { accountingValue, productCost } from "../utils/accounting";
@@ -38,6 +39,8 @@ export function InventoryScreen({
   const [stockProductPage, setStockProductPage] = useState(1);
   const [kardexPage, setKardexPage] = useState(1);
   const [movementPage, setMovementPage] = useState(1);
+  const { movements: inventoryMovements } =
+    useControlledInventoryMovements(data, user);
   const inventoryProducts = useMemo(() => data.products.filter(isInventoryProduct), [data.products]);
   const filteredProducts = useMemo(() => {
     const search = productSearch.trim().toLowerCase();
@@ -47,16 +50,16 @@ export function InventoryScreen({
   const stockProductPagination = paginateItems(inventoryProducts, stockProductPage, LIST_BATCH_SIZE);
   const filteredMovements = useMemo(() => {
     const search = movementSearch.trim().toLowerCase();
-    const movements = data.inventoryMovements || [];
+    const movements = inventoryMovements;
     if (!search) return movements;
     return movements.filter((movement) =>
       [movement.productName, movement.reason, movement.reference || "", movementTypeLabel(movement.type)].some((value) => value.toLowerCase().includes(search))
     );
-  }, [data.inventoryMovements, movementSearch]);
+  }, [inventoryMovements, movementSearch]);
   const movementPagination = paginateItems(filteredMovements, movementPage, LIST_BATCH_SIZE);
   const visibleMovements = movementPagination.items;
   const selectedProduct = inventoryProducts.find((product) => product.id === productId);
-  const productKardex = useMemo(() => (data.inventoryMovements || []).filter((movement) => movement.productId === productId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [data.inventoryMovements, productId]);
+  const productKardex = useMemo(() => inventoryMovements.filter((movement) => movement.productId === productId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [inventoryMovements, productId]);
   const kardexPagination = paginateItems(productKardex, kardexPage, LIST_BATCH_SIZE);
   const visibleKardex = kardexPagination.items;
   const productSales = useMemo(() => data.sales.filter((sale) => sale.items.some((item) => item.productId === productId) && (sale.status === "AUTORIZADA" || isTicketOffline(sale.status))), [data.sales, productId]);
@@ -153,7 +156,7 @@ export function InventoryScreen({
         ListItemComponent={ListItemComponent}
         movementPagination={movementPagination}
         movementSearch={movementSearch}
-        movements={data.inventoryMovements || []}
+        movements={inventoryMovements}
         setMovementPage={setMovementPage}
         setMovementSearch={setMovementSearch}
         visibleMovements={visibleMovements}

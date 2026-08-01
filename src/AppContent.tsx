@@ -23,6 +23,9 @@ import { useAuthState } from "./hooks/useAuthState";
 import { useAvailableTabs } from "./hooks/useAvailableTabs";
 import { useEstablishmentSwitcher } from "./hooks/useEstablishmentSwitcher";
 import { useKeyboardInset } from "./hooks/useKeyboardInset";
+import { useControlledCatalogData } from "./hooks/useControlledCatalogData";
+import { useControlledSalesHistory } from "./hooks/useControlledSalesHistory";
+import { useSQLiteBootstrap } from "./hooks/useSQLiteBootstrap";
 import { useSupportDiagnostics } from "./hooks/useSupportDiagnostics";
 import { useSyncAndBackup } from "./hooks/useSyncAndBackup";
 import { AppData, User } from "./types";
@@ -88,6 +91,22 @@ export function AppContent() {
     setPasswordChangeVisible: authState.setPasswordChangeVisible,
     setSession
   });
+  const sqliteCatalogDiagnostic = useSQLiteBootstrap(
+    ready && Boolean(session),
+    data,
+    session
+  );
+  const readableData = useControlledCatalogData(
+    ready,
+    data,
+    session,
+    sqliteCatalogDiagnostic
+  );
+  const salesHistory = useControlledSalesHistory(
+    ready && tab === "documentos",
+    data,
+    session
+  );
 
   const contactRecoverySupport = () => {
     const phone = SUPPORT_WHATSAPP_NUMBER.replace(/\D/g, "");
@@ -245,7 +264,8 @@ export function AppContent() {
         availableTabs={availableTabs}
         backendToken={backendToken}
         companyLabel={connectedCompanyLabel}
-        data={data}
+        data={readableData}
+        salesHistory={salesHistory}
         establishmentLabel={currentEstablishmentLabel}
         headerTopPadding={headerTopPadding}
         keyboardInset={keyboardInset}

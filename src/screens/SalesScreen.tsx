@@ -13,6 +13,7 @@ import { useSaleDocumentActions } from "../hooks/useSaleDocumentActions";
 import { useSaleDocumentWorkflowActions } from "../hooks/useSaleDocumentWorkflowActions";
 import { useSaleIssueFlow } from "../hooks/useSaleIssueFlow";
 import type { PersistMutation } from "../hooks/useSyncAndBackup";
+import type { ControlledSalesHistory } from "../hooks/useControlledSalesHistory";
 import { useSaleLineEditor } from "../hooks/useSaleLineEditor";
 import { useSaleFormState } from "../hooks/useSaleFormState";
 import { useSalesDocumentList } from "../hooks/useSalesDocumentList";
@@ -30,6 +31,7 @@ type SalesScreenMode = "sale" | "documents";
 
 export function SalesScreen({
   data,
+  salesHistory,
   user,
   backendToken,
   persist,
@@ -39,6 +41,7 @@ export function SalesScreen({
   mode = "sale"
 }: {
   data: AppData;
+  salesHistory: ControlledSalesHistory;
   user: User;
   backendToken: string;
   persist: (data: AppData) => Promise<void>;
@@ -302,6 +305,7 @@ export function SalesScreen({
     invoiceStats
   } = useSalesDocumentList({
     data,
+    sales: mode === "documents" ? salesHistory.sales : data.sales,
     invoiceSearch,
     saleEndDate,
     saleStartDate,
@@ -516,6 +520,8 @@ export function SalesScreen({
             createRide={createRide}
             createTicket={createTicket}
             data={data}
+            historySales={salesHistory.sales}
+            loadSaleDetail={salesHistory.loadDetail}
             editSale={(sale) => {
               editSale(sale);
               onOpenSale();

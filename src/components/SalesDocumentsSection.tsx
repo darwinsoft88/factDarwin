@@ -23,6 +23,8 @@ type SalesDocumentsSectionProps = {
   createRide: (sale: Sale, client: AppData["clients"][number]) => void;
   createTicket: (sale: Sale, client: AppData["clients"][number]) => void;
   data: AppData;
+  historySales: Sale[];
+  loadSaleDetail: (saleId: string) => Promise<Sale | null>;
   editSale: (sale: Sale) => void;
   emailSale: (sale: Sale, client: AppData["clients"][number]) => void;
   endDate: string;
@@ -62,6 +64,8 @@ export function SalesDocumentsSection({
   createRide,
   createTicket,
   data,
+  historySales,
+  loadSaleDetail,
   editSale,
   emailSale,
   endDate,
@@ -112,45 +116,53 @@ export function SalesDocumentsSection({
           onStatusChange={setStatusFilter}
         />
       </CollapsibleSection>
-      {data.sales.length === 0 ? <Empty text="Aun no hay ventas." /> : null}
-      {data.sales.length > 0 && filteredSales.length === 0 ? <Empty text="No hay documentos con ese filtro." /> : null}
+      {historySales.length === 0 ? <Empty text="Aun no hay ventas." /> : null}
+      {historySales.length > 0 && filteredSales.length === 0 ? <Empty text="No hay documentos con ese filtro." /> : null}
       {visibleSales.map((sale) => {
         const client = data.clients.find((item) => item.id === sale.clientId);
+        const canonicalSale = data.sales.find((item) => item.id === sale.id);
+        const actionableSale = canonicalSale ?? sale;
         return (
           <ListItem
             key={sale.id}
             title={`${documentNumber(sale, data.issuer)} - ${client?.name ?? "Cliente"}`}
             meta={`${formatShortDate(sale.createdAt)} | ${documentTypeLabel(sale)} | ${displayInvoiceStatus(sale.status)} | $${money(sale.total)}${sale.paymentCondition === "credito" ? ` | Credito pendiente $${money(sale.creditBalance ?? sale.total)}` : ""} | ${sale.authorizationNumber || sale.accessKey || "Interno"}${sriStatusHelpText(sale) ? ` | ${sriStatusHelpText(sale)}` : sale.sriMessage ? ` | ${shortText(sale.sriMessage, 90)}` : ""}`}
             badge={sale.status}
-            onOpen={canOpenTechnicalDetail ? () => client && onXml(formatSaleDetail(sale, client, data.issuer)) : undefined}
+            onOpen={canOpenTechnicalDetail ? () => {
+              if (!client) return;
+              void loadSaleDetail(sale.id).then((detail) => {
+                if (detail) onXml(formatSaleDetail(detail, client, data.issuer));
+              });
+            } : undefined}
             secondaryLabel={(isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA" ? "Ver RIDE" : sale.documentType === "nota_venta" && isTicketOffline(sale.status) ? "Ver nota" : sale.documentType === "proforma" && sale.status === "PROFORMA" ? "Ver proforma" : undefined}
             onSecondary={() => {
               if (!client) return;
-              if (isCreditNoteSale(sale)) return createCreditNoteRide(sale, client, data.sales.find((item) => item.id === sale.sourceSaleId));
-              return isInvoiceSale(sale) ? createRide(sale, client) : sale.documentType === "proforma" ? createProforma(sale, client) : createTicket(sale, client);
+              if (!canonicalSale) return;
+              if (isCreditNoteSale(canonicalSale)) return createCreditNoteRide(canonicalSale, client, data.sales.find((item) => item.id === canonicalSale.sourceSaleId));
+              return isInvoiceSale(canonicalSale) ? createRide(canonicalSale, client) : canonicalSale.documentType === "proforma" ? createProforma(canonicalSale, client) : createTicket(canonicalSale, client);
             }}
             invoiceLabel={canIssueFromInternalDocuments(user.role) && sale.documentType === "nota_venta" && isTicketOffline(sale.status) ? "Facturar" : undefined}
-            onInvoice={() => invoiceFromTicket(sale)}
+            onInvoice={() => canonicalSale && invoiceFromTicket(canonicalSale)}
             ticketLabel={canIssueFromInternalDocuments(user.role) && sale.documentType === "proforma" && sale.status === "PROFORMA" ? "Convertir a nota interna" : undefined}
-            onTicket={() => convertProforma(sale, "nota_venta")}
+            onTicket={() => canonicalSale && convertProforma(canonicalSale, "nota_venta")}
             proformaInvoiceLabel={canIssueFromInternalDocuments(user.role) && sale.documentType === "proforma" && sale.status === "PROFORMA" ? "Convertir a factura" : undefined}
-            onProformaInvoice={() => convertProforma(sale, "factura")}
+            onProformaInvoice={() => canonicalSale && convertProforma(canonicalSale, "factura")}
             emailLabel={(isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA" ? "Email" : undefined}
-            onEmail={() => client && emailSale(sale, client)}
+            onEmail={() => client && canonicalSale && emailSale(canonicalSale, client)}
             whatsappLabel={isInvoiceSale(sale) && sale.status === "AUTORIZADA" ? "WhatsApp" : undefined}
-            onWhatsapp={() => client && whatsappSale(sale, client)}
+            onWhatsapp={() => client && canonicalSale && whatsappSale(canonicalSale, client)}
             supportLabel={canOpenTechnicalDetail && isInvoiceSale(sale) && sale.status !== "AUTORIZADA" ? "Soporte" : undefined}
-            onSupport={() => client && onXml(formatSaleDetail(sale, client, data.issuer))}
-            creditNoteLabel={canManageFiscalAdjustments(user.role) && client && canIssueCreditNoteForSale(data.sales, sale, client) ? "Nota credito" : undefined}
-            onCreditNote={() => client && openCreditNoteForm(sale)}
+            onSupport={() => client && onXml(formatSaleDetail(actionableSale, client, data.issuer))}
+            creditNoteLabel={canManageFiscalAdjustments(user.role) && client && canonicalSale && canIssueCreditNoteForSale(data.sales, canonicalSale, client) ? "Nota credito" : undefined}
+            onCreditNote={() => client && canonicalSale && openCreditNoteForm(canonicalSale)}
             retentionLabel={canManageFiscalAdjustments(user.role) && isInvoiceSale(sale) && sale.status === "AUTORIZADA" ? "Retencion" : undefined}
-            onRetention={() => openRetentionForm(sale)}
+            onRetention={() => canonicalSale && openRetentionForm(canonicalSale)}
             editLabel={canIssueFromInternalDocuments(user.role) && canEditSale(sale) ? "Editar" : undefined}
-            onEdit={() => editSale(sale)}
+            onEdit={() => canonicalSale && editSale(canonicalSale)}
             retryLabel={canRetryDocuments(user.role) && (isInvoiceSale(sale) || isCreditNoteSale(sale)) && canRetrySriStatus(sale.status) ? (retryingSaleId === sale.id ? "Reintentando..." : `Reintentar SRI ${getRetryInfo(sale).today}/${MAX_DAILY_RETRIES}`) : undefined}
-            onRetry={() => client && retrySale(sale, client)}
+            onRetry={() => client && canonicalSale && retrySale(canonicalSale, client)}
             cancelLabel={canVoidDocuments(user.role) && sale.status !== "AUTORIZADA" && sale.status !== "ANULADA" && sale.status !== "CONVERTIDA" ? "Anular" : undefined}
-            onCancel={() => cancelDocument(sale)}
+            onCancel={() => canonicalSale && cancelDocument(canonicalSale)}
           />
         );
       })}

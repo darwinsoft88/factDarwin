@@ -1,5 +1,20 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { File } from "expo-file-system";
+import type {
+  Client,
+  CreditAdjustment,
+  CreditPayment,
+  InventoryMovement,
+  Product,
+  PendingSyncItem,
+  ReceivedRetention,
+  RemissionGuide,
+  Sale,
+} from "../types";
+import {
+  calculateCatalogSnapshotHashes,
+  type CatalogSnapshotHashes,
+} from "./catalogSnapshotHashes";
 
 const DATABASE_NAME = "factudarwin-local";
 const DATABASE_VERSION = 1;
@@ -12,10 +27,10 @@ const BACKUP_FILE = "snapshot-backup.json";
 const TEMP_FILE = "snapshot-temp.json";
 const METADATA_FILE = "snapshot-metadata.json";
 const MIGRATION_KEY = "factura-sri-mobile:snapshot-file-migration:v1";
-const ENVELOPE_VERSION = 1;
+const ENVELOPE_VERSION = 6;
 const STORAGE_INSTANCE_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-type SnapshotEnvelope = {
+type SnapshotEnvelopeV1 = {
   schemaVersion: 1;
   companyId: string;
   issuerRuc: string;
@@ -24,13 +39,92 @@ type SnapshotEnvelope = {
   payload: unknown;
 };
 
-type SnapshotMetadata = {
-  schemaVersion: 1;
+type SnapshotEnvelope = {
+  schemaVersion: 6;
   companyId: string;
   issuerRuc: string;
+  createdAt: string;
+  snapshotGeneration: string;
   payloadHash: string;
+  catalogHashes: CatalogSnapshotHashes;
+  manifestHash: string;
+  payload: unknown;
+};
+
+type LegacyCatalogSnapshotHashes = Omit<
+  CatalogSnapshotHashes,
+  "creditPayments" | "creditAdjustments"
+>;
+
+type SnapshotEnvelopeV5 = Omit<
+  SnapshotEnvelope,
+  "schemaVersion" | "catalogHashes"
+> & {
+  schemaVersion: 5;
+  catalogHashes: LegacyCatalogSnapshotHashes;
+};
+
+type SnapshotEnvelopeV2 = Omit<SnapshotEnvelopeV1, "schemaVersion"> & {
+  schemaVersion: 2;
+  snapshotGeneration: string;
+  clientsHash: string;
+  productsHash: string;
+};
+
+type SnapshotEnvelopeV3 = Omit<SnapshotEnvelopeV2, "schemaVersion"> & {
+  schemaVersion: 3;
+  salesHash: string;
+};
+
+type SnapshotEnvelopeV4 = Omit<
+  SnapshotEnvelopeV5,
+  "schemaVersion" | "manifestHash"
+> & {
+  schemaVersion: 4;
+};
+
+type SnapshotMetadata = {
+  schemaVersion: 6;
+  companyId: string;
+  issuerRuc: string;
+  snapshotGeneration: string;
+  payloadHash: string;
+  catalogHashes: CatalogSnapshotHashes;
   updatedAt: string;
   source: "write" | "migration" | "backup-recovery";
+};
+
+let lastVerifiedSnapshotDescriptor: MainSnapshotDescriptor | null = null;
+let lastVerifiedCurrentEnvelope: SnapshotEnvelope | null = null;
+
+export type MainSnapshotDescriptor = {
+  schemaVersion: number;
+  companyId: string;
+  issuerRuc: string;
+  snapshotGeneration: string;
+  payloadHash: string;
+  catalogHashes: CatalogSnapshotHashes;
+  createdAt: string;
+};
+
+export type MainSnapshotClientsSource = MainSnapshotDescriptor & {
+  clients: Client[];
+};
+
+export type MainSnapshotProductsSource = MainSnapshotDescriptor & {
+  products: Product[];
+};
+
+export type MainSnapshotCatalogSource = MainSnapshotDescriptor & {
+  clients: Client[];
+  products: Product[];
+  sales: Sale[];
+  inventoryMovements: InventoryMovement[];
+  creditPayments?: CreditPayment[];
+  creditAdjustments?: CreditAdjustment[];
+  receivedRetentions?: ReceivedRetention[];
+  guides?: RemissionGuide[];
+  pendingSync?: PendingSyncItem[];
 };
 
 export type MainSnapshotStorageErrorCode =
@@ -139,23 +233,70 @@ async function hashPayload(payload: unknown) {
   return digestStringAsync(CryptoDigestAlgorithm.SHA256, JSON.stringify(payload));
 }
 
+function manifestValue(
+  envelope: Omit<SnapshotEnvelope, "manifestHash" | "payload">,
+) {
+  return {
+    schemaVersion: envelope.schemaVersion,
+    companyId: envelope.companyId,
+    issuerRuc: envelope.issuerRuc,
+    createdAt: envelope.createdAt,
+    snapshotGeneration: envelope.snapshotGeneration,
+    payloadHash: envelope.payloadHash,
+    catalogHashes: envelope.catalogHashes,
+  };
+}
+
+async function hashManifest(
+  envelope: Omit<SnapshotEnvelope, "manifestHash" | "payload">,
+) {
+  const { CryptoDigestAlgorithm, digestStringAsync } =
+    await import("expo-crypto");
+  return digestStringAsync(
+    CryptoDigestAlgorithm.SHA256,
+    JSON.stringify(manifestValue(envelope)),
+  );
+}
+
 async function createEnvelope(rawPayload: string): Promise<SnapshotEnvelope> {
   const payload = JSON.parse(rawPayload) as unknown;
   const identity = payloadIdentity(payload);
-  return {
-    schemaVersion: ENVELOPE_VERSION,
+  const catalogHashes = await calculateCatalogSnapshotHashes(payload);
+  const { CryptoDigestAlgorithm, digestStringAsync, randomUUID } =
+    await import("expo-crypto");
+  const base = {
+    schemaVersion: ENVELOPE_VERSION as 6,
     companyId: identity.companyId,
     issuerRuc: identity.issuerRuc,
     createdAt: new Date().toISOString(),
-    payloadHash: await hashPayload(payload),
-    payload
+    snapshotGeneration: randomUUID(),
+    payloadHash: await digestStringAsync(
+      CryptoDigestAlgorithm.SHA256,
+      rawPayload,
+    ),
+    catalogHashes,
+  } as const;
+  return {
+    ...base,
+    manifestHash: await hashManifest(base),
+    payload,
   };
 }
 
 async function parseAndValidateEnvelope(raw: string): Promise<SnapshotEnvelope> {
-  const parsed = JSON.parse(raw) as Partial<SnapshotEnvelope>;
+  const parsed = JSON.parse(raw) as Partial<
+    SnapshotEnvelope | SnapshotEnvelopeV5 | SnapshotEnvelopeV4 | SnapshotEnvelopeV3 |
+      SnapshotEnvelopeV2 | SnapshotEnvelopeV1
+  >;
   if (
-    parsed.schemaVersion !== ENVELOPE_VERSION ||
+    (
+      parsed.schemaVersion !== 1 &&
+      parsed.schemaVersion !== 2 &&
+      parsed.schemaVersion !== 3 &&
+      parsed.schemaVersion !== 4 &&
+      parsed.schemaVersion !== 5 &&
+      parsed.schemaVersion !== ENVELOPE_VERSION
+    ) ||
     !parsed.payload ||
     typeof parsed.payload !== "object" ||
     Array.isArray(parsed.payload) ||
@@ -173,12 +314,132 @@ async function parseAndValidateEnvelope(raw: string): Promise<SnapshotEnvelope> 
   if (actualHash !== parsed.payloadHash) {
     throw new Error("La verificación de integridad del archivo local falló.");
   }
-  return parsed as SnapshotEnvelope;
+  if (parsed.schemaVersion === ENVELOPE_VERSION) {
+    const current = parsed as Partial<SnapshotEnvelope>;
+    if (
+      typeof current.snapshotGeneration !== "string" ||
+      !current.snapshotGeneration ||
+      !current.catalogHashes ||
+      typeof current.catalogHashes.creditPayments !== "string" ||
+      typeof current.catalogHashes.creditAdjustments !== "string" ||
+      typeof current.manifestHash !== "string"
+    ) {
+      throw new Error("La verificación de los catálogos locales falló.");
+    }
+    const expectedManifestHash = await hashManifest(
+      current as Omit<SnapshotEnvelope, "manifestHash" | "payload">,
+    );
+    if (current.manifestHash !== expectedManifestHash) {
+      throw new Error("La verificaciÃ³n del manifiesto local fallÃ³.");
+    }
+    if (
+      typeof current.catalogHashes.receivedRetentions !== "string" ||
+      typeof current.catalogHashes.guides !== "string" ||
+      typeof current.catalogHashes.pendingSync !== "string"
+    ) {
+      const upgraded = {
+        ...current,
+        catalogHashes: await calculateCatalogSnapshotHashes(current.payload),
+      } as Omit<SnapshotEnvelope, "manifestHash">;
+      return {
+        ...upgraded,
+        manifestHash: await hashManifest(upgraded),
+      } as SnapshotEnvelope;
+    }
+    return current as SnapshotEnvelope;
+  }
+  if (parsed.schemaVersion === 5) {
+    const legacyV5 = parsed as SnapshotEnvelopeV5;
+    const legacyManifestValue = {
+      schemaVersion: legacyV5.schemaVersion,
+      companyId: legacyV5.companyId,
+      issuerRuc: legacyV5.issuerRuc,
+      createdAt: legacyV5.createdAt,
+      snapshotGeneration: legacyV5.snapshotGeneration,
+      payloadHash: legacyV5.payloadHash,
+      catalogHashes: legacyV5.catalogHashes,
+    };
+    const { CryptoDigestAlgorithm, digestStringAsync } =
+      await import("expo-crypto");
+    const expected = await digestStringAsync(
+      CryptoDigestAlgorithm.SHA256,
+      JSON.stringify(legacyManifestValue),
+    );
+    if (legacyV5.manifestHash !== expected) {
+      throw new Error("La verificación del manifiesto local falló.");
+    }
+  }
+  if (parsed.schemaVersion === 4) {
+    const legacyV4 = parsed as Partial<SnapshotEnvelopeV4>;
+    const hashes = legacyV4.catalogHashes;
+    if (
+      typeof legacyV4.snapshotGeneration !== "string" ||
+      !legacyV4.snapshotGeneration ||
+      !hashes ||
+      typeof hashes.clients !== "string" ||
+      typeof hashes.products !== "string" ||
+      typeof hashes.sales !== "string" ||
+      typeof hashes.inventoryMovements !== "string"
+    ) {
+      throw new Error("La estructura de catÃ¡logos del archivo local no es vÃ¡lida.");
+    }
+    const base = {
+      ...legacyV4,
+      schemaVersion: ENVELOPE_VERSION as 6,
+      snapshotGeneration: legacyV4.snapshotGeneration,
+      catalogHashes: await calculateCatalogSnapshotHashes(
+        legacyV4.payload,
+      ),
+    } as Omit<SnapshotEnvelope, "manifestHash">;
+    return {
+      ...base,
+      manifestHash: await hashManifest(base),
+    };
+  }
+  const catalogHashes = await calculateCatalogSnapshotHashes(parsed.payload);
+  const legacy = parsed as
+    SnapshotEnvelopeV1 | SnapshotEnvelopeV2 | SnapshotEnvelopeV3 |
+      SnapshotEnvelopeV4 | SnapshotEnvelopeV5;
+  const base = {
+    ...legacy,
+    schemaVersion: ENVELOPE_VERSION as 6,
+    snapshotGeneration: legacy.schemaVersion === 2 ||
+        legacy.schemaVersion === 3 ||
+        legacy.schemaVersion === 4 ||
+        legacy.schemaVersion === 5
+      ? legacy.snapshotGeneration
+      : `legacy:${legacy.payloadHash}`,
+    catalogHashes,
+  };
+  return {
+    ...base,
+    manifestHash: await hashManifest(base),
+  };
 }
 
 async function readValidatedFile(file: File) {
   if (!file.exists) return null;
   return parseAndValidateEnvelope(await file.text());
+}
+
+function rememberCurrentEnvelope(envelope: SnapshotEnvelope) {
+  lastVerifiedCurrentEnvelope = envelope;
+  lastVerifiedSnapshotDescriptor = {
+    schemaVersion: envelope.schemaVersion,
+    companyId: envelope.companyId,
+    issuerRuc: envelope.issuerRuc,
+    snapshotGeneration: envelope.snapshotGeneration,
+    payloadHash: envelope.payloadHash,
+    catalogHashes: { ...envelope.catalogHashes },
+    createdAt: envelope.createdAt,
+  };
+}
+
+async function readCurrentEnvelopeForMirror(): Promise<SnapshotEnvelope | null> {
+  if (lastVerifiedCurrentEnvelope) return lastVerifiedCurrentEnvelope;
+  const envelope = await readValidatedFile(await snapshotFile(CURRENT_FILE));
+  if (envelope) rememberCurrentEnvelope(envelope);
+  return envelope;
 }
 
 function payloadString(envelope: SnapshotEnvelope) {
@@ -190,7 +451,9 @@ async function writeMetadata(envelope: SnapshotEnvelope, source: SnapshotMetadat
     schemaVersion: ENVELOPE_VERSION,
     companyId: envelope.companyId,
     issuerRuc: envelope.issuerRuc,
+    snapshotGeneration: envelope.snapshotGeneration,
     payloadHash: envelope.payloadHash,
+    catalogHashes: { ...envelope.catalogHashes },
     updatedAt: new Date().toISOString(),
     source
   };
@@ -202,10 +465,12 @@ async function writeMetadata(envelope: SnapshotEnvelope, source: SnapshotMetadat
 async function preserveValidCurrentAsBackup() {
   const current = await snapshotFile(CURRENT_FILE);
   if (!current.exists) return;
-  try {
-    await readValidatedFile(current);
-  } catch {
-    return;
+  if (!lastVerifiedCurrentEnvelope) {
+    try {
+      await readValidatedFile(current);
+    } catch {
+      return;
+    }
   }
   const backup = await snapshotFile(BACKUP_FILE);
   safeDelete(backup);
@@ -221,12 +486,12 @@ async function promoteValidatedTemp(envelope: SnapshotEnvelope, source: Snapshot
   try {
     safeDelete(current);
     temp.move(current);
-    const verified = await readValidatedFile(current);
-    if (!verified || verified.payloadHash !== envelope.payloadHash) {
+    if (!current.exists) {
       throw new Error("El archivo promovido no superó la verificación final.");
     }
-    await writeMetadata(verified, source);
-    return verified;
+    await writeMetadata(envelope, source);
+    rememberCurrentEnvelope(envelope);
+    return envelope;
   } catch (error) {
     if (!current.exists && backup.exists) {
       backup.copy(current);
@@ -263,6 +528,7 @@ async function recoverFromBackup() {
   backup.copy(restoredCurrent);
   const verified = await readValidatedFile(restoredCurrent);
   if (!verified) throw new Error("No se pudo recuperar el respaldo local.");
+  rememberCurrentEnvelope(verified);
   await writeMetadata(verified, "backup-recovery");
   return verified;
 }
@@ -273,7 +539,10 @@ async function readNativeSnapshot(legacyKey: string) {
   if (current.exists) {
     try {
       const envelope = await readValidatedFile(current);
-      if (envelope) return payloadString(envelope);
+      if (envelope) {
+        rememberCurrentEnvelope(envelope);
+        return payloadString(envelope);
+      }
     } catch (currentError) {
       try {
         const recovered = await recoverFromBackup();
@@ -315,6 +584,7 @@ async function readNativeSnapshot(legacyKey: string) {
     if (!reread || reread.payloadHash !== envelope.payloadHash) {
       throw new Error("La verificación posterior a la migración falló.");
     }
+    rememberCurrentEnvelope(reread);
     await AsyncStorage.setItem(MIGRATION_KEY, JSON.stringify({
       completedAt: new Date().toISOString(),
       payloadHash: reread.payloadHash,
@@ -390,11 +660,179 @@ export async function readMainSnapshot(legacyKey: string): Promise<string | null
   }
 }
 
-export async function writeMainSnapshot(legacyKey: string, value: string): Promise<void> {
+export async function readMainSnapshotDescriptor(): Promise<MainSnapshotDescriptor | null> {
+  if (indexedDbAvailable()) return null;
+  const envelope = await readCurrentEnvelopeForMirror();
+  if (!envelope) return null;
+  return {
+    schemaVersion: envelope.schemaVersion,
+    companyId: envelope.companyId,
+    issuerRuc: envelope.issuerRuc,
+    snapshotGeneration: envelope.snapshotGeneration,
+    payloadHash: envelope.payloadHash,
+    catalogHashes: { ...envelope.catalogHashes },
+    createdAt: envelope.createdAt
+  };
+}
+
+export async function readMainSnapshotFastDescriptor():
+  Promise<MainSnapshotDescriptor | null> {
+  if (indexedDbAvailable()) return null;
+  if (lastVerifiedSnapshotDescriptor) {
+    return { ...lastVerifiedSnapshotDescriptor };
+  }
+  const file = await snapshotFile(METADATA_FILE);
+  if (!file.exists) return null;
+  const metadata = JSON.parse(await file.text()) as Partial<SnapshotMetadata>;
+  if (
+    metadata.schemaVersion !== ENVELOPE_VERSION ||
+    typeof metadata.companyId !== "string" ||
+    typeof metadata.issuerRuc !== "string" ||
+    typeof metadata.snapshotGeneration !== "string" ||
+    typeof metadata.payloadHash !== "string" ||
+    !metadata.catalogHashes ||
+    typeof metadata.catalogHashes.clients !== "string" ||
+    typeof metadata.catalogHashes.products !== "string" ||
+    typeof metadata.catalogHashes.sales !== "string" ||
+    typeof metadata.catalogHashes.inventoryMovements !== "string" ||
+    typeof metadata.catalogHashes.creditPayments !== "string" ||
+    typeof metadata.catalogHashes.creditAdjustments !== "string" ||
+    typeof metadata.updatedAt !== "string"
+  ) {
+    throw new Error("El recibo del snapshot local no es válido.");
+  }
+  return {
+    schemaVersion: metadata.schemaVersion,
+    companyId: metadata.companyId,
+    issuerRuc: metadata.issuerRuc,
+    snapshotGeneration: metadata.snapshotGeneration,
+    payloadHash: metadata.payloadHash,
+    catalogHashes: { ...metadata.catalogHashes },
+    createdAt: metadata.updatedAt,
+  };
+}
+
+export async function readMainSnapshotClientsSource(): Promise<MainSnapshotClientsSource | null> {
+  if (indexedDbAvailable()) return null;
+  const envelope = await readCurrentEnvelopeForMirror();
+  if (!envelope) return null;
+  const payload = envelope.payload as { clients?: unknown };
+  if (!Array.isArray(payload.clients)) {
+    throw new Error("El snapshot validado no contiene una colección de clientes.");
+  }
+  return {
+    schemaVersion: envelope.schemaVersion,
+    companyId: envelope.companyId,
+    issuerRuc: envelope.issuerRuc,
+    snapshotGeneration: envelope.snapshotGeneration,
+    payloadHash: envelope.payloadHash,
+    catalogHashes: { ...envelope.catalogHashes },
+    createdAt: envelope.createdAt,
+    clients: payload.clients as Client[]
+  };
+}
+
+export async function readMainSnapshotProductsSource(): Promise<MainSnapshotProductsSource | null> {
+  if (indexedDbAvailable()) return null;
+  const envelope = await readCurrentEnvelopeForMirror();
+  if (!envelope) return null;
+  const payload = envelope.payload as { products?: unknown };
+  if (!Array.isArray(payload.products)) {
+    throw new Error("El snapshot validado no contiene una colección de productos.");
+  }
+  return {
+    schemaVersion: envelope.schemaVersion,
+    companyId: envelope.companyId,
+    issuerRuc: envelope.issuerRuc,
+    snapshotGeneration: envelope.snapshotGeneration,
+    payloadHash: envelope.payloadHash,
+    catalogHashes: { ...envelope.catalogHashes },
+    createdAt: envelope.createdAt,
+    products: payload.products as Product[]
+  };
+}
+
+export async function readMainSnapshotCatalogSource(): Promise<MainSnapshotCatalogSource | null> {
+  if (indexedDbAvailable()) return null;
+  const envelope = await readCurrentEnvelopeForMirror();
+  if (!envelope) return null;
+  const payload = envelope.payload as {
+    clients?: unknown;
+    products?: unknown;
+    sales?: unknown;
+    inventoryMovements?: unknown;
+    creditPayments?: unknown;
+    creditAdjustments?: unknown;
+    receivedRetentions?: unknown;
+    guides?: unknown;
+    pendingSync?: unknown;
+  };
+  const sales = payload.sales === undefined ? [] : payload.sales;
+  const inventoryMovements = payload.inventoryMovements === undefined
+    ? []
+    : payload.inventoryMovements;
+  const creditPayments = payload.creditPayments === undefined
+    ? []
+    : payload.creditPayments;
+  const creditAdjustments = payload.creditAdjustments === undefined
+    ? []
+    : payload.creditAdjustments;
+  const receivedRetentions = payload.receivedRetentions === undefined
+    ? []
+    : payload.receivedRetentions;
+  const guides = payload.guides === undefined ? [] : payload.guides;
+  const pendingSync = payload.pendingSync === undefined
+    ? []
+    : payload.pendingSync;
+  if (
+    !Array.isArray(payload.clients) ||
+    !Array.isArray(payload.products) ||
+    !Array.isArray(sales) ||
+    !Array.isArray(inventoryMovements) ||
+    !Array.isArray(creditPayments) ||
+    !Array.isArray(creditAdjustments) ||
+    !Array.isArray(receivedRetentions) ||
+    !Array.isArray(guides) ||
+    !Array.isArray(pendingSync)
+  ) {
+    throw new Error("El snapshot validado no contiene los catálogos requeridos.");
+  }
+  return {
+    schemaVersion: envelope.schemaVersion,
+    companyId: envelope.companyId,
+    issuerRuc: envelope.issuerRuc,
+    snapshotGeneration: envelope.snapshotGeneration,
+    payloadHash: envelope.payloadHash,
+    catalogHashes: { ...envelope.catalogHashes },
+    createdAt: envelope.createdAt,
+    clients: payload.clients as Client[],
+    products: payload.products as Product[],
+    sales: sales as Sale[],
+    inventoryMovements: inventoryMovements as InventoryMovement[],
+    creditPayments: creditPayments as CreditPayment[],
+    creditAdjustments: creditAdjustments as CreditAdjustment[],
+    receivedRetentions: receivedRetentions as ReceivedRetention[],
+    guides: guides as RemissionGuide[],
+    pendingSync: pendingSync as PendingSyncItem[],
+  };
+}
+
+export async function writeMainSnapshot(
+  legacyKey: string,
+  value: string,
+): Promise<MainSnapshotDescriptor | null> {
   if (!indexedDbAvailable()) {
     try {
-      await writeNativeSnapshot(value, "write");
-      return;
+      const envelope = await writeNativeSnapshot(value, "write");
+      return {
+        schemaVersion: envelope.schemaVersion,
+        companyId: envelope.companyId,
+        issuerRuc: envelope.issuerRuc,
+        snapshotGeneration: envelope.snapshotGeneration,
+        payloadHash: envelope.payloadHash,
+        catalogHashes: { ...envelope.catalogHashes },
+        createdAt: envelope.createdAt,
+      };
     } catch (error) {
       throw new MainSnapshotStorageError(
         "SNAPSHOT_FILE_WRITE_FAILED",
@@ -408,4 +846,5 @@ export async function writeMainSnapshot(legacyKey: string, value: string): Promi
   const verified = await readFromIndexedDb();
   if (verified !== value) throw new Error("La verificación de IndexedDB falló.");
   await AsyncStorage.removeItem(legacyKey).catch(() => undefined);
+  return null;
 }

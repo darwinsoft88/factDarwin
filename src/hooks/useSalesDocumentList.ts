@@ -7,6 +7,7 @@ import { documentTypeLabel, isConvertedSale, isCreditNoteSale, isInvoiceSale } f
 
 type UseSalesDocumentListParams = {
   data: AppData;
+  sales?: AppData["sales"];
   invoiceSearch: string;
   saleEndDate: string;
   saleStartDate: string;
@@ -15,12 +16,16 @@ type UseSalesDocumentListParams = {
 
 export function useSalesDocumentList({
   data,
+  sales = data.sales,
   invoiceSearch,
   saleEndDate,
   saleStartDate,
   statusFilter
 }: UseSalesDocumentListParams) {
-  const scopedSales = useMemo(() => data.sales.filter((sale) => saleInActiveScope(sale, data)), [data]);
+  const scopedSales = useMemo(
+    () => sales.filter((sale) => saleInActiveScope(sale, data)),
+    [data, sales],
+  );
   const filteredSales = useMemo(() => {
     const search = invoiceSearch.trim().toLowerCase();
     const startBoundary = saleStartDate.trim() ? parseInputDate(saleStartDate, "start") : null;

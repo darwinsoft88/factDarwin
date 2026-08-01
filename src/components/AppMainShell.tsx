@@ -23,6 +23,7 @@ import { KEYBOARD_AVOIDING_BEHAVIOR } from "../constants/layout";
 import { FloatingOverlayContext } from "../context/FloatingOverlayContext";
 import { AppData, User } from "../types";
 import type { PersistMutation } from "../hooks/useSyncAndBackup";
+import type { ControlledSalesHistory } from "../hooks/useControlledSalesHistory";
 import { AppTab } from "../utils/appAccess";
 import { SyncState } from "../utils/support";
 
@@ -32,6 +33,7 @@ type AppMainShellProps = {
   backendToken: string;
   companyLabel: string;
   data: AppData;
+  salesHistory: ControlledSalesHistory;
   establishmentLabel: string;
   headerTopPadding: number;
   keyboardInset: number;
@@ -59,6 +61,7 @@ export function AppMainShell({
   backendToken,
   companyLabel,
   data,
+  salesHistory,
   establishmentLabel,
   headerTopPadding,
   keyboardInset,
@@ -125,6 +128,7 @@ export function AppMainShell({
             <SalesScreen
               mode={activeTab === "ventas" ? "sale" : "documents"}
               data={data}
+              salesHistory={salesHistory}
               user={session}
               backendToken={backendToken}
               persist={persist}

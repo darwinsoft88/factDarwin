@@ -2,7 +2,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppData, PendingSyncItem, PendingSyncPatch, User } from "../types";
 import { identifyIncrementalPatch, normalizeSyncRequestId, sortPendingSyncFifo } from "../utils/pendingSync";
 import { sanitizeAppData } from "../validation";
-import { confirmMainSnapshotMigration, readMainSnapshot, writeMainSnapshot } from "./mainSnapshotStorage";
+import {
+  confirmMainSnapshotMigration,
+  readMainSnapshot,
+  writeMainSnapshot,
+  type MainSnapshotDescriptor,
+} from "./mainSnapshotStorage";
 
 // Clave de almacenamiento para AsyncStorage. Cambiar si se necesita mantener varias versiones o entornos.
 const STORAGE_KEY = "factura-sri-mobile:v1";
@@ -361,9 +366,8 @@ function cloneAppData(data: AppData): AppData {
 }
 
 function publishLoadedData(data: AppData, readRevision: number) {
-  const isolated = cloneAppData(data);
-  if (storedDataRevision === readRevision) lastStoredData = cloneAppData(isolated);
-  return isolated;
+  if (storedDataRevision === readRevision) lastStoredData = cloneAppData(data);
+  return data;
 }
 
 export async function loadData() {
@@ -449,10 +453,88 @@ async function prepareAppData(data: AppData) {
 }
 
 async function persistPreparedData(data: AppData): Promise<AppData> {
+  const canonicalStartedAt = Date.now();
   await savePendingOutbox(data.pendingSync || []);
-  const persisted = await saveMainSnapshotWithQuotaRecovery(data);
+  const { persisted, descriptor } =
+    await saveMainSnapshotWithQuotaRecovery(data);
+  const canonicalDurationMs = Date.now() - canonicalStartedAt;
   storedDataRevision += 1;
   lastStoredData = cloneAppData(persisted);
+  // Los espejos se programan después de esta confirmación y nunca invalidan
+  // el guardado canónico ya completado.
+  // eslint-disable-next-line no-console
+  console.info(JSON.stringify({
+    event: "canonical_snapshot_saved",
+    tenantId: descriptor?.companyId || "",
+    generation: descriptor?.snapshotGeneration || "",
+    canonicalDurationMs,
+    mirrorSchedulingDetached: true,
+  }));
+  if (descriptor) {
+    void import("./sqlite/catalogMirrorCoordinator")
+      .then(({ scheduleCatalogMirrorUpdate }) => {
+        scheduleCatalogMirrorUpdate(
+          descriptor,
+          persisted.clients,
+          persisted.products,
+        );
+      })
+      .catch(() => undefined);
+    void import("./sqlite/salesMirrorCoordinator")
+      .then(({ scheduleSalesMirrorUpdate }) => {
+        scheduleSalesMirrorUpdate(descriptor, persisted.sales);
+      })
+      .catch(() => undefined);
+    void import("./sqlite/inventoryMovementsMirrorCoordinator")
+      .then(({ scheduleInventoryMovementsMirrorUpdate }) => {
+        scheduleInventoryMovementsMirrorUpdate(
+          descriptor,
+          persisted.inventoryMovements || [],
+          persisted.sales,
+          persisted.products,
+        );
+      })
+      .catch(() => undefined);
+    void import("./sqlite/creditLedgerMirrorCoordinator")
+      .then(({ scheduleCreditLedgerMirrorUpdate }) => {
+        scheduleCreditLedgerMirrorUpdate(
+          descriptor,
+          persisted.creditPayments || [],
+          persisted.creditAdjustments || [],
+          persisted.sales,
+          persisted.clients,
+        );
+      })
+      .catch(() => undefined);
+    void import("./sqlite/receivedRetentionsMirrorCoordinator")
+      .then(({ scheduleReceivedRetentionsMirrorUpdate }) => {
+        scheduleReceivedRetentionsMirrorUpdate(
+          descriptor,
+          persisted.receivedRetentions || [],
+          persisted.sales,
+          persisted.clients,
+        );
+      })
+      .catch(() => undefined);
+    void import("./sqlite/remissionGuidesMirrorCoordinator")
+      .then(({ scheduleRemissionGuidesMirrorUpdate }) => {
+        scheduleRemissionGuidesMirrorUpdate(
+          descriptor,
+          persisted.guides || [],
+          persisted.sales,
+          persisted.clients,
+        );
+      })
+      .catch(() => undefined);
+    void import("./sqlite/pendingSyncMirrorCoordinator")
+      .then(({ schedulePendingSyncMirrorUpdate }) => {
+        schedulePendingSyncMirrorUpdate(
+          descriptor,
+          persisted.pendingSync || [],
+        );
+      })
+      .catch(() => undefined);
+  }
   return persisted;
 }
 
@@ -476,25 +558,37 @@ export async function updateStoredData(mutation: AppDataMutation): Promise<AppDa
 }
 
 
-async function saveMainSnapshotWithQuotaRecovery(data: AppData): Promise<AppData> {
+async function saveMainSnapshotWithQuotaRecovery(data: AppData): Promise<{
+  persisted: AppData;
+  descriptor: MainSnapshotDescriptor | null;
+}> {
   try {
-    await writeMainSnapshot(STORAGE_KEY, JSON.stringify(data));
-    return data;
+    const descriptor = await writeMainSnapshot(
+      STORAGE_KEY,
+      JSON.stringify(data),
+    );
+    return { persisted: data, descriptor };
   } catch (error) {
     if (!isStorageQuotaError(error)) throw error;
   }
 
   const compacted = compactDataForStorage(data, "normal");
   try {
-    await writeMainSnapshot(STORAGE_KEY, JSON.stringify(compacted));
-    return compacted;
+    const descriptor = await writeMainSnapshot(
+      STORAGE_KEY,
+      JSON.stringify(compacted),
+    );
+    return { persisted: compacted, descriptor };
   } catch (error) {
     if (!isStorageQuotaError(error)) throw error;
   }
 
   const aggressive = compactDataForStorage(data, "aggressive");
-  await writeMainSnapshot(STORAGE_KEY, JSON.stringify(aggressive));
-  return aggressive;
+  const descriptor = await writeMainSnapshot(
+    STORAGE_KEY,
+    JSON.stringify(aggressive),
+  );
+  return { persisted: aggressive, descriptor };
 }
 
 async function loadPendingOutbox(): Promise<PendingSyncItem[]> {

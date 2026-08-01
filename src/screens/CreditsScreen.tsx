@@ -11,6 +11,7 @@ import { Empty, Section } from "../components/common";
 import { PaginationControls } from "../components/PaginationControls";
 import { LIST_BATCH_SIZE } from "../constants/app";
 import { useCreditReceipts } from "../hooks/useCreditReceipts";
+import { useControlledCreditLedger } from "../hooks/useControlledCreditLedger";
 import type { PersistMutation } from "../hooks/useSyncAndBackup";
 import { restoreAppData } from "../services/backend";
 import { money } from "../sri";
@@ -78,7 +79,17 @@ export function CreditsScreen({
   ListItemComponent: React.ComponentType<CreditListItemProps>;
 }) {
   const [localData, setLocalData] = useState<AppData | null>(null);
-  const data = localData || sourceData;
+  const canonicalData = localData || sourceData;
+  const controlledLedger = useControlledCreditLedger(canonicalData, user);
+  const data = useMemo(() => ({
+    ...canonicalData,
+    creditPayments: controlledLedger.creditPayments,
+    creditAdjustments: controlledLedger.creditAdjustments,
+  }), [
+    canonicalData,
+    controlledLedger.creditAdjustments,
+    controlledLedger.creditPayments,
+  ]);
   const [selectedSaleId, setSelectedSaleId] = useState("");
   const [amountText, setAmountText] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("01");

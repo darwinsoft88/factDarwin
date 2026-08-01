@@ -6,6 +6,8 @@ import { GuideListSection } from "../components/GuideListSection";
 import { ProcessingOverlay } from "../components/ProcessingOverlay";
 import { useGuideDocumentFilters } from "../hooks/useGuideDocumentFilters";
 import { useGuideFormState } from "../hooks/useGuideFormState";
+import { useControlledRemissionGuides } from
+  "../hooks/useControlledRemissionGuides";
 import { authorizeRemissionGuide, reserveDocumentSequence } from "../services/backend";
 import { buildRemissionGuideXml, createGuideAccessKey, nextSequence } from "../sri";
 import { AppData, Client, RemissionGuide, Sale, User } from "../types";
@@ -58,6 +60,11 @@ export function GuidesScreen({
   ListItemComponent: React.ComponentType<GuidesListItemProps>;
   CalendarDateInputComponent: React.ComponentType<CalendarDateInputProps>;
 }) {
+  const controlledGuides = useControlledRemissionGuides(data, user);
+  const guideReadData = React.useMemo(
+    () => ({ ...data, guides: controlledGuides }),
+    [controlledGuides, data],
+  );
   const {
     client,
     clientsById,
@@ -74,7 +81,7 @@ export function GuidesScreen({
     sourceSale,
     sourceSaleId,
     visibleGuides
-  } = useGuideDocumentFilters(data);
+  } = useGuideDocumentFilters(guideReadData);
   const issuerForGuideDocument = (guide: RemissionGuide) => {
     const guideIssuer = issuerForGuide(data.issuer, guide);
     return {

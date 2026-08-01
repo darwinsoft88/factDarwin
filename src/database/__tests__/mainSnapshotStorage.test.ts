@@ -13,6 +13,7 @@ jest.mock("@react-native-async-storage/async-storage", () => ({
 jest.mock("expo-crypto", () => {
   return {
     CryptoDigestAlgorithm: { SHA256: "SHA-256" },
+    randomUUID: jest.fn(() => "snapshot-generation-test"),
     digestStringAsync: jest.fn(async (_algorithm: string, value: string) => [
       value.length,
       value.slice(0, 32),
@@ -93,7 +94,14 @@ jest.mock("expo-file-system", () => {
 });
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { confirmMainSnapshotMigration, readMainSnapshot, writeMainSnapshot } from "../mainSnapshotStorage";
+import { digestStringAsync } from "expo-crypto";
+import {
+  confirmMainSnapshotMigration,
+  readMainSnapshot,
+  readMainSnapshotCatalogSource,
+  readMainSnapshotDescriptor,
+  writeMainSnapshot,
+} from "../mainSnapshotStorage";
 
 const LEGACY_KEY = "factura-sri-mobile:v1";
 const CURRENT = "document/factudarwin/snapshot-current.json";
@@ -125,6 +133,10 @@ function snapshot(targetBytes = 0, marker = "current") {
   return JSON.stringify(data);
 }
 
+function mockHash(value: string) {
+  return [value.length, value.slice(0, 32), value.slice(-32)].join(":");
+}
+
 describe("mainSnapshotStorage native file migration", () => {
   beforeEach(() => {
     asyncStore.clear();
@@ -143,6 +155,181 @@ describe("mainSnapshotStorage native file migration", () => {
     expect(asyncStore.has(LEGACY_KEY)).toBe(false);
 
     expect(await readMainSnapshot(LEGACY_KEY)).toBe(original);
+  });
+
+  it("guarda hashes de catálogos y generación dentro del sobre verificado", async () => {
+    await writeMainSnapshot(LEGACY_KEY, snapshot());
+    const envelope = JSON.parse(mockFs.files.get(CURRENT) || "{}");
+
+    expect(envelope).toMatchObject({
+      schemaVersion: 6,
+      snapshotGeneration: "snapshot-generation-test",
+    });
+    expect(typeof envelope.manifestHash).toBe("string");
+    expect(typeof envelope.catalogHashes.clients).toBe("string");
+    expect(typeof envelope.catalogHashes.products).toBe("string");
+    expect(typeof envelope.catalogHashes.sales).toBe("string");
+    expect(typeof envelope.catalogHashes.inventoryMovements).toBe("string");
+    expect(typeof envelope.catalogHashes.creditPayments).toBe("string");
+    expect(typeof envelope.catalogHashes.creditAdjustments).toBe("string");
+    await expect(readMainSnapshotCatalogSource()).resolves.toMatchObject({
+      snapshotGeneration: "snapshot-generation-test",
+      catalogHashes: envelope.catalogHashes,
+    });
+  });
+
+  it("reutiliza el sobre ya verificado durante el arranque SQLite", async () => {
+    await writeMainSnapshot(LEGACY_KEY, snapshot());
+    await readMainSnapshot(LEGACY_KEY);
+    jest.mocked(digestStringAsync).mockClear();
+
+    await readMainSnapshotDescriptor();
+    await readMainSnapshotCatalogSource();
+    await readMainSnapshotCatalogSource();
+
+    expect(digestStringAsync).not.toHaveBeenCalled();
+  });
+
+  it("abre un sobre v4 y deriva los nuevos hashes de cartera", async () => {
+    const original = snapshot();
+    await writeMainSnapshot(LEGACY_KEY, original);
+    const envelope = JSON.parse(mockFs.files.get(CURRENT) || "{}");
+    envelope.schemaVersion = 4;
+    delete envelope.manifestHash;
+    mockFs.files.set(CURRENT, JSON.stringify(envelope));
+    jest.mocked(digestStringAsync).mockClear();
+
+    await expect(readMainSnapshot(LEGACY_KEY)).resolves.toBe(original);
+
+    expect(digestStringAsync).toHaveBeenCalledTimes(11);
+  });
+
+  it("abre un sobre v5 validando su manifiesto antes de derivar cartera", async () => {
+    const original = snapshot();
+    await writeMainSnapshot(LEGACY_KEY, original);
+    const envelope = JSON.parse(mockFs.files.get(CURRENT) || "{}");
+    envelope.schemaVersion = 5;
+    delete envelope.catalogHashes.creditPayments;
+    delete envelope.catalogHashes.creditAdjustments;
+    envelope.manifestHash = mockHash(JSON.stringify({
+      schemaVersion: envelope.schemaVersion,
+      companyId: envelope.companyId,
+      issuerRuc: envelope.issuerRuc,
+      createdAt: envelope.createdAt,
+      snapshotGeneration: envelope.snapshotGeneration,
+      payloadHash: envelope.payloadHash,
+      catalogHashes: envelope.catalogHashes,
+    }));
+    mockFs.files.set(CURRENT, JSON.stringify(envelope));
+
+    await expect(readMainSnapshot(LEGACY_KEY)).resolves.toBe(original);
+    await expect(readMainSnapshotCatalogSource()).resolves.toMatchObject({
+      catalogHashes: {
+        creditPayments: expect.any(String),
+        creditAdjustments: expect.any(String),
+        receivedRetentions: expect.any(String),
+        guides: expect.any(String),
+      },
+    });
+  });
+
+  it("rechaza un hash de catálogo desconectado aunque el hash global coincida", async () => {
+    await writeMainSnapshot(LEGACY_KEY, snapshot());
+    const envelope = JSON.parse(mockFs.files.get(CURRENT) || "{}");
+    envelope.catalogHashes.clients = "hash-ajeno";
+    mockFs.files.set(CURRENT, JSON.stringify(envelope));
+
+    await expect(readMainSnapshot(LEGACY_KEY)).rejects.toMatchObject({
+      code: "SNAPSHOT_FILE_CORRUPTED",
+    });
+  });
+
+  it("lee sobres v1 y deriva hashes y generación sin reescribirlos", async () => {
+    const rawPayload = snapshot();
+    const payload = JSON.parse(rawPayload);
+    mockFs.files.set(CURRENT, JSON.stringify({
+      schemaVersion: 1,
+      companyId: "company-1",
+      issuerRuc: "1723772099001",
+      createdAt: "2026-07-28T00:00:00.000Z",
+      payloadHash: mockHash(JSON.stringify(payload)),
+      payload,
+    }));
+
+    await expect(readMainSnapshot(LEGACY_KEY)).resolves.toBe(rawPayload);
+    await expect(readMainSnapshotCatalogSource()).resolves.toMatchObject({
+      snapshotGeneration: expect.stringMatching(/^legacy:/),
+      catalogHashes: {
+        clients: expect.any(String),
+        products: expect.any(String),
+        sales: expect.any(String),
+        inventoryMovements: expect.any(String),
+      },
+    });
+    expect(JSON.parse(mockFs.files.get(CURRENT) || "{}").schemaVersion).toBe(1);
+  });
+
+  it("verifica también el hash de movimientos de inventario", async () => {
+    const payload = JSON.parse(snapshot());
+    payload.inventoryMovements = [{
+      id: "movement-1",
+      productId: "product-1",
+      type: "entrada",
+      quantity: 1,
+      stockBefore: 0,
+      stockAfter: 1,
+    }];
+    await writeMainSnapshot(LEGACY_KEY, JSON.stringify(payload));
+    const envelope = JSON.parse(mockFs.files.get(CURRENT) || "{}");
+    envelope.catalogHashes.inventoryMovements = "hash-ajeno";
+    mockFs.files.set(CURRENT, JSON.stringify(envelope));
+    await expect(readMainSnapshot(LEGACY_KEY)).rejects.toMatchObject({
+      code: "SNAPSHOT_FILE_CORRUPTED",
+    });
+  });
+
+  it("lee sobres v2 conservando su generación y deriva salesHash", async () => {
+    await writeMainSnapshot(LEGACY_KEY, snapshot());
+    const envelope = JSON.parse(mockFs.files.get(CURRENT) || "{}");
+    envelope.schemaVersion = 2;
+    envelope.clientsHash = envelope.catalogHashes.clients;
+    envelope.productsHash = envelope.catalogHashes.products;
+    delete envelope.catalogHashes;
+    delete envelope.manifestHash;
+    mockFs.files.set(CURRENT, JSON.stringify(envelope));
+
+    await expect(readMainSnapshotCatalogSource()).resolves.toMatchObject({
+      snapshotGeneration: "snapshot-generation-test",
+      catalogHashes: {
+        sales: expect.any(String),
+        inventoryMovements: expect.any(String),
+      },
+      sales: [],
+    });
+    expect(JSON.parse(mockFs.files.get(CURRENT) || "{}").schemaVersion).toBe(2);
+  });
+
+  it("lee sobres v3 y deriva la estructura catalogHashes", async () => {
+    await writeMainSnapshot(LEGACY_KEY, snapshot());
+    const envelope = JSON.parse(mockFs.files.get(CURRENT) || "{}");
+    envelope.schemaVersion = 3;
+    envelope.clientsHash = envelope.catalogHashes.clients;
+    envelope.productsHash = envelope.catalogHashes.products;
+    envelope.salesHash = envelope.catalogHashes.sales;
+    delete envelope.catalogHashes;
+    delete envelope.manifestHash;
+    mockFs.files.set(CURRENT, JSON.stringify(envelope));
+
+    await expect(readMainSnapshotCatalogSource()).resolves.toMatchObject({
+      snapshotGeneration: "snapshot-generation-test",
+      catalogHashes: {
+        clients: expect.any(String),
+        products: expect.any(String),
+        sales: expect.any(String),
+        inventoryMovements: expect.any(String),
+      },
+      inventoryMovements: [],
+    });
   });
 
   it("migrates legacy data only after current was reread and validated", async () => {
