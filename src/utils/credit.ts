@@ -357,14 +357,21 @@ function operationIdentityPrefix(kind: CreditOperationIdentityKind) {
 function secureRandomUuid() {
   const cryptoProvider = globalThis.crypto;
   if (typeof cryptoProvider?.randomUUID === "function") return cryptoProvider.randomUUID();
-  if (typeof cryptoProvider?.getRandomValues !== "function") {
+  if (typeof cryptoProvider?.getRandomValues === "function") {
+    const bytes = cryptoProvider.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+    return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
+  }
+  try {
+    // Expo Crypto usa la fuente nativa segura cuando Hermes no expone globalThis.crypto.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const expoCrypto = require("expo-crypto") as typeof import("expo-crypto");
+    return expoCrypto.randomUUID();
+  } catch {
     throw new CreditPaymentOperationError("CREDIT_PAYMENT_INVALID_OPERATION_ID");
   }
-  const bytes = cryptoProvider.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
-  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
 }
 
 export function createCreditOperationId(kind: CreditOperationIdentityKind) {

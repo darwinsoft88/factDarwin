@@ -7,7 +7,7 @@ import type { PersistMutation } from "./useSyncAndBackup";
 import { appendAudit } from "../utils/audit";
 import { applyCreditAdjustmentOnce, reconcileCreditBalances, resolveCreditAdjustmentState } from "../utils/credit";
 import { isAccessKeyUsed, resolveInvoiceStatus } from "../utils/documents";
-import { showMessage } from "../utils/dialogs";
+import { showError, showSuccess, showWarning } from "../utils/dialogs";
 import { activeEstablishment, issuerForSale, updateIssuerEstablishmentSequence } from "../utils/establishments";
 import { formatSriDate } from "../utils/format";
 import { applyCreditNoteInventoryOnce } from "../utils/inventory";
@@ -34,7 +34,6 @@ type UseCreditNoteActionsParams = {
   data: AppData;
   issuingCreditNote: boolean;
   persistMutation: PersistMutation;
-  sendSaleEmail: (sale: Sale, client: Client, source?: Sale, showAlerts?: boolean) => Promise<boolean>;
   setCreditNoteQuantities: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setCreditNoteReason: React.Dispatch<React.SetStateAction<string>>;
   setCreditNoteSourceId: React.Dispatch<React.SetStateAction<string>>;
@@ -53,7 +52,6 @@ export function useCreditNoteActions({
   data,
   issuingCreditNote,
   persistMutation,
-  sendSaleEmail,
   setCreditNoteQuantities,
   setCreditNoteReason,
   setCreditNoteSourceId,
@@ -144,7 +142,7 @@ export function useCreditNoteActions({
     validateEmissionPointLicense(data, reservationIssuer, licenseErrors);
     if (licenseErrors.length > 0) {
       const message = licenseErrors.join("\n");
-      showMessage("Plan requerido", message);
+      showWarning("Plan requerido", message);
       return;
     }
     let sequence = nextSequence(reservationIssuer.creditNoteSequential || 1);
@@ -432,8 +430,6 @@ export function useCreditNoteActions({
         return audited;
       });
       const finalCreditNote = finalData.sales.find((sale) => sale.id === noteId);
-      const finalSource = finalCreditNote?.sourceSaleId ? finalData.sales.find((sale) => sale.id === finalCreditNote.sourceSaleId) : undefined;
-      const finalClient = finalCreditNote ? finalData.clients.find((client) => client.id === finalCreditNote.clientId) : undefined;
       if (!finalCreditNote) throw new Error("No se encontro la nota de credito persistida.");
 
       if (durableResultChanged) {
@@ -451,21 +447,28 @@ export function useCreditNoteActions({
           // El estado fiscal durable no debe degradarse por un fallo posterior de sincronizacion.
         }
       }
-      let creditNoteEmailSent = false;
-      if (transitionedToAuthorized && finalCreditNote.status === "AUTORIZADA" && finalSource && finalClient) {
-        try {
-          creditNoteEmailSent = await sendSaleEmail(finalCreditNote, finalClient, finalSource, false);
-        } catch {
-          creditNoteEmailSent = false;
-        }
+      if (transitionedToAuthorized && finalCreditNote.status === "AUTORIZADA") {
         setCreditNoteSourceId("");
         setCreditNoteReason("Devolucion parcial");
         setCreditNoteQuantities({});
       }
       const stockText = createdMovementIds.size > 0 ? ", stock devuelto" : "";
-      Alert.alert(explainSriResult(sriResult).title, finalCreditNote.status === "AUTORIZADA" ? `Nota de credito autorizada${stockText}${creditNoteEmailSent ? " y enviada al correo del cliente" : ""}.` : sriUserMessage(sriResult));
+      const title = explainSriResult(sriResult).title;
+
+      const message =
+        finalCreditNote.status === "AUTORIZADA"
+          ? `Nota de crédito autorizada${stockText}.`
+          : sriUserMessage(sriResult);
+
+      if (finalCreditNote.status === "AUTORIZADA") {
+        showSuccess(title, message);
+      } else if (finalCreditNote.status === "PENDIENTE_SRI") {
+        showWarning(title, message);
+      } else {
+        showError(title, message);
+      }
     } catch (error) {
-      Alert.alert("Respuesta SRI no aplicada", error instanceof Error ? error.message : "La respuesta del SRI requiere revision antes de continuar.");
+      showError("Respuesta SRI no aplicada", error instanceof Error ? error.message : "La respuesta del SRI requiere revision antes de continuar.");
     } finally {
       setRetryingSaleId("");
       setIssuingCreditNote(false);

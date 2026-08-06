@@ -3,10 +3,17 @@ import { backendBaseUrl, postJson, readJson } from "./http";
 export async function sendInvoiceEmail(backendUrl: string, payload: { to: string; subject: string; html: string; xml: string; pdfBase64?: string; documentType?: "factura" | "nota_credito"; documentNumber?: string }, token = "") {
   const baseUrl = backendBaseUrl(backendUrl);
   const response = await postJson(`${baseUrl}/api/email/invoice`, payload, "No hay conexion para enviar el correo. Intente nuevamente cuando tenga internet.", token);
-  const result = (await readJson(response)) as { ok?: boolean; error?: string };
+  const result = (await readJson(response)) as {
+    ok?: boolean;
+    error?: string;
+    messageId?: string;
+    accepted?: string[];
+    rejected?: string[];
+    response?: string;
+  };
 
-  if (!response.ok || !result.ok) {
-    throw new Error(result.error || "No se pudo enviar el correo.");
+  if (!response.ok || !result.ok || !result.accepted?.length) {
+    throw new Error(result.error || "No se pudo confirmar que el servidor de correo aceptara el mensaje.");
   }
 
   return result;

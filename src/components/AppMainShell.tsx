@@ -87,6 +87,7 @@ export function AppMainShell({
   const showCommercialSupport = activeTab !== "ventas";
 
   return (
+    // se usa KeyboardAvoidingView para que el teclado no tape los inputs en iOS, y se usa ScrollView para que la pantalla sea scrollable en Android
     <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
       <FloatingOverlayContext.Provider value={{ setOverlay: setFloatingOverlay }}>
         <AppHeader
@@ -111,7 +112,13 @@ export function AppMainShell({
 
         <LicenseExpiryBanner license={data.license} onOpenLicense={onOpenLicense} visible={licenseBannerVisible} />
 
-        <AppTabs availableTabs={availableTabs} activeTab={activeTab} onChange={onTabChange} />
+        <AppTabs availableTabs={availableTabs} activeTab={activeTab} onChange={onTabChange} /> 
+ {/*
+        <BottomAppTabs
+          availableTabs={availableTabs}
+          activeTab={activeTab}
+          onChange={onTabChange}
+        />*/}
 
         <ScrollView
           contentContainerStyle={[

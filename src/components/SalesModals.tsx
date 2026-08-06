@@ -50,6 +50,7 @@ type SalesModalsProps = {
   saveQuickClient: () => void;
   saveLineEdit: () => void;
   saveReceivedRetention: () => void;
+  savingReceivedRetention: boolean;
   setCreditNoteQuantities: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   setCreditNoteReason: React.Dispatch<React.SetStateAction<string>>;
   setAdditionalInfo: React.Dispatch<React.SetStateAction<AdditionalInfoField[]>>;
@@ -107,6 +108,7 @@ export function SalesModals({
   saveLineEdit,
   saveQuickClient,
   saveReceivedRetention,
+  savingReceivedRetention,
   setCreditNoteQuantities,
   setCreditNoteReason,
   setAdditionalInfo,
@@ -175,6 +177,7 @@ export function SalesModals({
         onNotesChange={setRetentionNotes}
         onClose={closeRetentionForm}
         onSave={saveReceivedRetention}
+        saving={savingReceivedRetention}
       />
       <QuickClientEditor
         visible={quickClientVisible}

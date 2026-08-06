@@ -7,13 +7,21 @@ import { AdditionalInfoField, AppData, Client, DocumentType, PaymentCondition, P
 import { appendAudit } from "../utils/audit";
 import { expireStaleSriPendingDocuments } from "../utils/autoRetrySriDocuments";
 import { getRetryInfo, MAX_DAILY_RETRIES, resolveInvoiceStatus } from "../utils/documents";
-import { confirmAction, getLocalVoidReason, showMessage } from "../utils/dialogs";
 import { issuerForSale } from "../utils/establishments";
-import { reverseSaleInventoryOnce, SaleInventoryError } from "../utils/inventory";
+import { acquireSaleRetryLock, applySriRetryInventoryOutcome, reapplyAuthorizedSaleInventoryOnce, reverseSaleInventoryOnce, SaleInventoryError } from "../utils/inventory";
 import { isTicketOffline } from "../utils/invoiceStatus";
 import { canEditSale, documentTypeLabel, isCreditNoteSale, isInvoiceSale, resolveSaleInventoryState } from "../utils/sales";
 import { explainSriResult, sriUserMessage } from "../utils/sriMessages";
 import { isDocumentCorrectionIssue, isStaleSriPendingDocument, isTransientSriIssue, staleSriPendingMessage } from "../utils/sriRetryPolicy";
+import {
+  confirmAction,
+  getLocalVoidReason,
+  showMessage,
+  showError,
+  showInfo,
+  showSuccess,
+  showWarning,
+} from "../utils/dialogs";
 
 const definitiveFailureStatuses = new Set<Sale["status"]>(["DEVUELTA", "ERROR_SRI", "ANULADA"]);
 
@@ -98,6 +106,8 @@ export function useSaleDocumentWorkflowActions({
   setSourceTicketId,
   user
 }: UseSaleDocumentWorkflowActionsParams) {
+  const retryRunningSaleIdsRef = React.useRef(new Set<string>());
+
   const loadPaymentTerms = (sale: Sale) => {
     setPaymentMethod(sale.paymentMethod || "01");
     setSalePayments(sale.payments || []);
@@ -107,11 +117,55 @@ export function useSaleDocumentWorkflowActions({
 
   const retrySale = async (sale: Sale, client: Client) => {
     if (!isInvoiceSale(sale) && !isCreditNoteSale(sale)) {
-      Alert.alert("Documento interno", "Este documento no se envia al SRI.");
+      showInfo("Documento interno", "Este documento no se envia al SRI.");
+      return;
+    }
+    const saleId = sale.id;
+    const releaseRetryLock = acquireSaleRetryLock(retryRunningSaleIdsRef.current, saleId);
+    if (!releaseRetryLock) return;
+
+    try {
+    if (sale.status === "AUTORIZADA" && resolveSaleInventoryState(sale) === "RECONCILIATION_PENDING") {
+      setRetryingSaleId(saleId);
+      setProcessingMessage("Reconciliando inventario...");
+      try {
+        await persistMutation((current) => {
+          const currentSale = current.sales.find((item) => item.id === saleId);
+          if (!currentSale || currentSale.status !== "AUTORIZADA" || resolveSaleInventoryState(currentSale) !== "RECONCILIATION_PENDING") return current;
+          const reconciled = reapplyAuthorizedSaleInventoryOnce({
+            products: current.products,
+            movements: current.inventoryMovements || [],
+            sale: currentSale,
+            userId: user.id,
+            createdAt: new Date().toISOString(),
+            reason: "Reaplicacion segura despues de autorizacion SRI"
+          });
+          return appendAudit(
+            {
+              ...current,
+              products: reconciled.products,
+              inventoryMovements: reconciled.movements,
+              sales: current.sales.map((item) => item.id === saleId ? reconciled.sale : item)
+            },
+            user,
+            "INVOICE_INVENTORY_RECONCILED",
+            "sale",
+            saleId,
+            `Inventario reconciliado para factura autorizada ${currentSale.sequence}`,
+            { inventoryOperationId: reconciled.sale.inventoryOperationId }
+          );
+        });
+        showSuccess("Inventario reconciliado", "La factura ya estaba autorizada y el inventario se actualizo una sola vez.");
+      } catch (error) {
+        showError("Reconciliacion pendiente", error instanceof Error ? error.message : "No se pudo actualizar el inventario de la factura autorizada.");
+      } finally {
+        setRetryingSaleId("");
+        setProcessingMessage("");
+      }
       return;
     }
     if (isClosedSale(sale)) {
-      Alert.alert("Documento cerrado", "Este documento ya no se puede reintentar.");
+      showWarning("Documento cerrado", "Este documento ya no se puede reintentar.");
       return;
     }
     if (isStaleSriPendingDocument(sale)) {
@@ -135,10 +189,9 @@ export function useSaleDocumentWorkflowActions({
     if (retryInfo.today >= MAX_DAILY_RETRIES) {
       const message = `Esta factura ya tiene ${retryInfo.today} reintento(s) hoy. Revise el detalle del documento antes de volver a intentar manana.`;
       setNotice(message);
-      Alert.alert("Limite diario de reintentos", message);
+      showWarning("Limite diario de reintentos", message);
       return;
     }
-    const saleId = sale.id;
     const clientId = client.id;
     const requestFingerprint = retryFingerprint(sale);
     const sourceSale = sale.sourceSaleId ? data.sales.find((item) => item.id === sale.sourceSaleId) : undefined;
@@ -148,9 +201,9 @@ export function useSaleDocumentWorkflowActions({
       const sourceInventoryState = sourceSale ? resolveSaleInventoryState(sourceSale) : undefined;
       if (
         (ticketDerived && (inventoryState !== "NOT_APPLIED" || sourceInventoryState !== "APPLIED")) ||
-        (!ticketDerived && inventoryState !== "APPLIED")
+        (!ticketDerived && inventoryState !== "APPLIED" && inventoryState !== "REVERSED")
       ) {
-        Alert.alert("Reconciliacion requerida", "El inventario del documento no es consistente para reintentar la emision.");
+        showWarning("Reconciliacion requerida", "El inventario del documento no es consistente para reintentar la emision.");
         return;
       }
     }
@@ -172,7 +225,7 @@ export function useSaleDocumentWorkflowActions({
           const updatedSale: Sale = { ...currentSale, status: "ERROR_SRI", sriMessage: message, retryHistory: [...(currentSale.retryHistory || []), retryAt] };
           return appendAudit({ ...current, sales: current.sales.map((item) => item.id === saleId ? updatedSale : item) }, user, isCreditNoteSale(currentSale) ? "CREDIT_NOTE_RETRY_FAILED" : "INVOICE_RETRY_FAILED", "sale", saleId, `Reenvio fallido de ${documentTypeLabel(currentSale)} ${currentSale.sequence}`, { error: message });
         });
-        Alert.alert("No se pudo reintentar", message);
+        showError("No se pudo reintentar", message);
       } finally {
         setRetryingSaleId("");
         setProcessingMessage("");
@@ -206,7 +259,19 @@ export function useSaleDocumentWorkflowActions({
         const currentTicketDerived = isInvoiceSale(updatedSale) && currentSource?.documentType === "nota_venta";
         if (isInvoiceSale(updatedSale) && !currentTicketDerived) {
           const inventoryState = resolveSaleInventoryState(currentSale);
-          if (updatedSale.status === "AUTORIZADA" || !isDefinitiveFailure(updatedSale)) {
+          if (inventoryState === "REVERSED") {
+            const retryInventory = applySriRetryInventoryOutcome({
+              products,
+              movements,
+              previousSale: currentSale,
+              resultSale: updatedSale,
+              userId: user.id,
+              createdAt: retryAt
+            });
+            products = retryInventory.products;
+            movements = retryInventory.movements;
+            updatedSale = retryInventory.sale;
+          } else if (updatedSale.status === "AUTORIZADA" || !isDefinitiveFailure(updatedSale)) {
             if (inventoryState !== "APPLIED") throw inventoryConsistencyError(currentSale);
           } else if (inventoryState === "UNKNOWN") {
             throw inventoryConsistencyError(currentSale);
@@ -231,24 +296,47 @@ export function useSaleDocumentWorkflowActions({
         return appendAudit({ ...current, products, inventoryMovements: movements, sales }, user, isCreditNoteSale(currentSale) ? "CREDIT_NOTE_RETRIED" : "INVOICE_RETRIED", "sale", saleId, `Reenvio de ${documentTypeLabel(currentSale)} ${currentSale.sequence}: ${updatedSale.status}`, { status: updatedSale.status, accessKey: updatedSale.accessKey });
       });
       if (!applied || !persistedSale) {
-        Alert.alert("Documento actualizado", "El documento cambio durante el reintento y la respuesta no se aplico sobre datos obsoletos.");
+        showInfo("Documento actualizado", "El documento cambio durante el reintento y la respuesta no se aplico sobre datos obsoletos.");
         return;
       }
-      Alert.alert(explainSriResult(sriResult).title, persistedSale.status === "AUTORIZADA" ? `${documentTypeLabel(persistedSale)} autorizada.` : sriUserMessage(sriResult));
-    } catch (error) {
+const title = explainSriResult(sriResult).title;
+const message = persistedSale.status === "AUTORIZADA"
+  ? `${documentTypeLabel(persistedSale)} autorizada.`
+  : sriUserMessage(sriResult);
+
+if (persistedSale.status === "AUTORIZADA" && resolveSaleInventoryState(persistedSale) === "RECONCILIATION_PENDING") {
+  showError("Factura autorizada; inventario pendiente", "El SRI autorizo la factura, pero el inventario requiere reconciliacion. Use Reconciliar inventario para recuperarlo sin reenviar al SRI.");
+} else if (persistedSale.status === "AUTORIZADA") {
+  showSuccess(title, message);
+} else if (persistedSale.status === "PENDIENTE_SRI") {
+  showWarning(title, message);
+} else {
+  showError(title, message);
+}    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "";
+      const normalizedMessage = rawMessage.toLowerCase();
+      const storageQuotaExceeded =
+        (error instanceof Error && (error.name === "QuotaExceededError" || error.name === "NS_ERROR_DOM_QUOTA_REACHED")) ||
+        normalizedMessage.includes("quota") ||
+        normalizedMessage.includes("exceeded");
       const message = error instanceof SaleInventoryError
         ? "El inventario del documento requiere reconciliacion antes de aplicar la respuesta SRI."
-        : error instanceof Error ? error.message : "No se pudo guardar el resultado del SRI.";
-      Alert.alert("No se pudo aplicar el resultado", message);
+        : storageQuotaExceeded
+          ? "El almacenamiento local está lleno. Sincronice la información y libere espacio antes de intentarlo nuevamente."
+          : rawMessage || "No se pudo guardar el resultado del SRI.";
+      showError("No se pudo aplicar el resultado", message);
     } finally {
       setRetryingSaleId("");
       setProcessingMessage("");
+    }
+    } finally {
+      releaseRetryLock();
     }
   };
 
   const editSale = (sale: Sale) => {
     if (!canEditSale(sale)) {
-      Alert.alert("Factura no editable", "Solo se pueden editar facturas no autorizadas y no anuladas.");
+      showWarning("Factura no editable", "Solo se pueden editar facturas no autorizadas y no anuladas.");
       return;
     }
 

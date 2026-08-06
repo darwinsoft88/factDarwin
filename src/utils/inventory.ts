@@ -223,6 +223,112 @@ export function applySaleInventoryOnce(options: SaleInventoryOperationOptions): 
   };
 }
 
+export function sriAuthorizedReapplyOperationId(sale: Sale) {
+  const authorizationIdentity = sale.authorizationNumber || sale.accessKey;
+  if (!authorizationIdentity) {
+    throw new SaleInventoryError("SALE_INVENTORY_OPERATION_MISMATCH", sale.id, "", "APPLY");
+  }
+  return `SRI_REAPPLY:v1:${sale.id}:${authorizationIdentity}`;
+}
+
+export function acquireSaleRetryLock(activeSaleIds: Set<string>, saleId: string) {
+  if (activeSaleIds.has(saleId)) return null;
+  activeSaleIds.add(saleId);
+  return () => activeSaleIds.delete(saleId);
+}
+
+export function reapplyAuthorizedSaleInventoryOnce(
+  options: Omit<SaleInventoryOperationOptions, "operationId">
+): SaleInventoryOperationResult {
+  const { products, movements, sale, userId, createdAt, reason } = options;
+  const operationId = sriAuthorizedReapplyOperationId(sale);
+  const state = resolveSaleInventoryState(sale);
+
+  if (sale.status !== "AUTORIZADA") {
+    throw new SaleInventoryError("SALE_INVENTORY_OPERATION_MISMATCH", sale.id, operationId, "APPLY");
+  }
+
+  if (state === "APPLIED") {
+    if (sale.inventoryOperationId !== operationId) {
+      throw new SaleInventoryError("SALE_INVENTORY_OPERATION_MISMATCH", sale.id, operationId, "APPLY");
+    }
+    return applySaleInventoryOnce({ products, movements, sale, operationId, userId, createdAt, reason });
+  }
+
+  if (state !== "REVERSED" && state !== "RECONCILIATION_PENDING") {
+    throw new SaleInventoryError("SALE_INVENTORY_OPERATION_MISMATCH", sale.id, operationId, "APPLY");
+  }
+
+  const originalOperationId = sale.inventoryOperationId || sale.id;
+  const originalApply = inspectMovementEvidence(movements, expectedMovements(sale, originalOperationId, "APPLY"), sale, originalOperationId, "APPLY");
+  const originalReverse = inspectMovementEvidence(movements, expectedMovements(sale, originalOperationId, "REVERSE"), sale, originalOperationId, "REVERSE");
+  if (!originalApply.complete || !originalReverse.complete) {
+    throw new SaleInventoryError("SALE_INVENTORY_INCONSISTENT_MOVEMENTS", sale.id, originalOperationId, "REVERSE");
+  }
+
+  const reapplyEvidence = inspectMovementEvidence(movements, expectedMovements(sale, operationId, "APPLY"), sale, operationId, "APPLY");
+  if (reapplyEvidence.complete) {
+    return {
+      products,
+      movements,
+      sale: { ...sale, inventoryState: "APPLIED", inventoryOperationId: operationId },
+      changed: false
+    };
+  }
+
+  return applySaleInventoryOnce({
+    products,
+    movements,
+    sale: { ...sale, inventoryState: "NOT_APPLIED", inventoryOperationId: undefined },
+    operationId,
+    userId,
+    createdAt,
+    reason
+  });
+}
+
+export function applySriRetryInventoryOutcome(options: {
+  products: Product[];
+  movements: InventoryMovement[];
+  previousSale: Sale;
+  resultSale: Sale;
+  userId: string;
+  createdAt: string;
+}) {
+  const { products, movements, previousSale, resultSale, userId, createdAt } = options;
+  if (resolveSaleInventoryState(previousSale) !== "REVERSED" || resultSale.status !== "AUTORIZADA") {
+    return {
+      products,
+      movements,
+      sale: resolveSaleInventoryState(previousSale) === "REVERSED"
+        ? { ...resultSale, inventoryState: "REVERSED" as const, inventoryOperationId: previousSale.inventoryOperationId }
+        : resultSale,
+      reconciliationPending: false
+    };
+  }
+
+  try {
+    const reapplied = reapplyAuthorizedSaleInventoryOnce({
+      products,
+      movements,
+      sale: { ...resultSale, inventoryState: "REVERSED", inventoryOperationId: previousSale.inventoryOperationId },
+      userId,
+      createdAt,
+      reason: "Reaplicacion despues de autorizacion SRI"
+    });
+    return { ...reapplied, reconciliationPending: false };
+  } catch (error) {
+    if (!(error instanceof SaleInventoryError)) throw error;
+    return {
+      products,
+      movements,
+      sale: { ...resultSale, inventoryState: "RECONCILIATION_PENDING" as const, inventoryOperationId: previousSale.inventoryOperationId },
+      changed: false,
+      reconciliationPending: true
+    };
+  }
+}
+
 export function reverseSaleInventoryOnce(options: SaleInventoryOperationOptions): SaleInventoryOperationResult {
   const { products, movements, sale, operationId, userId, createdAt, reason } = options;
   const state = requireKnownState(sale, operationId, "REVERSE");

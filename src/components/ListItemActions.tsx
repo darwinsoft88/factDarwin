@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { AppToast } from "./AppToast";
 
 export type ActionHandler = () => void | Promise<void>;
 type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
@@ -25,9 +26,18 @@ export function ListItemActions({
 }) {
   const [actionsVisible, setActionsVisible] = useState(false);
   const [processingActionLabel, setProcessingActionLabel] = useState("");
+  const mountedRef = useRef(false);
   const compactActions = actions.length > 2;
   const isProcessingAction = Boolean(processingActionLabel);
+  const isSendingEmail = processingActionLabel === "Email";
   const actionMeta = compactActionMeta(meta);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const runAction = async (label: string, action: ActionHandler) => {
     if (isProcessingAction) return;
@@ -39,8 +49,10 @@ export function ListItemActions({
     } catch (error) {
       Alert.alert("Accion no completada", error instanceof Error ? error.message : "No se pudo completar la accion.");
     } finally {
-      setProcessingActionLabel("");
-      onProcessingChange?.(false);
+      if (mountedRef.current) {
+        setProcessingActionLabel("");
+        onProcessingChange?.(false);
+      }
     }
   };
 
@@ -51,7 +63,7 @@ export function ListItemActions({
       <View style={styles.actionGroup}>
         <Pressable style={[styles.actionsButton, isProcessingAction && styles.disabledActionButton]} onPress={() => setActionsVisible(true)} disabled={isProcessingAction}>
           <MaterialCommunityIcons name={isProcessingAction ? "progress-clock" : "dots-vertical"} size={17} color="#ffffff" />
-          <Text style={styles.actionsButtonText}>{isProcessingAction ? "Procesando..." : "Acciones"}</Text>
+          <Text style={styles.actionsButtonText}>{isProcessingAction ? (isSendingEmail ? "Enviando..." : "Procesando...") : "Acciones"}</Text>
         </Pressable>
         <Modal visible={actionsVisible} transparent animationType="fade" onRequestClose={() => setActionsVisible(false)}>
           <View style={styles.actionModalBackdrop}>
@@ -77,6 +89,7 @@ export function ListItemActions({
               </Pressable>
             </View>
           </View>
+          <AppToast />
         </Modal>
       </View>
     );
@@ -86,8 +99,8 @@ export function ListItemActions({
     <View style={styles.actionGroup}>
       {actions.map((action) => (
         <Pressable key={action.label} style={[actionButtonStyle(action.tone), isProcessingAction && styles.disabledActionButton]} onPress={() => { void runAction(action.label, action.onPress); }} disabled={isProcessingAction}>
-          <MaterialCommunityIcons name={processingActionLabel === action.label ? "progress-clock" : action.icon} size={15} color={actionIconColor(action.tone)} />
-          <Text style={actionButtonTextStyle(action.tone)}>{processingActionLabel === action.label ? "Procesando..." : action.label}</Text>
+          <MaterialCommunityIcons name={processingActionLabel === action.label || (isSendingEmail && action.label === "Enviando...") ? "progress-clock" : action.icon} size={15} color={actionIconColor(action.tone)} />
+          <Text style={actionButtonTextStyle(action.tone)}>{processingActionLabel === action.label || (isSendingEmail && action.label === "Enviando...") ? (isSendingEmail ? "Enviando..." : "Procesando...") : action.label}</Text>
         </Pressable>
       ))}
     </View>

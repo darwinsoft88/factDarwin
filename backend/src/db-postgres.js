@@ -24,6 +24,9 @@ const { buildInitialTenantData, uid } = require("./saas");
 const documentEmailMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "001-document-email-operations.sql"), "utf8");
 const documentEmailSimulationMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "002-document-email-simulation.sql"), "utf8");
 const documentEmailSmtpMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "003-document-email-smtp.sql"), "utf8");
+const syncChangeLogMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "004-sync-change-log.sql"), "utf8");
+const documentHistoryMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "005-document-history-index.sql"), "utf8");
+const { appendSnapshotChanges } = require("./sync-change-log");
 
 const pool = new Pool({
   connectionString: config.databaseUrl,
@@ -387,6 +390,8 @@ async function ensureSchema() {
       ${documentEmailMigrationSql}
       ${documentEmailSimulationMigrationSql}
       ${documentEmailSmtpMigrationSql}
+      ${syncChangeLogMigrationSql}
+      ${documentHistoryMigrationSql}
     `).then(() => {
       reconcileSaasUsersFromSnapshots().catch((error) => {
         console.error("No se pudo reconciliar usuarios SaaS al iniciar:", error.message);
@@ -421,7 +426,7 @@ async function getSnapshot(companyId = "") {
   };
 }
 
-async function saveSnapshot(data, companyId = "") {
+async function saveSnapshot(data, companyId = "", changeContext = {}) {
   data = reconcileProductStockFromMovements(normalizeDocumentScopes(data));
   validateSnapshot(data);
   await ensureSchema();
@@ -431,9 +436,10 @@ async function saveSnapshot(data, companyId = "") {
   try {
     await client.query("BEGIN");
     let mergedData = data;
+    let currentData = null;
     if (companyId) {
       const locked = await client.query("SELECT data FROM saas_snapshots WHERE company_id = $1 FOR UPDATE", [companyId]);
-      const currentData = locked.rows[0]?.data
+      currentData = locked.rows[0]?.data
         ? typeof locked.rows[0].data === "string" ? JSON.parse(locked.rows[0].data) : locked.rows[0].data
         : null;
       mergedData = currentData
@@ -460,6 +466,19 @@ async function saveSnapshot(data, companyId = "") {
       );
       await client.query("INSERT INTO app_snapshot_history (data, created_at) VALUES ($1::jsonb, $2)", [JSON.stringify(storedData), updatedAt]);
       await syncNormalizedTables(client, data, updatedAt);
+    }
+
+    if (companyId) {
+      await appendSnapshotChanges(client, {
+        shadowConfig: config.incrementalSyncShadow,
+        companyId,
+        currentData,
+        finalData: mergedData,
+        occurredAt: updatedAt,
+        origin: changeContext.origin || "legacy_snapshot",
+        userId: changeContext.userId || null,
+        deviceId: changeContext.deviceId || null
+      });
     }
 
     const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -583,6 +602,15 @@ async function restoreTenantSnapshot(companyId = "", backup = {}, options = {}) 
     );
     await clearTenantNormalizedTables(client, normalizedCompanyId);
     await syncNormalizedTables(client, restoredData, updatedAt, normalizedCompanyId);
+    await appendSnapshotChanges(client, {
+      shadowConfig: config.incrementalSyncShadow,
+      companyId: normalizedCompanyId,
+      currentData: current.rows[0]?.data || {},
+      finalData: restoredData,
+      occurredAt: updatedAt,
+      origin: "admin_operation",
+      userId: options.userId || null
+    });
     await insertBackendAudit(client, "TENANT_RESTORED", { companyId: normalizedCompanyId, summary });
     await client.query("COMMIT");
     return { ok: true, companyId: normalizedCompanyId, updatedAt, summary };
@@ -740,7 +768,7 @@ async function completeDomainOperation(client, companyId = "", operationType, op
   return getDomainOperation(client, companyId, operationType, operationId);
 }
 
-async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
+async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null, changeContext = {}) {
   await ensureSchema();
 
   const client = await pool.connect();
@@ -804,6 +832,20 @@ async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
     }
 
     const automaticEmailOperations = await createAutomaticEmailOperations(client, companyId, currentData, data, updatedAt);
+    if (companyId) {
+      await appendSnapshotChanges(client, {
+        shadowConfig: config.incrementalSyncShadow,
+        companyId,
+        currentData,
+        finalData: data,
+        requestId: syncOperation?.requestId || null,
+        operationId: syncOperation?.operationId || null,
+        occurredAt: updatedAt,
+        origin: changeContext.origin || (domainOperations.length ? "domain_operation" : syncOperation ? "incremental_merge" : "legacy_merge"),
+        userId: changeContext.userId || null,
+        deviceId: changeContext.deviceId || null
+      });
+    }
     const summary = summarizeSnapshot(data);
     await insertBackendAudit(client, "APP_INCREMENTAL_MERGE", {
       ...summary,
@@ -849,6 +891,54 @@ async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null) {
 async function addAudit(event, payload) {
   await ensureSchema();
   await insertBackendAudit(pool, event, payload);
+}
+
+async function maximumSyncChangeSequence(companyId, timeoutMs = 5000) {
+  await ensureSchema();
+  const result = await pool.query({
+    text: "SELECT COALESCE(MAX(change_seq), 0)::bigint AS sequence FROM sync_change_log WHERE company_id = $1",
+    values: [String(companyId || "")],
+    query_timeout: timeoutMs
+  });
+  return Number(result.rows[0]?.sequence || 0);
+}
+
+async function listDiagnosticSyncChanges({ companyId, after, watermark, limit, timeoutMs = 5000, entityTypes = null }) {
+  await ensureSchema();
+  const result = await pool.query({
+    text: `SELECT change_seq AS "changeSeq", module, entity_type AS "entityType", entity_id AS "entityId",
+                  action, record_version AS "recordVersion", payload, payload_hash AS "payloadHash",
+                  origin, occurred_at AS "occurredAt", is_tombstone AS "isTombstone"
+           FROM sync_change_log
+           WHERE company_id = $1 AND change_seq > $2 AND change_seq <= $3
+             AND ($5::text[] IS NULL OR entity_type = ANY($5::text[]))
+           ORDER BY change_seq ASC LIMIT $4`,
+    values: [String(companyId || ""), Number(after), Number(watermark), Number(limit), entityTypes],
+    query_timeout: timeoutMs
+  });
+  return result.rows;
+}
+
+async function getIncrementalPilotBootstrap(companyId) {
+  await ensureSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const snapshot = await client.query("SELECT data, updated_at AS \"updatedAt\" FROM saas_snapshots WHERE company_id=$1", [companyId]);
+    const watermark = await client.query("SELECT COALESCE(MAX(change_seq),0)::bigint AS sequence FROM sync_change_log WHERE company_id=$1", [companyId]);
+    const versions = await client.query(`SELECT DISTINCT ON (entity_type,entity_id) entity_type AS "entityType",entity_id AS "entityId",record_version AS "recordVersion",payload_hash AS "payloadHash",action FROM sync_change_log WHERE company_id=$1 AND entity_type IN ('client','product') ORDER BY entity_type,entity_id,change_seq DESC`, [companyId]);
+    await client.query("COMMIT");
+    return snapshot.rows[0] ? { data: snapshot.rows[0].data, updatedAt: snapshot.rows[0].updatedAt, watermark: Number(watermark.rows[0].sequence || 0), versions: versions.rows } : null;
+  } catch (error) {
+    await client.query("ROLLBACK"); throw error;
+  } finally { client.release(); }
+}
+
+async function isIncrementalPilotDeviceTrusted({ companyId, userId, deviceId }) {
+  await ensureSchema();
+  if (!companyId || !userId || !deviceId) return false;
+  const result = await pool.query("SELECT 1 FROM saas_devices WHERE company_id=$1 AND user_id=$2 AND id=$3 LIMIT 1", [companyId, userId, deviceId]);
+  return result.rowCount === 1;
 }
 
 async function getAudit(limit = 50) {
@@ -1134,6 +1224,7 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
     payload: sale,
     updated_at: updatedAt
   }), companyId);
+  if (companyId) await syncDocumentHistoryIndex(client, companyId, updatedAt, data.sales || []);
 
   await replaceTable(client, "sale_items", (data.sales || []).flatMap((sale) => (sale.items || []).map((item, index) => ({ sale, item, index }))), ({ sale, item, index }) => ({
     id: `${scopedRowId(companyId, sale.id)}:${index}`,
@@ -1432,6 +1523,201 @@ function addDatePgFilter(where, values, column, operator, value) {
   where.push(`${column} ${operator} $${values.length}`);
 }
 
+async function syncDocumentHistoryIndex(client, companyId, updatedAt, sales) {
+  const presentDocumentIds = sales
+    .filter((sale) => (sale.documentType || "factura") === "factura")
+    .map((sale) => String(sale.id || ""))
+    .filter(Boolean);
+  const eligibleDocumentIds = sales
+    .filter((sale) => (sale.documentType || "factura") === "factura"
+      && sale.status === "AUTORIZADA"
+      && sale.inventoryState !== "RECONCILIATION_PENDING")
+    .map((sale) => String(sale.id || ""))
+    .filter(Boolean);
+  if (presentDocumentIds.length) {
+    await client.query(
+      `UPDATE document_history_index
+       SET is_visible = FALSE, summary_updated_at = $2
+       WHERE company_id = $1
+         AND document_type = 'factura'
+         AND document_id = ANY($3::text[])
+         AND is_visible = TRUE`,
+      [companyId, updatedAt, presentDocumentIds]
+    );
+  }
+  if (!eligibleDocumentIds.length) return;
+  await client.query(
+    `INSERT INTO document_history_index (
+       company_id, document_type, document_id, environment, establishment,
+       emission_point, document_scope, sequence, sequence_number, created_at,
+       client_id, client_name, client_identification, total_micros,
+       payment_condition, credit_balance_micros, status, sri_status,
+       authorization_number, access_key, inventory_status, email_status,
+       has_authorized_xml, has_ride_data, is_visible, summary_updated_at
+     )
+     SELECT
+       sale.company_id,
+       'factura',
+       COALESCE(NULLIF(sale.payload->>'id', ''), sale.id),
+       sale.environment,
+       sale.establishment,
+       sale.emission_point,
+       sale.establishment || '-' || sale.emission_point,
+       sale.sequence,
+       CASE WHEN sale.sequence ~ '^[0-9]+$' THEN sale.sequence::bigint ELSE 0 END,
+       sale.created_at,
+       COALESCE(sale.client_id, ''),
+       COALESCE(client_row.name, ''),
+       COALESCE(client_row.identification, ''),
+       round(sale.total * 1000000)::bigint,
+       NULLIF(sale.payload->>'paymentCondition', ''),
+       CASE
+         WHEN sale.payload ? 'creditBalance'
+           THEN round(COALESCE((sale.payload->>'creditBalance')::numeric, 0) * 1000000)::bigint
+         ELSE NULL
+       END,
+       sale.status,
+       sale.status,
+       COALESCE(sale.authorization_number, ''),
+       COALESCE(sale.access_key, ''),
+       COALESCE(sale.payload->>'inventoryState', ''),
+       CASE
+         WHEN jsonb_typeof(sale.payload->'emailHistory') = 'array'
+          AND jsonb_array_length(sale.payload->'emailHistory') > 0
+           THEN COALESCE(sale.payload->'emailHistory'->-1->>'status', 'none')
+         ELSE 'none'
+       END,
+       COALESCE(sale.payload->>'authorizedXml', '') <> '',
+       COALESCE(sale.payload->>'authorizedXml', '') <> '',
+       TRUE,
+       $2
+     FROM sales sale
+     LEFT JOIN clients client_row
+       ON client_row.company_id = sale.company_id
+      AND client_row.id IN (sale.client_id, sale.company_id || ':' || sale.client_id)
+     WHERE sale.company_id = $1
+       AND COALESCE(NULLIF(sale.payload->>'id', ''), sale.id) = ANY($3::text[])
+       AND sale.document_type = 'factura'
+       AND sale.status = 'AUTORIZADA'
+       AND COALESCE(sale.payload->>'inventoryState', '') <> 'RECONCILIATION_PENDING'
+     ORDER BY sale.created_at, sale.id
+     ON CONFLICT (company_id, document_type, document_id) DO UPDATE SET
+       environment = EXCLUDED.environment,
+       establishment = EXCLUDED.establishment,
+       emission_point = EXCLUDED.emission_point,
+       document_scope = EXCLUDED.document_scope,
+       sequence = EXCLUDED.sequence,
+       sequence_number = EXCLUDED.sequence_number,
+       created_at = EXCLUDED.created_at,
+       client_id = EXCLUDED.client_id,
+       client_name = EXCLUDED.client_name,
+       client_identification = EXCLUDED.client_identification,
+       total_micros = EXCLUDED.total_micros,
+       payment_condition = EXCLUDED.payment_condition,
+       credit_balance_micros = EXCLUDED.credit_balance_micros,
+       status = EXCLUDED.status,
+       sri_status = EXCLUDED.sri_status,
+       authorization_number = EXCLUDED.authorization_number,
+       access_key = EXCLUDED.access_key,
+       inventory_status = EXCLUDED.inventory_status,
+       email_status = EXCLUDED.email_status,
+       has_authorized_xml = EXCLUDED.has_authorized_xml,
+       has_ride_data = EXCLUDED.has_ride_data,
+       is_visible = TRUE,
+       summary_updated_at = EXCLUDED.summary_updated_at`,
+    [companyId, updatedAt, eligibleDocumentIds]
+  );
+}
+
+async function maximumDocumentHistorySequence(companyId = "", timeoutMs = 10_000) {
+  await ensureSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    await client.query(`SET LOCAL statement_timeout = '${Math.max(1, Math.trunc(timeoutMs))}ms'`);
+    const result = await client.query(
+      `SELECT COALESCE((
+         SELECT history_seq
+         FROM document_history_index
+         WHERE company_id = $1 AND is_visible = TRUE
+         ORDER BY history_seq DESC
+         LIMIT 1
+       ), 0)::text AS sequence`,
+      [companyId]
+    );
+    await client.query("COMMIT");
+    return String(result.rows[0]?.sequence || "0");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function listDocumentHistoryPage({ companyId = "", filters, watermark, after = null, limit = 51, timeoutMs = 10_000 }) {
+  await ensureSchema();
+  const client = await pool.connect();
+  const values = [companyId, filters.documentType, filters.status, filters.documentScope, String(watermark)];
+  const where = [
+    "company_id = $1",
+    "document_type = $2",
+    "status = $3",
+    "document_scope = $4",
+    "history_seq <= $5::bigint",
+    "is_visible = TRUE"
+  ];
+  if (filters.dateFrom) {
+    values.push(`${filters.dateFrom}T00:00:00.000Z`);
+    where.push(`created_at >= $${values.length}::timestamptz`);
+  }
+  if (filters.dateTo) {
+    values.push(`${filters.dateTo}T00:00:00.000Z`);
+    where.push(`created_at < ($${values.length}::timestamptz + interval '1 day')`);
+  }
+  if (filters.search) {
+    const fullNumber = /^(\d{3})-(\d{3})-(\d{1,9})$/.exec(filters.search);
+    if (fullNumber) {
+      values.push(fullNumber[1], fullNumber[2], fullNumber[3].padStart(9, "0"));
+      where.push(`(establishment = $${values.length - 2} AND emission_point = $${values.length - 1} AND sequence = $${values.length})`);
+    } else {
+      values.push(filters.search);
+      where.push(`(access_key = $${values.length} OR sequence = $${values.length} OR client_identification = $${values.length})`);
+    }
+  }
+  if (after) {
+    values.push(after.createdAt, after.sequenceNumber, after.documentId);
+    where.push(`(created_at, sequence_number, document_id) < ($${values.length - 2}::timestamptz, $${values.length - 1}::bigint, $${values.length}::text)`);
+  }
+  values.push(limit);
+  try {
+    await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    await client.query(`SET LOCAL statement_timeout = '${Math.max(1, Math.trunc(timeoutMs))}ms'`);
+    const result = await client.query(
+      `SELECT document_id AS "documentId", establishment, emission_point AS "emissionPoint",
+              sequence, sequence_number AS "sequenceNumber", created_at AS "createdAt",
+              created_at::date::text AS "issueDate", client_id AS "clientId",
+              client_name AS "clientName", client_identification AS "clientIdentification",
+              total_micros AS "totalMicros", payment_condition AS "paymentCondition",
+              credit_balance_micros AS "creditBalanceMicros", authorization_number AS "authorizationNumber",
+              inventory_status AS "inventoryStatus", email_status AS "emailStatus",
+              has_authorized_xml AS "hasAuthorizedXml", has_ride_data AS "hasRideData"
+       FROM document_history_index
+       WHERE ${where.join(" AND ")}
+       ORDER BY created_at DESC, sequence_number DESC, document_id DESC
+       LIMIT $${values.length}`,
+      values
+    );
+    await client.query("COMMIT");
+    return result.rows;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function countSnapshotHistory(client = pool, companyId = "") {
   const result = companyId
     ? await client.query("SELECT COUNT(*)::int AS count FROM saas_snapshot_history WHERE company_id = $1", [companyId])
@@ -1576,6 +1862,16 @@ async function createCompanyAccount({ company, admin, passwordHash, device }) {
       );
     }
     await client.query("INSERT INTO saas_snapshots (company_id, data, updated_at) VALUES ($1, $2::jsonb, $3)", [companyId, JSON.stringify(data), now]);
+    await appendSnapshotChanges(client, {
+      shadowConfig: config.incrementalSyncShadow,
+      companyId,
+      currentData: {},
+      finalData: data,
+      occurredAt: now,
+      origin: "system_operation",
+      userId,
+      deviceId: device?.deviceId || null
+    });
     await insertBackendAudit(client, "TENANT_REGISTERED", { companyId, ruc: normalizedRuc, email: normalizedEmail });
     await client.query("COMMIT");
 
@@ -1600,10 +1896,19 @@ async function createCompanyAccount({ company, admin, passwordHash, device }) {
   }
 }
 
-async function authenticateCompanyUser(email, password, device = {}, companyId = "") {
+async function authenticateCompanyUser(
+  identifier,
+  password,
+  device = {},
+  companyId = "",
+  username = ""
+) {
   await ensureSchema();
-  const normalizedEmail = normalizeUserEmail(email);
-  const normalizedRuc = normalizeTenantKey(email);
+  const normalizedEmail = normalizeUserEmail(identifier);
+  const normalizedRuc = normalizeTenantKey(identifier);
+  const normalizedUsername = String(username || "")
+    .trim()
+    .toLowerCase();
   const result = await pool.query(
     `SELECT u.id, u.company_id AS "companyId", u.name, u.email, u.role, u.password_hash AS "passwordHash",
             u.password_must_change AS "mustChangePassword",
@@ -1611,11 +1916,25 @@ async function authenticateCompanyUser(email, password, device = {}, companyId =
      FROM saas_users u
      JOIN saas_companies c ON c.id = u.company_id
      WHERE u.status = 'active'
-       AND (u.email = $1 OR (c.ruc = $2 AND u.role = 'admin'))
+      AND (
+      u.email = $1
+      OR (
+          c.ruc = $2
+          AND (
+              LOWER(u.name) = $4
+              OR LOWER(split_part(u.email,'@',1)) = $4
+          )
+      )
+)
        AND ($3 = '' OR u.company_id = $3)
      ORDER BY CASE WHEN u.email = $1 THEN 0 ELSE 1 END
      LIMIT 20`,
-    [normalizedEmail, normalizedRuc, String(companyId || "")]
+    [
+      normalizedEmail,
+      normalizedRuc,
+      String(companyId || ""),
+      normalizedUsername
+    ]
   );
   const matchingRows = result.rows.filter((row) => verifyPassword(password, row.passwordHash));
   const matchingCompanies = uniqueCompanyAuthRows(matchingRows);
@@ -1740,7 +2059,17 @@ async function resetCompanyUserPassword({ identifier, passwordHash }) {
         const sameUser = String(user.id || "") === row.id || normalizeUserEmail(user.email) === row.email;
         return sameUser ? { ...user, password: undefined, passwordHash, mustChangePassword: true, updatedAt: now } : user;
       });
-      await client.query("UPDATE saas_snapshots SET data = $1::jsonb, updated_at = $2 WHERE company_id = $3", [JSON.stringify({ ...data, users: nextUsers }), now, row.companyId]);
+      const finalData = { ...data, users: nextUsers };
+      await client.query("UPDATE saas_snapshots SET data = $1::jsonb, updated_at = $2 WHERE company_id = $3", [JSON.stringify(finalData), now, row.companyId]);
+      await appendSnapshotChanges(client, {
+        shadowConfig: config.incrementalSyncShadow,
+        companyId: row.companyId,
+        currentData: data,
+        finalData,
+        occurredAt: now,
+        origin: "system_operation",
+        userId: row.id
+      });
     }
 
     await insertBackendAudit(client, "PASSWORD_RESET_REQUESTED", { companyId: row.companyId, email: row.email });
@@ -1809,7 +2138,17 @@ async function changeCompanyUserPassword({ companyId, userId, passwordHash }) {
         const sameUser = String(user.id || "") === row.id || normalizeUserEmail(user.email) === row.email;
         return sameUser ? { ...user, password: undefined, passwordHash, mustChangePassword: false, updatedAt: now } : user;
       });
-      await client.query("UPDATE saas_snapshots SET data = $1::jsonb, updated_at = $2 WHERE company_id = $3", [JSON.stringify({ ...data, users: nextUsers }), now, row.companyId]);
+      const finalData = { ...data, users: nextUsers };
+      await client.query("UPDATE saas_snapshots SET data = $1::jsonb, updated_at = $2 WHERE company_id = $3", [JSON.stringify(finalData), now, row.companyId]);
+      await appendSnapshotChanges(client, {
+        shadowConfig: config.incrementalSyncShadow,
+        companyId: row.companyId,
+        currentData: data,
+        finalData,
+        occurredAt: now,
+        origin: "admin_operation",
+        userId: row.id
+      });
     }
 
     await insertBackendAudit(client, "PASSWORD_CHANGED", { companyId: row.companyId, email: row.email });
@@ -1894,6 +2233,37 @@ async function listTenantAccounts() {
   });
 }
 
+async function getSnapshotMetadata(companyId = "") {
+  await ensureSchema();
+
+  if (companyId) {
+    const result = await pool.query(
+      `SELECT updated_at AS "updatedAt"
+       FROM saas_snapshots
+       WHERE company_id = $1`,
+      [companyId]
+    );
+
+    if (!result.rows.length) return null;
+
+    return {
+      updatedAt: new Date(result.rows[0].updatedAt).toISOString()
+    };
+  }
+
+  const result = await pool.query(
+    `SELECT updated_at AS "updatedAt"
+     FROM app_snapshots
+     WHERE id = 1`
+  );
+
+  if (!result.rows.length) return null;
+
+  return {
+    updatedAt: new Date(result.rows[0].updatedAt).toISOString()
+  };
+}
+
 module.exports = {
   addAudit,
   authenticateCompanyUser,
@@ -1909,9 +2279,15 @@ module.exports = {
   findDocumentByAccessKey,
   initialize: ensureSchema,
   listGuidesHistory,
+  listDocumentHistoryPage,
   listSalesHistory,
+  listDiagnosticSyncChanges,
   listTenantAccounts,
   mergeSnapshotPatch,
+  maximumSyncChangeSequence,
+  maximumDocumentHistorySequence,
+  getIncrementalPilotBootstrap,
+  isIncrementalPilotDeviceTrusted,
   reconcileSaasUsersFromSnapshots,
   registerOrReplayDomainOperation,
   reserveDocumentSequence,
@@ -1920,5 +2296,6 @@ module.exports = {
   searchClients,
   searchProducts,
   changeCompanyUserPassword,
+  getSnapshotMetadata,
   saveSnapshot
 };

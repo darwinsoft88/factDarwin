@@ -1,5 +1,9 @@
 import React, { useState } from "react";
-import { Alert } from "react-native";
+import {
+  showError,
+  showInfo,
+  showWarning
+} from "../utils/dialogs";
 import { lookupIdentityData } from "../services/backend";
 import { AppData, Client } from "../types";
 import { normalizeClientIdentification } from "../validation";
@@ -39,7 +43,7 @@ export function useClientIdentityLookup({
   const lookupClientIdentification = async () => {
     const identification = normalizeClientIdentification(form.identification);
     if (!identification) {
-      Alert.alert("Identificacion requerida", "Ingrese una cedula o RUC para consultar.");
+      showWarning("Identificacion requerida", "Ingrese una cedula o RUC para consultar.");
       return;
     }
     const existingClient = data.clients.find((client) => normalizeClientIdentification(client.identification) === identification);
@@ -55,14 +59,14 @@ export function useClientIdentityLookup({
       });
       setEditModalVisible(true);
       setClientSearch(existingClient.identification);
-      Alert.alert("Cliente ya existe", `Se cargo el cliente guardado: ${existingClient.name}.`);
+      showInfo("Cliente ya existe", `Se cargo el cliente guardado: ${existingClient.name}.`);
       return;
     }
     setLookingUpClient(true);
     try {
       const token = backendToken || await getBackendToken(data.backendUrl);
       if (!token) {
-        Alert.alert("Sesion requerida", "Inicie sesion con conexion al servidor para consultar cedula o RUC.");
+        showWarning("Sesion requerida", "Inicie sesion con conexion al servidor para consultar cedula o RUC.");
         return;
       }
       const result = await lookupIdentityData(data.backendUrl, identification, token);
@@ -73,9 +77,9 @@ export function useClientIdentityLookup({
         name: result.name || result.businessName || current.name,
         address: result.address || current.address
       }));
-      Alert.alert("Datos encontrados", `${result.name || result.businessName}\n${result.status ? `Estado: ${result.status}` : ""}`.trim());
+      showInfo("Datos encontrados", `${result.name || result.businessName}\n${result.status ? `Estado: ${result.status}` : ""}`.trim());
     } catch (error) {
-      Alert.alert("No se pudo consultar", error instanceof Error ? error.message : "Intente nuevamente.");
+      showError("No se pudo consultar", error instanceof Error ? error.message : "Intente nuevamente.");
     } finally {
       setLookingUpClient(false);
     }

@@ -38,6 +38,7 @@ type SalesDocumentsSectionProps = {
   openRetentionForm: (sale: Sale) => void;
   retrySale: (sale: Sale, client: AppData["clients"][number]) => void;
   retryingSaleId: string;
+  sendingEmailSaleId: string;
   setEndDate: React.Dispatch<React.SetStateAction<string>>;
   setInvoiceSearch: React.Dispatch<React.SetStateAction<string>>;
   setNotice: React.Dispatch<React.SetStateAction<string>>;
@@ -82,6 +83,7 @@ export function SalesDocumentsSection({
   openRetentionForm,
   retrySale,
   retryingSaleId,
+  sendingEmailSaleId,
   setEndDate,
   setInvoiceSearch,
   setNotice,
@@ -147,11 +149,11 @@ export function SalesDocumentsSection({
             onTicket={() => canonicalSale && convertProforma(canonicalSale, "nota_venta")}
             proformaInvoiceLabel={canIssueFromInternalDocuments(user.role) && sale.documentType === "proforma" && sale.status === "PROFORMA" ? "Convertir a factura" : undefined}
             onProformaInvoice={() => canonicalSale && convertProforma(canonicalSale, "factura")}
-            emailLabel={(isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA" ? "Email" : undefined}
+            emailLabel={(isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status === "AUTORIZADA" ? (sendingEmailSaleId === sale.id ? "Enviando..." : "Email") : undefined}
             onEmail={() => client && canonicalSale && emailSale(canonicalSale, client)}
             whatsappLabel={isInvoiceSale(sale) && sale.status === "AUTORIZADA" ? "WhatsApp" : undefined}
             onWhatsapp={() => client && canonicalSale && whatsappSale(canonicalSale, client)}
-            supportLabel={canOpenTechnicalDetail && isInvoiceSale(sale) && sale.status !== "AUTORIZADA" ? "Soporte" : undefined}
+            supportLabel={(isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status !== "AUTORIZADA" ? "Ver detalle SRI" : undefined}
             onSupport={() => client && onXml(formatSaleDetail(actionableSale, client, data.issuer))}
             creditNoteLabel={canManageFiscalAdjustments(user.role) && client && canonicalSale && canIssueCreditNoteForSale(data.sales, canonicalSale, client) ? "Nota credito" : undefined}
             onCreditNote={() => client && canonicalSale && openCreditNoteForm(canonicalSale)}
@@ -159,7 +161,11 @@ export function SalesDocumentsSection({
             onRetention={() => canonicalSale && openRetentionForm(canonicalSale)}
             editLabel={canIssueFromInternalDocuments(user.role) && canEditSale(sale) ? "Editar" : undefined}
             onEdit={() => canonicalSale && editSale(canonicalSale)}
-            retryLabel={canRetryDocuments(user.role) && (isInvoiceSale(sale) || isCreditNoteSale(sale)) && canRetrySriStatus(sale.status) ? (retryingSaleId === sale.id ? "Reintentando..." : `Reintentar SRI ${getRetryInfo(sale).today}/${MAX_DAILY_RETRIES}`) : undefined}
+            retryLabel={canRetryDocuments(user.role) && isInvoiceSale(sale) && sale.status === "AUTORIZADA" && sale.inventoryState === "RECONCILIATION_PENDING"
+              ? (retryingSaleId === sale.id ? "Reconciliando..." : "Reconciliar inventario")
+              : canRetryDocuments(user.role) && (isInvoiceSale(sale) || isCreditNoteSale(sale)) && canRetrySriStatus(sale.status)
+                ? (retryingSaleId === sale.id ? "Reintentando..." : `Reintentar SRI ${getRetryInfo(sale).today}/${MAX_DAILY_RETRIES}`)
+                : undefined}
             onRetry={() => client && canonicalSale && retrySale(canonicalSale, client)}
             cancelLabel={canVoidDocuments(user.role) && sale.status !== "AUTORIZADA" && sale.status !== "ANULADA" && sale.status !== "CONVERTIDA" ? "Anular" : undefined}
             onCancel={() => canonicalSale && cancelDocument(canonicalSale)}

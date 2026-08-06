@@ -3,9 +3,11 @@ import React, { useMemo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AppData } from "../types";
 import { buildDashboard } from "../utils/dashboard";
+import { scopedReportData } from "../utils/documents";
+import { isSriRejected } from "../utils/invoiceStatus";
 import { sriPendingSendSummary } from "../utils/sriRetryPolicy";
 import { SyncState } from "../utils/support";
-import { buildSyncStatusBannerView, runSyncStatusBannerAction } from "../utils/syncStatusBanner";
+import { buildSyncStatusBannerView, countUniqueAttentionDocuments, runSyncStatusBannerAction } from "../utils/syncStatusBanner";
 
 type SyncStatusBannerProps = {
   data: AppData;
@@ -23,7 +25,14 @@ export function SyncStatusBanner({ data, syncState, retrying, onOpen, onRetry, o
   const staleSriCount = sriSummary.staleCount;
   const dashboard = useMemo(() => buildDashboard(data), [data]);
   const reviewCount = dashboard.pendingCount + dashboard.rejectedCount;
-  const documentCount = sriPendingCount + dashboard.rejectedCount;
+  const rejectedDocumentIds = useMemo(
+    () => scopedReportData(data).sales.filter((sale) => isSriRejected(sale.status)).map((sale) => sale.id),
+    [data]
+  );
+  const documentCount = countUniqueAttentionDocuments(
+    sriSummary.pending.map((sale) => sale.id),
+    rejectedDocumentIds
+  );
   const hasError = syncState === "error" || Boolean(data.autoBackupLastError);
   const content = useMemo(() => buildSyncStatusBannerView({
     documentCount,

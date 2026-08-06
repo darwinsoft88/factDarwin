@@ -7,7 +7,6 @@ import { AppData, CashClosing, User } from "../types";
 import { appendAudit } from "../utils/audit";
 import { buildCashClosingSummary } from "../utils/cash";
 import { closingInActiveScope } from "../utils/documents";
-import { showMessage } from "../utils/dialogs";
 import { activeEstablishment } from "../utils/establishments";
 import { formatShortDate, toInputDate } from "../utils/format";
 import { generateId } from "../utils/id";
@@ -15,6 +14,11 @@ import { parseDecimal, roundMoney, sanitizeDecimalInput } from "../utils/numbers
 import { paymentLabel } from "../utils/reportFormats";
 import { syncPatchToBackend } from "../utils/sync";
 import { money } from "../sri";
+import {
+  showSuccess,
+  showWarning,
+} from "../utils/dialogs";
+
 
 type CashClosingListItemProps = {
   title: string;
@@ -61,7 +65,7 @@ export function CashClosingScreen({
 
   const saveClosing = async () => {
     if (!Number.isFinite(cashCounted) || cashCounted < 0) {
-      showMessage("Efectivo invalido", "Ingrese el efectivo contado en caja.");
+      showWarning("Efectivo invalido", "Ingrese el efectivo contado en caja.");
       return;
     }
 
@@ -89,7 +93,7 @@ export function CashClosingScreen({
     await persist(nextData);
     await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, cashClosings: [closing], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cierre pendiente de sincronizar", nextData, persist);
     setNotes("");
-    showMessage("Cierre guardado", "El cierre de caja quedo registrado y se sincronizara con la base de datos.");
+    showSuccess("Cierre guardado", "El cierre de caja quedo registrado y se sincronizara con la base de datos.");
   };
 
   return (

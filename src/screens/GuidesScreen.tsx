@@ -16,7 +16,7 @@ import { appendAudit } from "../utils/audit";
 import { resolveCompanyLogoUrl } from "../utils/assets";
 import { buildGuideRideHtml, formatGuideDetail } from "../utils/documentHtml";
 import { getRetryInfo, isAccessKeyUsed, MAX_DAILY_RETRIES, resolveInvoiceStatus } from "../utils/documents";
-import { showMessage } from "../utils/dialogs";
+import { showError, showSuccess, showWarning } from "../utils/dialogs";
 import { activeEstablishment, activeIssuer, issuerForGuide, updateIssuerEstablishmentSequence } from "../utils/establishments";
 import { parseInputDate } from "../utils/format";
 import { generateId } from "../utils/id";
@@ -130,12 +130,18 @@ export function GuidesScreen({
     if (issuingGuide) return;
 
     if (!sourceSale || !client) {
-      Alert.alert("Documento requerido", "Seleccione una factura, ticket o proforma para trasladar.");
+      showWarning(
+        "Documento requerido",
+        "Seleccione una factura, ticket o proforma para trasladar."
+      );
       return;
     }
     const errors = validateGuideForm(transporterName, transporterIdentification, transporterType, plate, startAddress, endAddress, route, reason, startDate, endDate);
     if (errors.length > 0) {
-      Alert.alert("Revise la guia", errors.map((error) => `- ${error}`).join("\n"));
+      showWarning(
+        "Revise la guía",
+        `${errors[0]}${errors.length > 1 ? ` Después revise ${errors.length === 2 ? "otro campo pendiente" : `los otros ${errors.length - 1} campos pendientes`}.` : ""}`
+      );
       return;
     }
 
@@ -221,7 +227,22 @@ export function GuidesScreen({
         auditLogs: finalData.auditLogs.slice(0, 1)
       }, finalData, persist);
       Alert.alert(explainSriResult(sriResult).title, finalGuide.status === "AUTORIZADA" ? "Guia autorizada por el SRI." : sriUserMessage(sriResult));
-      showMessage("Guia guardada", finalGuide.status === "AUTORIZADA" ? "Guia autorizada y guardada con exito." : sriUserMessage(sriResult));
+      if (finalGuide.status === "AUTORIZADA") {
+        showSuccess(
+          "Guía guardada",
+          "Guía autorizada y guardada con éxito."
+        );
+      } else if (finalGuide.status === "PENDIENTE_SRI") {
+        showWarning(
+          "Guía pendiente",
+          sriUserMessage(sriResult)
+        );
+      } else {
+        showError(
+          "Guía rechazada",
+          sriUserMessage(sriResult)
+        );
+      }
       resetGuideForm();
       setGuideModalVisible(false);
     } catch (error) {
@@ -314,7 +335,22 @@ export function GuidesScreen({
         ...data,
         guides: (data.guides || []).map((item) => (item.id === guide.id ? updatedGuide : item))
       }, user, "GUIDE_RETRIED", "guide", guide.id, `Reenvio de guia ${guide.sequence}: ${updatedGuide.status}`, { status: updatedGuide.status, accessKey: updatedGuide.accessKey }));
-      Alert.alert(explainSriResult(sriResult).title, updatedGuide.status === "AUTORIZADA" ? "Guia autorizada por el SRI." : sriUserMessage(sriResult));
+      if (updatedGuide.status === "AUTORIZADA") {
+        showSuccess(
+          "Guía autorizada",
+          "La guía fue autorizada por el SRI."
+        );
+      } else if (updatedGuide.status === "PENDIENTE_SRI") {
+        showWarning(
+          "Guía pendiente",
+          sriUserMessage(sriResult)
+        );
+      } else {
+        showError(
+          "Guía rechazada",
+          sriUserMessage(sriResult)
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo reintentar la guia.";
       await persist(appendAudit({
@@ -352,6 +388,7 @@ export function GuidesScreen({
         title="Nueva guia de remision"
         subtitle={sourceSale && client ? `${client.name} | ${sourceSale.items.length} producto(s)` : "Seleccione documento origen y transportista"}
         confirmLabel={issuingGuide ? "Procesando..." : "Emitir guia"}
+        confirming={issuingGuide}
         onClose={() => setGuideModalVisible(false)}
         onConfirm={() => { if (!issuingGuide) void issueGuide(); }}
       >

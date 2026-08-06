@@ -74,6 +74,8 @@ test("los logs enmascaran el correo", () => {
 });
 
 test("la parada espera el lote activo y cierra el repositorio", async () => {
+  const previousMode = config.automaticAuthorizationEmailMode;
+  config.automaticAuthorizationEmailMode = "simulate";
   let complete = false;
   let closed = false;
   let scheduled = false;
@@ -121,13 +123,17 @@ test("la parada espera el lote activo y cierra el repositorio", async () => {
     cancelSchedule() {}
   });
 
-  worker.start();
-  await new Promise((resolve) => setImmediate(resolve));
-  await worker.stop();
+  try {
+    worker.start();
+    await new Promise((resolve) => setImmediate(resolve));
+    await worker.stop();
 
-  assert.equal(complete, true);
-  assert.equal(closed, true);
-  assert.equal(scheduled, false);
+    assert.equal(complete, true);
+    assert.equal(closed, true);
+    assert.equal(scheduled, false);
+  } finally {
+    config.automaticAuthorizationEmailMode = previousMode;
+  }
 });
 
 test("send prepara una vez y persiste accepted", async () => {

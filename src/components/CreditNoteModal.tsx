@@ -7,6 +7,7 @@ import { documentNumber } from "../utils/documents";
 import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
 import { buildCreditNoteItem, formatQuantity, getCreditLineAvailable, getCreditLineKey } from "../utils/sales";
 import { Input, PrimaryButton } from "./common";
+import { AppToast } from "./AppToast";
 
 type CreditNoteTotals = {
   subtotal: number;
@@ -99,6 +100,7 @@ export function CreditNoteModal({
           </View>
         </View>
       </KeyboardAvoidingView>
+      <AppToast />
     </Modal>
   );
 }

@@ -11,6 +11,7 @@ import { creditBalance, creditPaymentScopeText, creditSaleScopeText, isCreditOve
 import { documentNumber } from "../utils/documents";
 import { formatShortDate } from "../utils/format";
 import { paymentLabel } from "../utils/reportFormats";
+import { AppToast } from "./AppToast";
 
 type CreditDetailModalProps = {
   data: AppData;
@@ -130,6 +131,7 @@ export function CreditDetailModal({
           ) : null}
         </View>
       </View>
+      <AppToast />
     </Modal>
   );
 }

@@ -1,12 +1,11 @@
 import { Alert, Platform } from "react-native";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { loginBackend, registerBackend, requestPasswordReset, restoreAppData, changeBackendPassword } from "../services/backend";
 import { hashPassword } from "../services/security";
 import { upsertOfflineUser } from "../utils/authOffline";
 import { isBackendConnectionError, loginErrorMessage } from "../utils/errors";
 import { normalizedEstablishments, issuerWithEstablishment } from "../utils/establishments";
 import { showMessage } from "../utils/dialogs";
-import { generateId } from "../utils/id";
 import { isSessionTokenExpired } from "../utils/sessionToken";
 import { mergeAppDataSnapshots } from "../utils/dataMerge";
 import { sanitizeAppData, isValidUrl } from "../validation";
@@ -15,6 +14,8 @@ import type { AppData, User, UserRole } from "../types";
 import type { SyncState } from "../utils/support";
 import type { AuthState } from "./useAuthState";
 import type { AppTab } from "../utils/appAccess";
+import toast from "../services/toast";
+import { getIncrementalDeviceId } from "../services/incrementalDeviceIdentity";
 
 export type UseAuthActionsParams = {
   authState: AuthState;
@@ -41,8 +42,11 @@ export type AuthActions = {
 };
 
 export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef, setData, setSession, setBackendToken, setSyncState, setAppMenuVisible, setEstablishmentSwitcherVisible, setTab, setOnboardingVisible }: UseAuthActionsParams): AuthActions {
+  const choosingLoginEstablishmentRef = useRef(false);
+  const loginRunningRef = useRef(false);
   const authActions = useMemo(() => {
-    const enterSession = async (nextData: AppData, nextUser: User, token: string, passwordHash = "") => {
+    const enterSession = async (nextData: AppData, nextUser: User, token: string, passwordHash = "", connectionMode: "online" | "offline" = "online"
+    ) => {
       let sessionToken = token;
       if (!sessionToken) {
         const storedSession = await loadSession();
@@ -73,20 +77,44 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
         authState.setPasswordChangeStatus({ tone: "info", message: "Por seguridad, cree una nueva contrasena para reemplazar la clave temporal." });
         authState.setPasswordChangeVisible(true);
       }
+      toast.success(`¡Bienvenido, ${nextUser.name}!`, connectionMode === "offline" ? "Ingresaste en modo sin conexión. Tus cambios se guardarán en este dispositivo." : "Inicio de sesión exitoso.");
+
     };
 
     const chooseLoginEstablishment = async (establishmentId: string) => {
-      if (!authState.pendingLogin) return;
-      authState.setLoginErrorModalMessage("");
-      authState.setLoginStatus(null);
-      const establishment = normalizedEstablishments(authState.pendingLogin.data.issuer).find((item) => item.id === establishmentId);
-      if (!establishment) return;
-      const nextIssuer = issuerWithEstablishment({ ...authState.pendingLogin.data.issuer, activeEstablishmentId: establishment.id }, establishment);
-      await enterSession({ ...authState.pendingLogin.data, issuer: nextIssuer }, authState.pendingLogin.user, authState.pendingLogin.token, authState.pendingLogin.passwordHash || "");
+      if (choosingLoginEstablishmentRef.current || !authState.pendingLogin) return;
+      choosingLoginEstablishmentRef.current = true;
+      try {
+        authState.setLoginErrorModalMessage("");
+        authState.setLoginStatus(null);
+        const pendingLogin = authState.pendingLogin;
+        const establishment = normalizedEstablishments(pendingLogin.data.issuer).find((item) => item.id === establishmentId);
+        if (!establishment) return;
+        const nextIssuer = issuerWithEstablishment({ ...pendingLogin.data.issuer, activeEstablishmentId: establishment.id }, establishment);
+        await enterSession({ ...pendingLogin.data, issuer: nextIssuer }, pendingLogin.user, pendingLogin.token, pendingLogin.passwordHash || "");
+      } finally {
+        choosingLoginEstablishmentRef.current = false;
+      }
     };
 
-    const login = async (companyId = "") => {
+    const loginAttempt = async (companyId = "") => {
       const identifier = authState.email.trim();
+      const isRucLogin = /^\d{13}$/.test(identifier);
+      const username = authState.username.trim();
+
+      if (isRucLogin && !username) {
+        const message =
+          "Ingrese el usuario para iniciar sesión con el RUC.";
+
+        authState.setLoginStatus({
+          tone: "error",
+          message
+        });
+
+        authState.setLoginErrorModalMessage(message);
+       // toast.error("No se pudo iniciar sesión", message);
+        return;
+      }
       const backendUrl = authState.authBackendUrl.trim();
       const normalizedIdentifier = identifier.toLowerCase();
       authState.setLoginStatus(null);
@@ -98,6 +126,7 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
         const message = "Ingrese correo o RUC y clave para iniciar sesion.";
         authState.setLoginStatus({ tone: "error", message });
         authState.setLoginErrorModalMessage(message);
+        //toast.error("No se pudo iniciar sesión", message);
         return;
       }
       if (/^\d+$/.test(identifier) && identifier.length !== 13) {
@@ -115,13 +144,22 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
 
       try {
         authState.setLoginStatus({ tone: "info", message: "Validando acceso..." });
-        const result = await loginBackend(backendUrl, identifier, authState.password, companyId);
+        const deviceId = await getIncrementalDeviceId();
+        const result = await loginBackend(
+          backendUrl,
+          identifier,
+          authState.password,
+          isRucLogin ? username : "",
+          companyId,
+          { deviceId, deviceLabel: Platform.OS, platform: Platform.OS }
+        );
         authState.setLoginStatus({ tone: "info", message: "Acceso validado. Cargando datos de la empresa..." });
         const snapshot = await restoreAppData<AppData>(backendUrl, result.token || "");
         if (!result.user || !snapshot?.data) {
           const message = "El servidor valido el acceso, pero no devolvio los datos de la empresa. Intente nuevamente.";
           authState.setLoginStatus({ tone: "error", message });
-          Alert.alert("No se pudo cargar la empresa", message);
+          //Alert.alert("No se pudo cargar la empresa", message);
+          authState.setLoginErrorModalMessage(message);
           return;
         }
 
@@ -155,9 +193,6 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
           return;
         }
 
-        await saveData(restored);
-        setData(restored);
-        dataRef.current = restored;
         const token = result.token || "";
         const establishments = normalizedEstablishments(restored.issuer).filter((item) => item.active !== false);
         if (establishments.length > 1) {
@@ -177,7 +212,7 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
           if (!companyId && /^\d{13}$/.test(identifier) && uniqueOptions.length === 1) {
             const singleCompany = uniqueOptions[0];
             if (!singleCompany) return;
-            await login(singleCompany.id);
+            await loginAttempt(singleCompany.id);
             return;
           }
           authState.setCompanyOptions(uniqueOptions);
@@ -197,26 +232,66 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
       }
 
       const passwordHash = await hashPassword(authState.password);
+      const normalizedUsername = authState.username.trim().toLowerCase();
       const storedSession = await loadSession();
       if (storedSession?.user) {
         const validStoredToken = storedSession.token && !isSessionTokenExpired(storedSession.token) ? storedSession.token : "";
         const storedEmailMatches = storedSession.user.email.trim().toLowerCase() === normalizedIdentifier;
         const rucMatches = /^\d{13}$/.test(identifier) && (storedSession.companyRuc === identifier || dataRef.current.issuer.ruc === identifier);
         const passwordMatches = storedSession.passwordHash ? storedSession.passwordHash === passwordHash : Boolean(validStoredToken);
-        if ((storedEmailMatches || rucMatches) && passwordMatches) {
+        const storedUserMatches =
+          !isRucLogin ||
+          storedSession.user.name.trim().toLowerCase() === normalizedUsername ||
+          storedSession.user.email
+            .trim()
+            .toLowerCase()
+            .split("@")[0] === normalizedUsername;
+        if (
+          (storedEmailMatches || (rucMatches && storedUserMatches)) &&
+          passwordMatches
+        ) {
           const localData = sanitizeAppData({ ...dataRef.current, backendUrl, autoBackupEnabled: true, autoBackupLastError: "" });
-          await enterSession(localData, storedSession.user, validStoredToken, storedSession.passwordHash || passwordHash);
+          await enterSession(localData, storedSession.user, validStoredToken, storedSession.passwordHash || passwordHash, "offline");
           return;
         }
       }
 
+
       const found = dataRef.current.users.find((user) => {
-        const emailMatches = user.email.trim().toLowerCase() === normalizedIdentifier;
-        return emailMatches && (user.passwordHash === passwordHash || user.password === authState.password);
+        const emailMatches =
+          user.email.trim().toLowerCase() === normalizedIdentifier;
+
+        const passwordMatches =
+          user.passwordHash === passwordHash ||
+          user.password === authState.password;
+
+        return emailMatches && passwordMatches;
       });
-      const rucUser = /^\d{13}$/.test(identifier) && dataRef.current.issuer.ruc === identifier
-        ? dataRef.current.users.find((user) => user.passwordHash === passwordHash || user.password === authState.password)
-        : undefined;
+
+      const rucUser =
+        isRucLogin &&
+          dataRef.current.issuer.ruc.replace(/\D/g, "") === identifier
+          ? dataRef.current.users.find((user) => {
+            const nameMatches =
+              user.name.trim().toLowerCase() === normalizedUsername;
+
+            const emailUsername =
+              user.email.trim().toLowerCase().split("@")[0] || "";
+
+            const emailUsernameMatches =
+              emailUsername === normalizedUsername;
+
+            const passwordMatches =
+              user.passwordHash === passwordHash ||
+              user.password === authState.password;
+
+            return (
+              (nameMatches || emailUsernameMatches) &&
+              passwordMatches
+            );
+          })
+          : undefined;
+
       const localUser = found || rucUser;
       if (!localUser) {
         const message = "No hay conexion con el servidor y no existe una sesion local valida para esos datos.";
@@ -232,7 +307,19 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
         authState.setLoginStatus(null);
         return;
       }
-      await enterSession(localData, localUser, "", passwordHash);
+      await enterSession(localData, localUser, "", passwordHash, "offline");
+    };
+
+    const login = async (companyId = "") => {
+      if (loginRunningRef.current) return;
+      loginRunningRef.current = true;
+      authState.setLoggingIn(true);
+      try {
+        await loginAttempt(companyId);
+      } finally {
+        loginRunningRef.current = false;
+        authState.setLoggingIn(false);
+      }
     };
 
     const registerTenant = async () => {
@@ -272,6 +359,7 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
       authState.setRegisterStatus({ tone: "info", message: "Creando cuenta y preparando la empresa..." });
 
       try {
+        const deviceId = await getIncrementalDeviceId();
         const result = await registerBackend<AppData>(backendUrl, {
           company: {
             ruc: form.ruc,
@@ -285,7 +373,7 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
             password: form.password
           },
           device: {
-            deviceId: `${Platform.OS}-${generateId()}`,
+            deviceId,
             deviceLabel: Platform.OS,
             platform: Platform.OS
           }
@@ -304,6 +392,7 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
         await saveData(registeredData);
         const user = {
           id: result.user!.id,
+          companyId: result.user!.companyId || result.company?.id,
           name: result.user!.name,
           email: result.user!.email,
           role: (result.user!.role || "admin") as User["role"]
@@ -408,7 +497,9 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
         backendTokenRef.current = result.token || backendTokenRef.current;
         authState.setPasswordChangeVisible(false);
         authState.setPasswordChangeStatus(null);
-        Alert.alert("Contrasena actualizada", "Su nueva contrasena quedo guardada correctamente.");
+        //Alert.alert("Contrasena actualizada", "Su nueva contrasena quedo guardada correctamente.");
+        toast.success("Contraseña actualizada", "Su nueva contraseña quedó guardada correctamente."
+        );
       } catch (error) {
         authState.setPasswordChangeStatus({ tone: "error", message: error instanceof Error ? error.message : "No se pudo cambiar la contrasena." });
       } finally {
@@ -416,46 +507,46 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
       }
     };
 
-        const logout = () => {
-          const pendingCount = dataRef.current.pendingSync?.length || 0;
-          const hasBackupError = Boolean(dataRef.current.autoBackupLastError);
-          if (pendingCount > 0 || hasBackupError) {
-            setAppMenuVisible(false);
-            Alert.alert(
-              "Sincronizacion pendiente",
-              pendingCount > 0
-                ? `Este dispositivo tiene ${pendingCount} cambio(s) pendiente(s) por subir. Sincronice antes de cerrar sesion para no perder documentos locales.`
-                : "Este dispositivo tiene cambios locales pendientes por subir. Sincronice antes de cerrar sesion."
-            );
-            return;
-          }
-          setAppMenuVisible(false);
-          setOnboardingVisible(false);
-          setEstablishmentSwitcherVisible(false);
-          authState.setPendingLogin(null);
-          authState.setPasswordChangeVisible(false);
-          authState.setNewPasswordForm({ password: "", confirm: "" });
-          authState.setPasswordChangeStatus(null);
-          setBackendToken("");
-          backendTokenRef.current = "";
-          setSession(null);
-          sessionRef.current = null;
-          void clearSession();
-          setTab("dashboard");
-          authState.setAuthMode("login");
-          authState.setRegistering(false);
-          authState.setRegisterStatus(null);
-          authState.setRegisterForm(authState.emptyRegisterForm);
-        };
+    const logout = () => {
+      const pendingCount = dataRef.current.pendingSync?.length || 0;
+      const hasBackupError = Boolean(dataRef.current.autoBackupLastError);
+      if (pendingCount > 0 || hasBackupError) {
+        setAppMenuVisible(false);
+        Alert.alert(
+          "Sincronizacion pendiente",
+          pendingCount > 0
+            ? `Este dispositivo tiene ${pendingCount} cambio(s) pendiente(s) por subir. Sincronice antes de cerrar sesion para no perder documentos locales.`
+            : "Este dispositivo tiene cambios locales pendientes por subir. Sincronice antes de cerrar sesion."
+        );
+        return;
+      }
+      setAppMenuVisible(false);
+      setOnboardingVisible(false);
+      setEstablishmentSwitcherVisible(false);
+      authState.setPendingLogin(null);
+      authState.setPasswordChangeVisible(false);
+      authState.setNewPasswordForm({ password: "", confirm: "" });
+      authState.setPasswordChangeStatus(null);
+      setBackendToken("");
+      backendTokenRef.current = "";
+      setSession(null);
+      sessionRef.current = null;
+      void clearSession();
+      setTab("dashboard");
+      authState.setAuthMode("login");
+      authState.setRegistering(false);
+      authState.setRegisterStatus(null);
+      authState.setRegisterForm(authState.emptyRegisterForm);
+    };
 
-        return {
-          login,
-          registerTenant,
-          recoverPassword,
-          chooseLoginEstablishment,
-          submitNewPassword,
-          logout
-        };
+    return {
+      login,
+      registerTenant,
+      recoverPassword,
+      chooseLoginEstablishment,
+      submitNewPassword,
+      logout
+    };
   }, [
     authState,
     dataRef,

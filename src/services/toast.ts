@@ -17,7 +17,7 @@ export const toast = {
       text1: title,
       text2: message,
       position: "top",
-      visibilityTime: 4000
+      visibilityTime: 5000
     });
   },
 
@@ -27,7 +27,7 @@ export const toast = {
       text1: title,
       text2: message,
       position: "top",
-      visibilityTime: 3000
+      visibilityTime: 3500
     });
   },
 
@@ -37,7 +37,7 @@ export const toast = {
       text1: title,
       text2: message,
       position: "top",
-      visibilityTime: 3500
+      visibilityTime: 4000
     });
   }
 };

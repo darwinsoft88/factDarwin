@@ -4,7 +4,33 @@ const express = require("express");
 const fs = require("node:fs");
 const config = require("./config");
 const db = require("./db");
-const { authenticateCompanyUser, authenticateSupportUser, changeCompanyUserPassword, createCompanyAccount, exportTenantSnapshot, findDocumentByAccessKey, getAudit, getSnapshot, listGuidesHistory, listSalesHistory, listTenantAccounts, mergeSnapshotPatch, reserveDocumentSequence, resetCompanyUserPassword, restoreTenantSnapshot, saveSnapshot, searchClients, searchProducts } = db;
+const {
+  authenticateCompanyUser,
+  authenticateSupportUser,
+  changeCompanyUserPassword,
+  createCompanyAccount,
+  exportTenantSnapshot,
+  findDocumentByAccessKey,
+  getAudit,
+  getIncrementalPilotBootstrap,
+  getSnapshot,
+  getSnapshotMetadata,
+  listGuidesHistory,
+  listDocumentHistoryPage,
+  listDiagnosticSyncChanges,
+  listSalesHistory,
+  listTenantAccounts,
+  isIncrementalPilotDeviceTrusted,
+  mergeSnapshotPatch,
+  maximumSyncChangeSequence,
+  maximumDocumentHistorySequence,
+  reserveDocumentSequence,
+  resetCompanyUserPassword,
+  restoreTenantSnapshot,
+  saveSnapshot,
+  searchClients,
+  searchProducts
+} = db;
 const { authenticateUser, hashPassword, requireAuth, signToken } = require("./auth");
 const { sendInvoiceEmail, sendPasswordResetEmail, sendTestEmail } = require("./email");
 const { licenseStatus, normalizeLicense, requireActiveLicense } = require("./license");
@@ -17,14 +43,22 @@ const { getTenantAssetStatus, getTenantLogo, saveTenantCertificate, saveTenantLo
 const { cleanupTechnicalLogs, errorLogger, listTechnicalLogs, logTechnical, requestLogger } = require("./technical-logs");
 const { hashSyncPayload, resolveSyncRequestId, stripSyncTransportFields } = require("./db-utils");
 const { createDocumentEmailWorker } = require("./document-email-worker");
+const { createDocumentEmailQueueRepository } = require("./document-email-queue");
 const { createCorsOptions } = require("./cors-policy");
+const { diagnosticPull, encodeCursor, initialCursor } = require("./sync-diagnostic-pull");
+const { evaluateIncrementalPilotAccess } = require("./sync-pilot-config");
+const { evaluateDocumentHistoryAccess } = require("./document-history-config");
+const { historicalDocumentsPage } = require("./document-history");
 
 const app = express();
 let documentEmailWorker = null;
+let documentEmailRepository = null;
 let shutdownPromise = null;
 const sriAuthorizationLocks = new Map();
 const sriAuthorizationCache = new Map();
 const SRI_AUTHORIZATION_CACHE_TTL_MS = 10 * 60 * 1000;
+const diagnosticPullRate = new Map();
+const historicalDocumentsRate = new Map();
 
 config.assertProductionConfig();
 
@@ -198,7 +232,7 @@ app.post("/api/master/tenants/:companyId/restore", requireMasterKey, async (req,
       return;
     }
     const preBackup = await runPostgresBackup("pre-tenant-restore");
-    const restore = await restoreTenantSnapshot(req.params.companyId, backup, { expectedRuc: confirmRuc });
+    const restore = await restoreTenantSnapshot(req.params.companyId, backup, { expectedRuc: confirmRuc, userId: req.user?.sub || req.user?.id || null });
     logTechnical("warn", "tenant_restored", { companyId: req.params.companyId, summary: restore.summary, preBackup });
     res.json({ ok: true, restore, preBackup });
   } catch (error) {
@@ -215,7 +249,10 @@ app.put("/api/master/tenants/:companyId/license", requireMasterKey, async (req, 
     }
 
     const license = normalizeLicense(req.body?.license);
-    const result = await saveSnapshot({ ...snapshot.data, license }, req.params.companyId);
+    const result = await saveSnapshot({ ...snapshot.data, license }, req.params.companyId, {
+      origin: "admin_operation",
+      userId: req.user?.sub || req.user?.id || null
+    });
     logTechnical("info", "tenant_license_updated", { companyId: req.params.companyId, license: licenseStatus({ license }), summary: result.summary });
     res.json({ ok: true, companyId: req.params.companyId, license: licenseStatus({ license }), updatedAt: result.updatedAt, summary: result.summary });
   } catch (error) {
@@ -267,15 +304,37 @@ app.post("/api/auth/register", async (req, res, next) => {
 });
 app.post("/api/auth/login", async (req, res, next) => {
   try {
-    const { email, password, device = {}, companyId = "" } = req.body || {};
-    if (!email || !password) {
-      res.status(400).json({ error: "Debe enviar email y password." });
+    const {
+      email,
+      identifier = email,
+      username = "",
+      password,
+      device = {},
+      companyId = ""
+    } = req.body || {};
+    if (!identifier || !password) {
+      res.status(400).json({
+        error: "Debe enviar el identificador y la contraseña."
+      });
       return;
     }
 
-    let saasUser = authenticateSupportUser ? await authenticateSupportUser(email, String(password || ""), device, companyId) : null;
+    let saasUser = authenticateSupportUser
+      ? await authenticateSupportUser(
+        identifier,
+        String(password || ""),
+        device,
+        companyId
+      )
+      : null;
     try {
-      saasUser = saasUser || (authenticateCompanyUser ? await authenticateCompanyUser(email, String(password || ""), device, companyId) : null);
+      saasUser = saasUser || (authenticateCompanyUser ? await authenticateCompanyUser(
+        identifier,
+        String(password || ""),
+        device,
+        companyId,
+        String(username || "").trim()
+      ) : null);
     } catch (error) {
       if (error.statusCode === 409 && Array.isArray(error.companyOptions)) {
         res.json({
@@ -578,6 +637,23 @@ app.post("/api/company/certificate", requireAuth(["admin"]), async (req, res, ne
   }
 });
 
+app.get(
+  "/api/sync/version",
+  requireAuth(["admin", "vendedor", "cajero", "contador"]),
+  async (req, res, next) => {
+    try {
+      const metadata = await getSnapshotMetadata(req.user?.companyId);
+
+      res.json({
+        ok: true,
+        updatedAt: metadata?.updatedAt ?? null
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
 app.get("/api/data", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (_req, res, next) => {
   try {
     const snapshot = await getSnapshot(_req.user?.companyId);
@@ -586,6 +662,8 @@ app.get("/api/data", requireAuth(["admin", "vendedor", "cajero", "contador"]), a
     next(error);
   }
 });
+
+
 
 app.get("/api/history/sales", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
   try {
@@ -647,7 +725,10 @@ app.post("/api/data", requireAuth(["admin", "vendedor", "cajero", "contador"]), 
       return;
     }
 
-    res.json(await saveSnapshot(data, req.user?.companyId));
+    res.json(await saveSnapshot(data, req.user?.companyId, {
+      origin: "legacy_snapshot",
+      userId: req.user?.sub || req.user?.id || null
+    }));
   } catch (error) {
     next(error);
   }
@@ -676,7 +757,9 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
       payloadHash: hashSyncPayload(patch),
       operationType: "SYNC_MERGE",
       operationId: null
-    } : null);
+    } : null, {
+      userId: req.user?.sub || req.user?.id || null
+    });
     logTechnical("info", "sync_merge_applied", {
       companyId: req.user?.companyId || "",
       userId: req.user?.id || "",
@@ -753,6 +836,178 @@ app.post("/api/backups/postgres", requireAuth(["admin"]), async (_req, res, next
 app.get("/api/support/logs", requireAuth(["admin"]), async (req, res, next) => {
   try {
     res.json({ ok: true, logs: listTechnicalLogs(req.query.limit) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/documents/history", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+  const companyId = String(req.user?.companyId || "");
+  try {
+    const access = await historicalDocumentAccessForRequest(req);
+    if (!access.enabled || !maximumDocumentHistorySequence || !listDocumentHistoryPage) {
+      logTechnical("info", "historical_documents_page_failed", { companyId, result: access.reason || "REPOSITORY_UNAVAILABLE" });
+      res.status(404).json({
+        ok: false,
+        error: {
+          code: historicalDocumentAccessError(access.reason),
+          reason: access.reason || "REPOSITORY_UNAVAILABLE"
+        }
+      });
+      return;
+    }
+    enforceRateLimit(
+      historicalDocumentsRate,
+      `${companyId}:${req.user?.sub || req.user?.id || ""}:${String(req.get("X-Device-Id") || "").toLowerCase()}`,
+      config.historicalDocumentPagination.rateLimitPerMinute,
+      "HISTORICAL_DOCUMENTS_RATE_LIMITED"
+    );
+    logTechnical("info", "historical_documents_page_requested", { companyId, result: "started" });
+    const result = await historicalDocumentsPage({
+      maximumSequence: maximumDocumentHistorySequence,
+      listPage: listDocumentHistoryPage
+    }, {
+      companyId,
+      config: config.historicalDocumentPagination,
+      query: req.query || {}
+    });
+    res.json(result);
+  } catch (error) {
+    if (String(error.code || "").startsWith("HISTORICAL_DOCUMENTS_")) {
+      logTechnical("warn", historyMetricForError(error.code), { companyId, result: error.code });
+      res.status(error.statusCode || 400).json({ ok: false, error: { code: error.code, ...error.details } });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.get("/api/sync/diagnostic/pull", requireAuth(["admin"]), async (req, res, next) => {
+  const companyId = String(req.user?.companyId || "");
+  const userId = String(req.user?.sub || req.user?.id || "");
+  try {
+    enforceDiagnosticPullRateLimit(`${companyId}:${userId}`, config.incrementalSyncPullDiagnostic.rateLimitPerMinute);
+    if (!maximumSyncChangeSequence || !listDiagnosticSyncChanges) {
+      const error = new Error("SYNC_PULL_DISABLED"); error.code = "SYNC_PULL_DISABLED"; error.statusCode = 404; throw error;
+    }
+    const result = await diagnosticPull({
+      maximumSequence: maximumSyncChangeSequence,
+      listChanges: listDiagnosticSyncChanges
+    }, {
+      config: config.incrementalSyncPullDiagnostic,
+      companyId,
+      cursor: req.query.cursor,
+      limit: req.query.limit,
+      modules: req.query.modules
+    });
+    res.json(result);
+  } catch (error) {
+    if (String(error.code || "").startsWith("SYNC_")) {
+      const diagnosticEvent = error.code === "SYNC_PULL_RATE_LIMITED"
+        ? "sync_diagnostic_rate_limited_total"
+        : error.code === "SYNC_CURSOR_EXPIRED"
+          ? "sync_diagnostic_cursor_expired_total"
+          : error.code?.startsWith("SYNC_CURSOR_")
+            ? "sync_diagnostic_cursor_invalid_total"
+            : error.details?.reason === "COMPANY_REJECTED"
+              ? "sync_diagnostic_company_rejected_total"
+              : "sync_diagnostic_pull_failed_total";
+      logTechnical("warn", diagnosticEvent, {
+        companyId, result: error.code, environment: config.incrementalSyncPullDiagnostic.environment
+      });
+      res.status(error.statusCode || 400).json({ ok: false, error: { code: error.code, ...error.details }, requiresFullSnapshot: error.code === "SYNC_CURSOR_EXPIRED" });
+      return;
+    }
+    next(error);
+  }
+});
+
+app.get("/api/sync/capabilities", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+  try {
+    const access = await incrementalPilotAccessForRequest(req);
+    logTechnical("info", "sync_incremental_pilot_capability", { companyId: req.user?.companyId || "", result: access.reason, platform: access.platform });
+    res.json({ ok: true, syncProtocolVersion: 1, incrementalSyncEnabled: access.enabled, modules: access.modules, snapshotFallbackAvailable: true, configVersion: config.incrementalSyncPilot.configVersion || null, reason: access.reason });
+  } catch (error) { next(error); }
+});
+
+app.get("/api/sync/bootstrap", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+  try {
+    enforceDiagnosticPullRateLimit(`pilot-bootstrap:${req.user?.companyId}:${req.user?.sub || req.user?.id}`, config.incrementalSyncPilot.rateLimitPerMinute);
+    const access = await incrementalPilotAccessForRequest(req);
+    if (!access.enabled || !getIncrementalPilotBootstrap) {
+      res.status(404).json({ ok: false, error: { code: "SYNC_PULL_DISABLED", reason: access.reason } }); return;
+    }
+    const bootstrap = await getIncrementalPilotBootstrap(req.user.companyId);
+    if (!bootstrap) { res.status(404).json({ ok: false, error: { code: "SYNC_SNAPSHOT_NOT_FOUND" } }); return; }
+    const cursorData = { ...initialCursor(req.user.companyId, bootstrap.watermark, config.incrementalSyncPilot), lastChangeSeq: bootstrap.watermark };
+    res.json({ ok: true, protocolVersion: 1, mode: "pilot", snapshot: { data: bootstrap.data, updatedAt: bootstrap.updatedAt }, snapshotRevision: bootstrap.watermark, cursor: encodeCursor(cursorData, config.incrementalSyncPilot.cursorSecret), versions: bootstrap.versions, modules: access.modules });
+  } catch (error) { next(error); }
+});
+
+app.get("/api/sync/pull", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+  try {
+    enforceDiagnosticPullRateLimit(`pilot-pull:${req.user?.companyId}:${req.user?.sub || req.user?.id}`, config.incrementalSyncPilot.rateLimitPerMinute);
+    const access = await incrementalPilotAccessForRequest(req);
+    if (!access.enabled) { res.status(404).json({ ok: false, error: { code: "SYNC_PULL_DISABLED", reason: access.reason } }); return; }
+    if (!req.query.cursor) { res.status(409).json({ ok: false, error: { code: "SYNC_BOOTSTRAP_REQUIRED" }, requiresFullSnapshot: true }); return; }
+    const entityTypes = [access.modules.clients ? "client" : null, access.modules.products ? "product" : null].filter(Boolean);
+    const result = await diagnosticPull({ maximumSequence: maximumSyncChangeSequence, listChanges: listDiagnosticSyncChanges }, {
+      config: config.incrementalSyncPilot, companyId: req.user.companyId, cursor: req.query.cursor,
+      limit: req.query.limit, accessGranted: true, mode: "pilot", entityTypes,
+      rollingWatermark: true, advanceToWatermarkWhenExhausted: true
+    });
+    res.json({ ...result, modules: access.modules });
+  } catch (error) {
+    if (String(error.code || "").startsWith("SYNC_")) { res.status(error.statusCode || 400).json({ ok: false, error: { code: error.code, ...error.details }, requiresFullSnapshot: ["SYNC_CURSOR_EXPIRED", "SYNC_CURSOR_INVALID", "SYNC_CURSOR_PROTOCOL_UNSUPPORTED"].includes(error.code) }); return; }
+    next(error);
+  }
+});
+
+app.get("/api/admin/email-operations", requireAuth(["admin"]), async (req, res, next) => {
+  try {
+    if (!documentEmailRepository) {
+      res.status(503).json({ error: "La cola durable de correos requiere PostgreSQL." });
+      return;
+    }
+    const status = String(req.query.status || "").trim().toLowerCase();
+    if (status && !["pending", "processing", "accepted", "failed", "uncertain"].includes(status)) {
+      res.status(400).json({ error: "El estado de la operacion de correo no es valido." });
+      return;
+    }
+    const operations = await documentEmailRepository.listOperations(req.user?.companyId || "", {
+      status,
+      limit: req.query.limit
+    });
+    res.json({ ok: true, operations });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/admin/email-operations/:operationId/retry", requireAuth(["admin"]), async (req, res, next) => {
+  try {
+    if (!documentEmailRepository) {
+      res.status(503).json({ error: "La cola durable de correos requiere PostgreSQL." });
+      return;
+    }
+    const operation = await documentEmailRepository.retryOperation(
+      req.user?.companyId || "",
+      req.params.operationId,
+      req.user?.id || req.user?.email || "admin"
+    );
+    documentEmailWorker?.wake();
+    res.json({
+      ok: true,
+      operation: {
+        id: operation.id,
+        documentType: operation.documentType,
+        documentId: operation.documentId,
+        origin: operation.origin,
+        status: operation.status,
+        attempts: operation.attempts,
+        smtpMessageId: operation.smtpMessageId
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -1006,7 +1261,8 @@ const httpServer = app.listen(config.port, async () => {
   try {
     if (db.initialize) await db.initialize();
     if (db.engine === "postgres") {
-      documentEmailWorker = createDocumentEmailWorker({ connectionString: config.databaseUrl });
+      documentEmailRepository = createDocumentEmailQueueRepository({ connectionString: config.databaseUrl });
+      documentEmailWorker = createDocumentEmailWorker({ repository: documentEmailRepository });
       documentEmailWorker.start();
     }
   } catch (error) {
@@ -1031,6 +1287,100 @@ function shutdown(signal) {
     process.exitCode = 1;
   });
   return shutdownPromise;
+}
+
+function enforceDiagnosticPullRateLimit(key, limit) {
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const current = diagnosticPullRate.get(key);
+  if (!current || now - current.startedAt >= windowMs) {
+    diagnosticPullRate.set(key, { startedAt: now, count: 1 });
+    return;
+  }
+  if (current.count >= limit) {
+    const error = new Error("SYNC_PULL_RATE_LIMITED");
+    error.code = "SYNC_PULL_RATE_LIMITED";
+    error.statusCode = 429;
+    throw error;
+  }
+  current.count += 1;
+}
+
+async function incrementalPilotAccessForRequest(req) {
+  const companyId = String(req.user?.companyId || "").toLowerCase();
+  const userId = String(req.user?.sub || req.user?.id || "").toLowerCase();
+  const deviceId = String(req.get("X-Device-Id") || "").trim().toLowerCase();
+  const context = {
+    companyId,
+    userId,
+    deviceId,
+    platform: String(req.get("X-Platform") || "").trim().toLowerCase(),
+    appVersion: String(req.get("X-App-Version") || "").trim(),
+    protocolVersion: Number(req.get("X-Sync-Protocol-Version") || 0),
+    deviceTrusted: isIncrementalPilotDeviceTrusted
+      ? await isIncrementalPilotDeviceTrusted({ companyId, userId, deviceId })
+      : false
+  };
+  const access = evaluateIncrementalPilotAccess(config.incrementalSyncPilot, context);
+  return { ...access, platform: context.platform };
+}
+
+async function historicalDocumentAccessForRequest(req) {
+  const companyId = String(req.user?.companyId || "").toLowerCase();
+  const userId = String(req.user?.sub || req.user?.id || "").toLowerCase();
+  const deviceId = String(req.get("X-Device-Id") || "").trim().toLowerCase();
+  const context = {
+    companyId,
+    userId,
+    deviceId,
+    platform: String(req.get("X-Platform") || "").trim().toLowerCase(),
+    appVersion: String(req.get("X-App-Version") || "").trim(),
+    protocolVersion: Number(req.get("X-Historical-Documents-Protocol-Version") || 0),
+    deviceTrusted: isIncrementalPilotDeviceTrusted
+      ? await isIncrementalPilotDeviceTrusted({ companyId, userId, deviceId })
+      : false
+  };
+  return evaluateDocumentHistoryAccess(config.historicalDocumentPagination, context);
+}
+
+function enforceRateLimit(store, key, limit, code) {
+  const now = Date.now();
+  const current = store.get(key);
+  if (!current || now - current.startedAt >= 60_000) {
+    store.set(key, { startedAt: now, count: 1 });
+    return;
+  }
+  if (current.count >= limit) {
+    const error = new Error(code);
+    error.code = code;
+    error.statusCode = 429;
+    throw error;
+  }
+  current.count += 1;
+}
+
+function historyMetricForError(code) {
+  if (code === "HISTORICAL_DOCUMENTS_CURSOR_INVALID") return "historical_documents_cursor_invalid";
+  if (code === "HISTORICAL_DOCUMENTS_CURSOR_EXPIRED") return "historical_documents_cursor_expired";
+  if (code === "HISTORICAL_DOCUMENTS_QUERY_TIMEOUT") return "historical_documents_query_timeout";
+  return "historical_documents_page_failed";
+}
+
+function historicalDocumentAccessError(reason) {
+  const errors = {
+    GLOBAL_DISABLED: "FEATURE_DISABLED",
+    INVALID_MODE: "FEATURE_DISABLED",
+    INVALID_CONFIG_VERSION: "FEATURE_DISABLED",
+    ENVIRONMENT_REJECTED: "FEATURE_DISABLED",
+    COMPANY_REJECTED: "COMPANY_NOT_ALLOWED",
+    PLATFORM_REJECTED: "PLATFORM_NOT_ALLOWED",
+    PROTOCOL_REJECTED: "PROTOCOL_UNSUPPORTED",
+    APP_VERSION_REJECTED: "APP_VERSION_NOT_ALLOWED",
+    DEVICE_UNTRUSTED: "DEVICE_NOT_ALLOWED",
+    DEVICE_REJECTED: "DEVICE_NOT_ALLOWED",
+    USER_REJECTED: "USER_NOT_ALLOWED"
+  };
+  return errors[reason] || "FEATURE_DISABLED";
 }
 
 process.once("SIGINT", () => void shutdown("SIGINT"));

@@ -1,6 +1,6 @@
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Alert, Linking, Platform } from "react-native";
 import { sendInvoiceEmail } from "../services/backend";
 import { buildRideHtml } from "../sri/ride";
@@ -8,18 +8,18 @@ import { buildCreditNoteXml, buildInvoiceXml, money } from "../sri";
 import { AppData, Client, Sale, User } from "../types";
 import { appendAudit } from "../utils/audit";
 import { resolveCompanyLogoUrl } from "../utils/assets";
+import { showError, showInfo, showSuccess, showWarning } from "../utils/dialogs";
 import { buildCreditNoteRideHtml, buildInternalTicketHtml, buildProformaHtml } from "../utils/documentHtml";
 import { issuerForSale } from "../utils/establishments";
 import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleThermalPdfDocument, openHtmlViewer } from "../utils/printFiles";
-import { appendPendingSync, buildPendingSyncItem } from "../utils/pendingSync";
 import { isCreditNoteSale } from "../utils/sales";
-import { syncSalePatchToBackend } from "../utils/sync";
+import { syncPatchToBackendResult } from "../utils/sync";
+import { isValidEmail } from "../validation";
 
 type UseSaleDocumentActionsParams = {
   backendToken: string;
   data: AppData;
   persist: (data: AppData, options?: { skipAutoBackup?: boolean; syncState?: "pending" | "syncing" | "synced" | "error" }) => Promise<void>;
-  setNotice: React.Dispatch<React.SetStateAction<string>>;
   setProcessingMessage: React.Dispatch<React.SetStateAction<string>>;
   user: User;
 };
@@ -36,10 +36,20 @@ export function useSaleDocumentActions({
   backendToken,
   data,
   persist,
-  setNotice,
   setProcessingMessage,
   user
 }: UseSaleDocumentActionsParams) {
+  const [sendingEmailSaleId, setSendingEmailSaleId] = useState("");
+  const mountedRef = useRef(false);
+  const sendingEmailRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const createRide = async (sale: Sale, client: Client) => {
     if (sale.status !== "AUTORIZADA") {
       Alert.alert("RIDE no disponible", "El RIDE se genera cuando la factura esta autorizada.");
@@ -95,7 +105,7 @@ export function useSaleDocumentActions({
   };
 
   const recordSaleEmailAttempt = async (sale: Sale, to: string, status: "sent" | "failed", error = "") => {
-    if (!data.sales.some((item) => item.id === sale.id)) return;
+    if (!data.sales.some((item) => item.id === sale.id)) return false;
     const sentAt = new Date().toISOString();
     const updatedSale: Sale = {
       ...sale,
@@ -110,21 +120,27 @@ export function useSaleDocumentActions({
       sales: [updatedSale],
       auditLogs: nextData.auditLogs.slice(0, 1)
     };
-    const synced = await syncSalePatchToBackend(data.backendUrl, backendToken, patch);
-    const localData = synced
-      ? nextData
-      : appendPendingSync(nextData, buildPendingSyncItem(patch, "Correo pendiente de sincronizar", "El correo fue procesado, pero no se pudo sincronizar el historial en este momento."));
-    await persist(localData, { skipAutoBackup: synced, syncState: synced ? "synced" : "pending" });
+    const syncResult = await syncPatchToBackendResult(data.backendUrl, backendToken, patch, "Historial de correo pendiente de sincronizar");
+    if (!syncResult.confirmed || syncResult.localCleanupPending) return false;
+    await persist(nextData, { skipAutoBackup: true, syncState: "synced" });
+    return true;
   };
 
   const sendSaleEmail = async (sale: Sale, client: Client, source?: Sale, showAlerts = true) => {
+    if (sendingEmailRef.current) return false;
+
     if (sale.status !== "AUTORIZADA") {
-      if (showAlerts) Alert.alert("Correo no disponible", "Solo se envia cuando el documento esta autorizado.");
+      if (showAlerts) showInfo("Correo no disponible", "Solo se envia cuando el documento esta autorizado.");
       return false;
     }
 
     if (!client.email) {
-      if (showAlerts) Alert.alert("Cliente sin email", "Agregue un correo al cliente.");
+      if (showAlerts) showInfo("Cliente sin correo", "Agregue un correo al cliente antes de enviar el documento.");
+      return false;
+    }
+
+    if (!isValidEmail(client.email)) {
+      if (showAlerts) showWarning("Correo invalido", "El correo registrado para el cliente no tiene un formato valido.");
       return false;
     }
 
@@ -134,8 +150,12 @@ export function useSaleDocumentActions({
     const saleIssuer = issuerForDocument(data, sale);
     const documentNumber = `${saleIssuer.establishment}-${saleIssuer.emissionPoint}-${sale.sequence}`;
 
-    try {
+    sendingEmailRef.current = true;
+    if (mountedRef.current) {
+      setSendingEmailSaleId(sale.id);
       setProcessingMessage(`Enviando ${documentLabel} al correo del cliente...`);
+    }
+    try {
       const rideHtml = isCreditNote ? buildCreditNoteRideHtml(sale, client, saleIssuer, source) : buildRideHtml(sale, client, saleIssuer);
       const pdfBase64 = await createPdfBase64(rideHtml);
       await sendInvoiceEmail(data.backendUrl, {
@@ -147,24 +167,35 @@ export function useSaleDocumentActions({
         documentType: isCreditNote ? "nota_credito" : "factura",
         documentNumber
       }, backendToken);
-      const message = `La ${documentLabel} ${documentNumber} fue enviada a ${client.email} con sus documentos autorizados.`;
-      await recordSaleEmailAttempt(sale, client.email, "sent");
-      setNotice(message);
+      let historySaved = false;
+      try {
+        historySaved = await recordSaleEmailAttempt(sale, client.email, "sent");
+      } catch {
+        historySaved = false;
+      }
       if (showAlerts) {
-        if (Platform.OS === "web") {
-          window.alert(message);
+        if (historySaved) {
+          showSuccess("Correo aceptado para envio", `El servidor de correo acepto la ${documentLabel} ${documentNumber} para ${client.email}.`);
         } else {
-          Alert.alert(`${documentTitle} enviada`, message);
+          showWarning("Correo aceptado; historial pendiente", `El servidor de correo acepto el mensaje para ${client.email}, pero no se pudo actualizar el historial. Se recuperara al sincronizar.`);
         }
       }
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo enviar el correo.";
-      await recordSaleEmailAttempt(sale, client.email, "failed", message);
-      if (showAlerts) Alert.alert("Correo no enviado", message);
+      try {
+        await recordSaleEmailAttempt(sale, client.email, "failed", message);
+      } catch {
+        // El fallo del historial no debe reemplazar el resultado principal del envio.
+      }
+      if (showAlerts) showError("Correo no enviado", message);
       return false;
     } finally {
-      setProcessingMessage("");
+      sendingEmailRef.current = false;
+      if (mountedRef.current) {
+        setSendingEmailSaleId("");
+        setProcessingMessage("");
+      }
     }
   };
 
@@ -213,6 +244,7 @@ export function useSaleDocumentActions({
     createRide,
     createTicket,
     emailSale,
+    sendingEmailSaleId,
     sendSaleEmail,
     whatsappSale
   };

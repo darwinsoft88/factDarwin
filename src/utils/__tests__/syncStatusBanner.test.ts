@@ -1,4 +1,4 @@
-import { buildSyncStatusBannerView, runSyncStatusBannerAction } from "../syncStatusBanner";
+import { buildSyncStatusBannerView, countUniqueAttentionDocuments, runSyncStatusBannerAction } from "../syncStatusBanner";
 
 const base = {
   documentCount: 0,
@@ -12,6 +12,11 @@ const base = {
 };
 
 describe("syncStatusBanner", () => {
+  it("cuenta una sola vez un documento presente en dos categorias", () => {
+    expect(countUniqueAttentionDocuments(["sale-326"], ["sale-326"])).toBe(1);
+    expect(countUniqueAttentionDocuments(["sale-326"], ["sale-326", "sale-327"])).toBe(2);
+  });
+
   it("stays hidden without incidents", () => {
     expect(buildSyncStatusBannerView(base).visible).toBe(false);
   });

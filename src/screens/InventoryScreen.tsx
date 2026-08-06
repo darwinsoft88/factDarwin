@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Alert, StyleSheet, View } from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { StyleSheet, View } from "react-native";
 import { EntityEditModal } from "../components/EntityEditModal";
 import { InventoryKardexSection, InventoryListItemProps, InventoryMovementSection, InventoryMovementsSection, InventoryStockSection } from "../components/InventorySections";
 import { LIST_BATCH_SIZE } from "../constants/app";
@@ -9,7 +9,7 @@ import { AppData, InventoryMovementType, User } from "../types";
 import { accountingValue, productCost } from "../utils/accounting";
 import { appendAudit } from "../utils/audit";
 import { isInventoryProduct } from "../utils/catalogItems";
-import { showMessage } from "../utils/dialogs";
+import { showSuccess, showWarning } from "../utils/dialogs";
 import { createInventoryMovement, movementReason, movementTypeLabel } from "../utils/inventory";
 import { isTicketOffline } from "../utils/invoiceStatus";
 import { parseDecimal } from "../utils/numbers";
@@ -34,6 +34,9 @@ export function InventoryScreen({
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("");
   const [movementModalVisible, setMovementModalVisible] = useState(false);
+  const [productPickerVisible, setProductPickerVisible] = useState(false);
+  const [savingMovement, setSavingMovement] = useState(false);
+  const savingMovementRef = useRef(false);
   const [productSearch, setProductSearch] = useState("");
   const [movementSearch, setMovementSearch] = useState("");
   const [stockProductPage, setStockProductPage] = useState(1);
@@ -86,55 +89,76 @@ export function InventoryScreen({
     setProductId(inventoryProducts[0]?.id || "");
   }, [inventoryProducts, productId]);
 
-  useEffect(() => {
-    if (filteredProducts.length === 0) return;
-    if (filteredProducts.some((product) => product.id === productId)) return;
-    setProductId(filteredProducts[0]?.id || "");
-  }, [filteredProducts, productId]);
-
   const saveMovement = async () => {
-    const qty = parseDecimal(quantity);
-    if (!selectedProduct || !Number.isFinite(qty) || qty <= 0) {
-      Alert.alert("Movimiento incompleto", "Seleccione producto e ingrese una cantidad mayor a cero.");
-      return;
+    if (savingMovementRef.current) return;
+    savingMovementRef.current = true;
+    setSavingMovement(true);
+
+    try {
+      const qty = parseDecimal(quantity);
+      if (!selectedProduct) {
+        showWarning(
+          "Producto requerido",
+          "Seleccione el producto al que desea aplicar el movimiento."
+        );
+        return;
+      }
+      if (!Number.isFinite(qty) || qty <= 0) {
+        showWarning(
+          type === "ajuste" ? "Nuevo stock requerido" : "Cantidad requerida",
+          type === "ajuste"
+            ? "Ingrese un nuevo stock válido mayor a cero."
+            : "Ingrese una cantidad válida mayor a cero."
+        );
+        return;
+      }
+
+      let stockAfter = selectedProduct.stock;
+      if (type === "entrada") stockAfter = selectedProduct.stock + qty;
+      if (type === "salida") stockAfter = selectedProduct.stock - qty;
+      if (type === "ajuste") stockAfter = qty;
+
+      if (stockAfter < 0) {
+        showWarning(
+          "Stock insuficiente",
+          `La salida no puede dejar stock negativo. Disponible: ${selectedProduct.stock}.`
+        );
+        return;
+      }
+
+      const createdAt = new Date().toISOString();
+      const movement = createInventoryMovement(selectedProduct, type, type === "ajuste" ? Math.abs(stockAfter - selectedProduct.stock) : qty, stockAfter, reason.trim() || movementReason(type), user.id);
+      const updatedProduct = { ...selectedProduct, stock: stockAfter, updatedAt: createdAt };
+      const nextData = appendAudit({
+        ...data,
+        products: data.products.map((product) => (product.id === selectedProduct.id ? updatedProduct : product)),
+        inventoryMovements: [movement, ...(data.inventoryMovements || [])]
+      }, user, "INVENTORY_MOVEMENT_CREATED", "inventory", movement.id, `${movementTypeLabel(type)} de inventario: ${selectedProduct.code} - ${selectedProduct.name}`, { quantity: movement.quantity, stockBefore: selectedProduct.stock, stockAfter });
+      await persist(nextData);
+      await syncPatchToBackend(data.backendUrl, backendToken, {
+        baseData: data,
+        products: [updatedProduct],
+        inventoryMovements: [movement],
+        auditLogs: nextData.auditLogs.slice(0, 1)
+      }, "Movimiento de inventario pendiente de sincronizar", nextData, persist);
+      setQuantity("");
+      setReason("");
+      setMovementModalVisible(false);
+      showSuccess("Movimiento guardado", `Inventario actualizado. Nuevo stock de ${selectedProduct.name}: ${stockAfter}.`);
+    } finally {
+      savingMovementRef.current = false;
+      setSavingMovement(false);
     }
-
-    let stockAfter = selectedProduct.stock;
-    if (type === "entrada") stockAfter = selectedProduct.stock + qty;
-    if (type === "salida") stockAfter = selectedProduct.stock - qty;
-    if (type === "ajuste") stockAfter = qty;
-
-    if (stockAfter < 0) {
-      Alert.alert("Stock insuficiente", `No puede dejar stock negativo. Disponible: ${selectedProduct.stock}.`);
-      return;
-    }
-
-    const createdAt = new Date().toISOString();
-    const movement = createInventoryMovement(selectedProduct, type, type === "ajuste" ? Math.abs(stockAfter - selectedProduct.stock) : qty, stockAfter, reason.trim() || movementReason(type), user.id);
-    const updatedProduct = { ...selectedProduct, stock: stockAfter, updatedAt: createdAt };
-    const nextData = appendAudit({
-      ...data,
-      products: data.products.map((product) => (product.id === selectedProduct.id ? updatedProduct : product)),
-      inventoryMovements: [movement, ...(data.inventoryMovements || [])]
-    }, user, "INVENTORY_MOVEMENT_CREATED", "inventory", movement.id, `${movementTypeLabel(type)} de inventario: ${selectedProduct.code} - ${selectedProduct.name}`, { quantity: movement.quantity, stockBefore: selectedProduct.stock, stockAfter });
-    await persist(nextData);
-    await syncPatchToBackend(data.backendUrl, backendToken, {
-      baseData: data,
-      products: [updatedProduct],
-      inventoryMovements: [movement],
-      auditLogs: nextData.auditLogs.slice(0, 1)
-    }, "Movimiento de inventario pendiente de sincronizar", nextData, persist);
-    setQuantity("");
-    setReason("");
-    setMovementModalVisible(false);
-    showMessage("Movimiento guardado", `Inventario actualizado. Nuevo stock de ${selectedProduct.name}: ${stockAfter}.`);
   };
 
   return (
     <View style={styles.stack}>
       <InventoryStockSection
         ListItemComponent={ListItemComponent}
-        onCreateMovement={() => setMovementModalVisible(true)}
+        onCreateMovement={() => {
+          setProductPickerVisible(false);
+          setMovementModalVisible(true);
+        }}
         productPagination={stockProductPagination}
         products={inventoryProducts}
         setProductPage={setStockProductPage}
@@ -166,7 +190,12 @@ export function InventoryScreen({
         title="Movimiento de inventario"
         subtitle={selectedProduct ? `${selectedProduct.code} - ${selectedProduct.name}` : "Seleccione producto y cantidad"}
         confirmLabel="Guardar movimiento"
-        onClose={() => setMovementModalVisible(false)}
+        confirming={savingMovement}
+        onClose={() => {
+          if (savingMovementRef.current) return;
+          setProductPickerVisible(false);
+          setMovementModalVisible(false);
+        }}
         onConfirm={() => { void saveMovement(); }}
       >
         <InventoryMovementSection
@@ -174,12 +203,14 @@ export function InventoryScreen({
           showSaveButton={false}
           filteredProducts={filteredProducts}
           productId={productId}
+          productPickerVisible={productPickerVisible}
           productSearch={productSearch}
           quantity={quantity}
           reason={reason}
           selectedProduct={selectedProduct}
           type={type}
           onProductChange={setProductId}
+          onProductPickerVisibleChange={setProductPickerVisible}
           onProductSearchChange={setProductSearch}
           onQuantityChange={setQuantity}
           onReasonChange={setReason}

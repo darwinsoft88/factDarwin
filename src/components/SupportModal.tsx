@@ -1,6 +1,7 @@
 import React from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppLegalFooter } from "./AppLegalFooter";
+import { AppToast } from "./AppToast";
 
 type SupportModalProps = {
   visible: boolean;
@@ -48,6 +49,7 @@ export function SupportModal({ visible, loading, diagnosticText, showTechnicalDe
           </ScrollView>
         </View>
       </View>
+      <AppToast />
     </Modal>
   );
 }

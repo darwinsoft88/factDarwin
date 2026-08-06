@@ -119,10 +119,10 @@ test("detecta XML ausente, invalido y clave diferente", async () => {
   );
 });
 
-test("genera RIDE como Buffer PDF valido", () => {
+test("genera RIDE como Buffer PDF valido", async () => {
   const current = operation();
   const snapshot = current.payload.authorizationSnapshot;
-  const pdf = buildRidePdf({
+  const pdf = await buildRidePdf({
     documentType: current.documentType,
     document: snapshot.document,
     client: snapshot.client,
@@ -132,6 +132,34 @@ test("genera RIDE como Buffer PDF valido", () => {
   assert(Buffer.isBuffer(pdf));
   assert(pdf.length > 0);
   assert.equal(pdf.subarray(0, 5).toString("ascii"), "%PDF-");
+});
+
+test("genera un RIDE multipagina sin perder el formato PDF", async () => {
+  const current = operation("factura", {
+    document: {
+      items: Array.from({ length: 32 }, (_value, index) => ({
+        id: `line-${index + 1}`,
+        code: `P${index + 1}`,
+        name: `Producto de prueba ${index + 1}`,
+        quantity: 1,
+        unitPrice: 10,
+        discount: 0,
+        ivaRate: 0.15
+      }))
+    }
+  });
+  const snapshot = current.payload.authorizationSnapshot;
+  const pdf = await buildRidePdf({
+    documentType: current.documentType,
+    document: snapshot.document,
+    client: snapshot.client,
+    issuer: snapshot.issuer,
+    sourceDocument: snapshot.sourceDocument
+  });
+
+  assert.equal(Buffer.isBuffer(pdf), true);
+  assert.equal(pdf.subarray(0, 5).toString("ascii"), "%PDF-");
+  assert.ok((pdf.toString("latin1").match(/\/Type\s*\/Page\b/g) || []).length > 1);
 });
 
 test("rechaza adjuntos por encima del limite", async () => {

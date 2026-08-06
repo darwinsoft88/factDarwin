@@ -364,3 +364,32 @@ probar ausencia de duplicados en facturas y notas de crédito.
 
 En ningún estado de correo —incluidos `failed`, `uncertain` y `accepted`— se
 modifica ni degrada el estado tributario del documento.
+
+## Finalización operativa (Fase 5)
+
+La consulta administrativa se expone mediante
+`GET /api/admin/email-operations`. Requiere rol `admin`, siempre aplica el
+`companyId` del token y solo entrega metadatos operativos. No devuelve payloads,
+XML, RIDE, HTML ni direcciones completas.
+
+`POST /api/admin/email-operations/:operationId/retry` reactiva exclusivamente
+operaciones `failed` o `uncertain` de la misma empresa. El reintento:
+
+- conserva `operation.id` y `smtp_message_id`;
+- no crea una segunda operación;
+- limpia el lease y las marcas del intento anterior;
+- vuelve a `pending` y despierta al trabajador;
+- no modifica el documento tributario.
+
+Reintentar una operación `uncertain` es una decisión administrativa consciente:
+el SMTP anterior pudo haber aceptado el mensaje. El `Message-ID` estable ayuda a
+deduplicar, pero no elimina completamente el riesgo de una segunda entrega.
+
+El envío automático directo de notas de crédito desde el frontend fue retirado.
+La automatización pertenece exclusivamente a la cola durable. El botón Email
+manual permanece disponible como `manual_resend` independiente y no consume ni
+bloquea la operación `automatic_authorization`.
+
+El despliegue conserva el modo global predeterminado `off`; ninguna empresa se
+habilita mediante migraciones. La activación de `send` continúa requiriendo el
+procedimiento de canary y una habilitación empresarial explícita.

@@ -90,6 +90,35 @@ async function cases() {
       response: "250 queued", envelope: { fromDomain: "example.test", toCount: 1 }, elapsedMs: 4
     });
   }
+  await clientFor(process.env.DATABASE_URL, async (client) => {
+    await insert(client, "failed-manual-retry", "enabled", "factura", { status: "failed", attempts: 5 });
+    await insert(client, "uncertain-manual-retry", "enabled", "nota_credito", { status: "uncertain", attempts: 2 });
+    await client.query(
+      "UPDATE document_email_operations SET smtp_message_id='<uncertain-manual-retry@email.factudarwin.com>', retryable=FALSE WHERE id='uncertain-manual-retry'"
+    );
+    await insert(client, "other-company-operation", "other-company", "factura", { status: "failed" });
+  });
+  const listed = await first.listOperations("enabled", { limit: 100 });
+  assert(listed.some((operation) => operation.id === "failed-manual-retry"));
+  assert(!listed.some((operation) => operation.id === "other-company-operation"));
+  assert(listed.every((operation) => operation.recipientEmail === undefined));
+  assert(listed.every((operation) => operation.recipientMasked.endsWith("@example.test")));
+  const uncertainOnly = await first.listOperations("enabled", { status: "uncertain" });
+  assert.deepEqual(uncertainOnly.map((operation) => operation.id), ["uncertain-manual-retry"]);
+  await assert.rejects(
+    first.retryOperation("enabled", claimed[0].id, "admin-1"),
+    (error) => error.statusCode === 409
+  );
+  const failedRetry = await first.retryOperation("enabled", "failed-manual-retry", "admin-1");
+  const uncertainRetry = await first.retryOperation("enabled", "uncertain-manual-retry", "admin-1");
+  assert.equal(failedRetry.status, "pending");
+  assert.equal(failedRetry.attempts, 0);
+  assert.equal(uncertainRetry.status, "pending");
+  assert.equal(uncertainRetry.smtpMessageId, "<uncertain-manual-retry@email.factudarwin.com>");
+  await assert.rejects(
+    first.retryOperation("other-company", "failed-manual-retry", "admin-2"),
+    (error) => error.statusCode === 404
+  );
   await first.markBlockedSendOperations();
   await first.recoverExpiredLeases("recovery", "2026-07-26T12:00:01.000Z");
   const report = await clientFor(process.env.DATABASE_URL, async (client) => (await client.query(
@@ -100,8 +129,10 @@ async function cases() {
   assert.equal(report.find((row) => row.id === "invoice-disabled").last_error_code, "COMPANY_SEND_NOT_ENABLED");
   assert.equal(report.find((row) => row.id === "expired-after-send").status, "uncertain");
   assert.equal(report.find((row) => row.id === "expired-after-send").last_error_code, "SMTP_DELIVERY_OUTCOME_UNCERTAIN");
-  assert.equal((await first.claim("worker-c", 10)).length, 0);
-  console.log(JSON.stringify({ accepted: 2, disabledAttempts: 0, expiredStatus: "uncertain" }));
+  const manualClaims = await first.claim("worker-c", 10);
+  assert.deepEqual(manualClaims.map((operation) => operation.id).sort(), ["failed-manual-retry", "uncertain-manual-retry"]);
+  assert.equal(manualClaims.find((operation) => operation.id === "uncertain-manual-retry").smtpMessageId, "<uncertain-manual-retry@email.factudarwin.com>");
+  console.log(JSON.stringify({ accepted: 2, disabledAttempts: 0, expiredStatus: "uncertain", manualRetries: manualClaims.length }));
   await first.close(); await second.close();
 }
 async function cleanup() {

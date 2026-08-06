@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, Vie
 import { KEYBOARD_AVOIDING_BEHAVIOR } from "../constants/layout";
 import { Input } from "./common";
 import { PasswordVisibilityButton } from "./inputActions";
+import { AppToast } from "./AppToast";
 
 type PasswordChangeStatus = {
   tone: "info" | "error" | "success";
@@ -65,6 +66,7 @@ export function PasswordChangeModal({
           </View>
         </View>
       </KeyboardAvoidingView>
+      <AppToast />
     </Modal>
   );
 }

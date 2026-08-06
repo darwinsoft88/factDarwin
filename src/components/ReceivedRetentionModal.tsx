@@ -7,7 +7,7 @@ import { Issuer, RetentionTaxType, Sale } from "../types";
 import { documentNumber } from "../utils/documents";
 import { parseDecimal, sanitizeDecimalInput, sanitizeIntegerInput } from "../utils/numbers";
 import { Input, PrimaryButton, Select } from "./common";
-
+import { AppToast } from "./AppToast";
 type CalendarDateInputProps = {
   label: string;
   value: string;
@@ -38,6 +38,7 @@ type ReceivedRetentionModalProps = {
   onNotesChange: (value: string) => void;
   onClose: () => void;
   onSave: () => void;
+  saving: boolean;
 };
 
 export function ReceivedRetentionModal({
@@ -62,7 +63,8 @@ export function ReceivedRetentionModal({
   onAmountChange,
   onNotesChange,
   onClose,
-  onSave
+  onSave,
+  saving
 }: ReceivedRetentionModalProps) {
   const baseValue = parseDecimal(base || "0") || 0;
   const percentageValue = parseDecimal(percentage || "0") || 0;
@@ -101,11 +103,12 @@ export function ReceivedRetentionModal({
                 <Text style={styles.totalLine}>Porcentaje: {money(percentageValue)}%</Text>
                 <Text style={styles.totalStrong}>Valor estimado: ${money(baseValue * (percentageValue / 100))}</Text>
               </View>
-              <PrimaryButton label="Guardar retencion" onPress={onSave} />
+              <PrimaryButton disabled={saving} label={saving ? "Guardando..." : "Guardar retencion"} onPress={onSave} />
             </ScrollView>
           </View>
         </View>
       </KeyboardAvoidingView>
+      <AppToast />
     </Modal>
   );
 }

@@ -47,7 +47,7 @@ export type InventoryMovementType = "entrada" | "salida" | "ajuste";
 export type SaleInventoryOperationType = "APPLY" | "REVERSE";
 export type CreditNoteInventoryOperationType = "CREDIT_NOTE_RETURN" | "CREDIT_NOTE_RETURN_REVERSE";
 export type InventoryOperationType = SaleInventoryOperationType | CreditNoteInventoryOperationType;
-export type SaleInventoryState = "UNKNOWN" | "NOT_APPLIED" | "APPLIED" | "REVERSED";
+export type SaleInventoryState = "UNKNOWN" | "NOT_APPLIED" | "APPLIED" | "REVERSED" | "RECONCILIATION_PENDING";
 export type CreditNoteInventoryState = "UNKNOWN" | "NOT_APPLIED" | "APPLIED" | "REVERSED";
 
 export type InventoryMovement = {

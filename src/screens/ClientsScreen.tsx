@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { ClientEditModal } from "../components/ClientEditModal";
 import { ClientListItemProps, ClientListSection } from "../components/ClientListSection";
 import { LIST_BATCH_SIZE } from "../constants/app";
@@ -7,7 +7,12 @@ import { useClientIdentityLookup } from "../hooks/useClientIdentityLookup";
 import { AppData, Client, User } from "../types";
 import { canDeleteCatalog, canEditCatalog } from "../utils/appAccess";
 import { appendAudit } from "../utils/audit";
-import { confirmAction, showMessage } from "../utils/dialogs";
+import {
+  confirmAction,
+  showError,
+  showSuccess,
+  showWarning
+} from "../utils/dialogs";
 import { generateId } from "../utils/id";
 import { paginateItems } from "../utils/pagination";
 import { syncPatchToBackend } from "../utils/sync";
@@ -32,6 +37,7 @@ export function ClientsScreen({
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState("");
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [savingClient, setSavingClient] = useState(false);
   const [clientSearch, setClientSearch] = useState("");
   const [clientPage, setClientPage] = useState(1);
   const { lookingUpClient, lookupClientIdentification } = useClientIdentityLookup({
@@ -61,8 +67,10 @@ export function ClientsScreen({
   }, [clientSearch]);
 
   const save = async () => {
+    if (savingClient) return;
+
     if (!canEdit) {
-      Alert.alert("Acceso restringido", "Su usuario no tiene permiso para modificar clientes.");
+      showWarning("Acceso restringido", "Su usuario no tiene permiso para modificar clientes.");
       return;
     }
 
@@ -77,47 +85,59 @@ export function ClientsScreen({
     };
 
     if (!clientData.name || !clientData.identification) {
-      Alert.alert("Datos incompletos", "Ingrese nombre e identificacion.");
+      showWarning("Datos incompletos", "Ingrese nombre e identificacion.");
       return;
     }
 
     const duplicate = findDuplicateClient(data.clients, clientData.identification, editingId);
     if (duplicate) {
-      Alert.alert("Cliente duplicado", `Ya existe un cliente con esa identificacion: ${duplicate.name}.`);
+      showWarning("Cliente duplicado", `Ya existe un cliente con esa identificacion: ${duplicate.name}.`);
       return;
     }
 
-    if (editingId) {
-      const currentClient = data.clients.find((client) => client.id === editingId);
-      if (isConsumerFinalClient(currentClient)) {
-        Alert.alert("Consumidor Final protegido", "Este cliente fiscal es del sistema y no debe editarse. Cree o edite el cliente real aparte.");
-        return;
-      }
-      const updatedClient = { ...data.clients.find((client) => client.id === editingId), ...clientData, id: editingId } as Client;
-      const nextData = appendAudit({ ...data, clients: data.clients.map((client) => (client.id === editingId ? updatedClient : client)) }, user, "CLIENT_UPDATED", "client", editingId, `Cliente actualizado: ${clientData.name}`);
-      await persist(nextData);
-      await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [updatedClient], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", nextData, persist);
-      showMessage("Cliente actualizado", "Los datos del cliente se editaron con exito.");
-    } else {
-      const client = { id: generateId(), ...clientData };
-      const nextData = appendAudit({ ...data, clients: [client, ...data.clients] }, user, "CLIENT_CREATED", "client", client.id, `Cliente creado: ${client.name}`);
-      await persist(nextData);
-      await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [client], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", nextData, persist);
-      showMessage("Cliente guardado", "El cliente se guardo con exito.");
-    }
+    setSavingClient(true);
+    try {
+      const successMessage = editingId
+        ? (["Cliente actualizado", "Los datos del cliente se editaron con exito."] as const)
+        : (["Cliente guardado", "El cliente se guardo con exito."] as const);
 
-    setEditingId("");
-    setEditModalVisible(false);
-    setForm(emptyForm);
+      if (editingId) {
+        const currentClient = data.clients.find((client) => client.id === editingId);
+        if (isConsumerFinalClient(currentClient)) {
+          showWarning("Consumidor Final protegido", "Este cliente fiscal es del sistema y no debe editarse. Cree o edite el cliente real aparte.");
+          return;
+        }
+        const updatedClient = { ...currentClient, ...clientData, id: editingId } as Client;
+        const nextData = appendAudit({ ...data, clients: data.clients.map((client) => (client.id === editingId ? updatedClient : client)) }, user, "CLIENT_UPDATED", "client", editingId, `Cliente actualizado: ${clientData.name}`);
+        await persist(nextData);
+        const synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [updatedClient], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", nextData, persist);
+        if (!synced) return;
+      } else {
+        const client = { id: generateId(), ...clientData };
+        const nextData = appendAudit({ ...data, clients: [client, ...data.clients] }, user, "CLIENT_CREATED", "client", client.id, `Cliente creado: ${client.name}`);
+        await persist(nextData);
+        const synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [client], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", nextData, persist);
+        if (!synced) return;
+      }
+
+      setEditingId("");
+      setEditModalVisible(false);
+      setForm(emptyForm);
+      showSuccess(successMessage[0], successMessage[1]);
+    } catch (error) {
+      showError("Error al guardar", error instanceof Error ? error.message : "No se pudo guardar el cliente.");
+    } finally {
+      setSavingClient(false);
+    }
   };
 
   const edit = (client: Client) => {
     if (!canEdit) {
-      Alert.alert("Acceso restringido", "Su usuario no tiene permiso para modificar clientes.");
+      showWarning("Acceso restringido", "Su usuario no tiene permiso para modificar clientes.");
       return;
     }
     if (isConsumerFinalClient(client)) {
-      Alert.alert("Consumidor Final protegido", "Este cliente fiscal es del sistema y no debe editarse. Cree el cliente real con su cedula/RUC.");
+      showWarning("Consumidor Final protegido", "Este cliente fiscal es del sistema y no debe editarse. Cree el cliente real con su cedula/RUC.");
       return;
     }
 
@@ -135,7 +155,7 @@ export function ClientsScreen({
 
   const openCreate = () => {
     if (!canEdit) {
-      Alert.alert("Acceso restringido", "Su usuario no tiene permiso para crear clientes.");
+      showWarning("Acceso restringido", "Su usuario no tiene permiso para crear clientes.");
       return;
     }
     setEditingId("");
@@ -158,7 +178,7 @@ export function ClientsScreen({
       (data.receivedRetentions || []).some((retention) => retention.clientId === client.id);
 
     if (clientInUse) {
-      Alert.alert("Cliente protegido", "Este cliente ya tiene documentos asociados. Para conservar el historial fiscal no se puede eliminar.");
+      showWarning("Cliente protegido", "Este cliente ya tiene documentos asociados. Para conservar el historial fiscal no se puede eliminar.");
       return;
     }
 
@@ -167,7 +187,7 @@ export function ClientsScreen({
         const nextData = appendAudit({ ...data, clients: data.clients.filter((item) => item.id !== client.id), deletedIds: { ...(data.deletedIds || {}), clients: Array.from(new Set([...(data.deletedIds?.clients || []), client.id])) } }, user, "CLIENT_DELETED", "client", client.id, `Cliente eliminado: ${client.name}`);
         await persist(nextData);
         await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, deletions: { clients: [client.id] }, auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente eliminado pendiente de sincronizar", nextData, persist);
-        showMessage("Cliente eliminado", "El cliente se elimino con exito.");
+        showSuccess("Cliente eliminado", "El cliente se elimino con exito.");
       })();
     });
   };
@@ -195,6 +215,7 @@ export function ClientsScreen({
           editingId={editingId}
           form={form}
           lookingUpClient={lookingUpClient}
+          saving={savingClient}
           onChange={setForm}
           onClose={cancelEdit}
           onLookupIdentification={() => { void lookupClientIdentification(); }}

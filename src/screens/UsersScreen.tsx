@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { EntityEditModal } from "../components/EntityEditModal";
 import { Empty, Input, LoadMoreButton, Section, Select } from "../components/common";
 import { LIST_BATCH_SIZE } from "../constants/app";
@@ -9,7 +9,7 @@ import { hashPassword } from "../services/security";
 import { AppData, User, UserRole } from "../types";
 import { roleLabel } from "../utils/appAccess";
 import { appendAudit } from "../utils/audit";
-import { confirmAction, showMessage } from "../utils/dialogs";
+import { confirmAction, showError, showSuccess, showWarning } from "../utils/dialogs";
 import { generateId } from "../utils/id";
 import { syncPatchToBackend } from "../utils/sync";
 
@@ -38,6 +38,7 @@ export function UsersScreen({
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState("");
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [savingUser, setSavingUser] = useState(false);
   const [userSearch, setUserSearch] = useState("");
   const [visibleUserCount, setVisibleUserCount] = useState(LIST_BATCH_SIZE);
   const filteredUsers = useMemo(() => {
@@ -56,46 +57,59 @@ export function UsersScreen({
   }, [editingId, data.users.length, emptyForm]);
 
   const save = async () => {
+    if (savingUser) return;
+
     if (!form.name || !form.email || (!editingId && !form.password)) {
-      Alert.alert("Datos incompletos", editingId ? "Ingrese nombre y correo." : "Ingrese nombre, correo y contrasena.");
+      showWarning("Datos incompletos", editingId ? "Ingrese nombre y correo." : "Ingrese nombre, correo y contrasena.");
       return;
     }
     const email = form.email.trim().toLowerCase();
     if (data.users.some((user) => user.id !== editingId && user.email.trim().toLowerCase() === email)) {
-      Alert.alert("Usuario duplicado", "Ya existe un usuario con ese correo.");
+      showWarning("Usuario duplicado", "Ya existe un usuario con ese correo.");
       return;
     }
 
-    if (editingId) {
-      const passwordHash = form.password ? await hashPassword(form.password) : undefined;
-      const updatedUser = data.users.find((user) => user.id === editingId);
-      const finalUser = {
-        ...updatedUser,
-        id: editingId,
-        name: form.name.trim(),
-        email,
-        role: form.role,
-        ...(passwordHash ? { password: undefined, passwordHash } : {})
-      } as User;
-      const nextData = appendAudit({
-        ...data,
-        users: data.users.map((user) => user.id === editingId ? finalUser : user)
-      }, currentUser, "USER_UPDATED", "user", editingId, `Usuario actualizado: ${form.name.trim()}`);
-      await persist(nextData);
-      await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, users: [finalUser], auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario pendiente de sincronizar", nextData, persist);
-      showMessage("Usuario actualizado", "El usuario se edito con exito.");
-    } else {
-      const passwordHash = await hashPassword(form.password);
-      const createdUser: User = { id: generateId(), name: form.name.trim(), email, role: form.role, passwordHash };
-      const nextData = appendAudit({ ...data, users: [createdUser, ...data.users] }, currentUser, "USER_CREATED", "user", createdUser.id, `Usuario creado: ${createdUser.name}`);
-      await persist(nextData);
-      await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, users: [createdUser], auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario pendiente de sincronizar", nextData, persist);
-      showMessage("Usuario guardado", "El usuario se guardo con exito.");
-    }
+    setSavingUser(true);
+    try {
+      const successTitle = editingId ? "Usuario actualizado" : "Usuario guardado";
+      const successMessage = editingId ? "El usuario se edito con exito." : "El usuario se guardo con exito.";
+      let synced = false;
 
-    setEditingId("");
-    setEditModalVisible(false);
-    setForm(emptyForm);
+      if (editingId) {
+        const passwordHash = form.password ? await hashPassword(form.password) : undefined;
+        const updatedUser = data.users.find((user) => user.id === editingId);
+        const finalUser = {
+          ...updatedUser,
+          id: editingId,
+          name: form.name.trim(),
+          email,
+          role: form.role,
+          ...(passwordHash ? { password: undefined, passwordHash } : {})
+        } as User;
+        const nextData = appendAudit({
+          ...data,
+          users: data.users.map((user) => user.id === editingId ? finalUser : user)
+        }, currentUser, "USER_UPDATED", "user", editingId, `Usuario actualizado: ${form.name.trim()}`);
+        await persist(nextData);
+        synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, users: [finalUser], auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario pendiente de sincronizar", nextData, persist);
+      } else {
+        const passwordHash = await hashPassword(form.password);
+        const createdUser: User = { id: generateId(), name: form.name.trim(), email, role: form.role, passwordHash };
+        const nextData = appendAudit({ ...data, users: [createdUser, ...data.users] }, currentUser, "USER_CREATED", "user", createdUser.id, `Usuario creado: ${createdUser.name}`);
+        await persist(nextData);
+        synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, users: [createdUser], auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario pendiente de sincronizar", nextData, persist);
+      }
+
+      if (!synced) return;
+      setEditingId("");
+      setEditModalVisible(false);
+      setForm(emptyForm);
+      showSuccess(successTitle, successMessage);
+    } catch (error) {
+      showError("Error al guardar", error instanceof Error ? error.message : "No se pudo guardar el usuario.");
+    } finally {
+      setSavingUser(false);
+    }
   };
 
   const edit = (user: User) => {
@@ -140,6 +154,7 @@ export function UsersScreen({
       onClose={cancelEdit}
       onConfirm={() => { void save(); }}
       confirmLabel={editingId ? "Guardar cambios" : "Guardar usuario"}
+      confirming={savingUser}
     >
       {renderUserForm(Boolean(editingId))}
     </EntityEditModal>
@@ -168,13 +183,13 @@ export function UsersScreen({
             onDelete={user.id === currentUser.id ? undefined : () => confirmAction("Eliminar usuario", `Seguro que desea eliminar a ${user.name}? Esta accion quedara registrada en auditoria.`, () => {
               void (async () => {
                 if (user.role === "admin" && data.users.filter((item) => item.role === "admin").length <= 1) {
-                  showMessage("Admin requerido", "Debe existir al menos un usuario administrador.");
+                  showWarning("Admin requerido", "Debe existir al menos un usuario administrador.");
                   return;
                 }
                 const nextData = appendAudit({ ...data, users: data.users.filter((item) => item.id !== user.id), deletedIds: { ...(data.deletedIds || {}), users: Array.from(new Set([...(data.deletedIds?.users || []), user.id])) } }, currentUser, "USER_DELETED", "user", user.id, `Usuario eliminado: ${user.name}`);
                 await persist(nextData);
                 await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, deletions: { users: [user.id] }, auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario eliminado pendiente de sincronizar", nextData, persist);
-                showMessage("Usuario eliminado", "El usuario se elimino con exito.");
+                showSuccess("Usuario eliminado", "El usuario se elimino con exito.");
               })();
             })}
           />

@@ -10,6 +10,7 @@ import { creditBalance } from "../utils/credit";
 import { documentNumber } from "../utils/documents";
 import { formatShortDate } from "../utils/format";
 import { sanitizeDecimalInput } from "../utils/numbers";
+import { AppToast } from "./AppToast";
 
 type CreditPaymentModalProps = {
   amountText: string;
@@ -84,6 +85,7 @@ export function CreditPaymentModal({
           </View>
         </View>
       </KeyboardAvoidingView>
+      <AppToast global />
     </Modal>
   );
 }

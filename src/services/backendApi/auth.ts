@@ -1,9 +1,28 @@
 import { backendBaseUrl, postJson, readJson } from "./http";
 import { BackendCompanyOption, BackendLoginResponse, BackendRegisterPayload, BackendRegisterResponse } from "./types";
 
-export async function loginBackend(backendUrl: string, email: string, password: string, companyId = "") {
+export async function loginBackend(
+  backendUrl: string,
+  identifier: string,
+  password: string,
+  username = "",
+  companyId = "",
+  device?: { deviceId: string; deviceLabel: string; platform: string }
+) {
   const baseUrl = backendBaseUrl(backendUrl);
-  const response = await postJson(`${baseUrl}/api/auth/login`, { email, password, companyId }, "No hay conexion con el servidor para validar la sesion. Puede seguir usando la app con los datos guardados en este dispositivo.");
+
+  const response = await postJson(
+    `${baseUrl}/api/auth/login`,
+    {
+      email: identifier,
+      identifier,
+      username: username.trim(),
+      password,
+      companyId,
+      device
+    },
+    "No hay conexion con el servidor para validar la sesion. Puede seguir usando la app con los datos guardados en este dispositivo."
+  );
   const result = (await readJson(response)) as BackendLoginResponse;
   if (result.companyOptions?.length) {
     const error = new Error(result.error || "Elija la empresa con la que desea trabajar.") as Error & { companyOptions?: BackendCompanyOption[] };

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { QuickClientForm, QuickClientMode } from "../hooks/useQuickSaleClientEditor";
 import { ClientEditModal } from "./ClientEditModal";
 
@@ -9,7 +9,7 @@ type QuickClientEditorProps = {
   lookingUpClient: boolean;
   onChange: React.Dispatch<React.SetStateAction<QuickClientForm>>;
   onLookupIdentification: () => void;
-  onSave: () => void;
+  onSave: () => void | Promise<void>;
   onClose: () => void;
 };
 
@@ -24,6 +24,16 @@ export function QuickClientEditor({
   onClose
 }: QuickClientEditorProps) {
   const isCreating = mode === "create";
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave();
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <ClientEditModal
@@ -32,10 +42,11 @@ export function QuickClientEditor({
       editingId={isCreating ? "" : "quick-sale-client"}
       form={form}
       lookingUpClient={lookingUpClient}
+      saving={saving}
       onChange={onChange}
       onClose={onClose}
       onLookupIdentification={onLookupIdentification}
-      onSave={onSave}
+      onSave={() => { void save(); }}
     />
   );
 }

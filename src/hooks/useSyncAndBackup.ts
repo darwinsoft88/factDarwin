@@ -7,7 +7,15 @@ import {
   REMOTE_REFRESH_THROTTLE_MS,
   WEB_REMOTE_REFRESH_INTERVAL_MS
 } from "../constants/app";
-import { backupAppData, checkBackendHealth, loginBackend, mergeBackendData, restoreAppData } from "../services/backend";
+import {
+  backupAppData,
+  checkBackendHealth,
+  getRemoteSnapshotMetadata,
+  loginBackend,
+  mergeBackendData,
+  restoreAppData
+} from "../services/backend";
+
 import { hashPassword } from "../services/security";
 import { loadSession, saveData, saveSession } from "../database";
 import { migrateStoredPendingSyncRequestIds, updateStoredData } from "../database/storage";
@@ -16,7 +24,7 @@ import { AppData, PendingSyncItem, PendingSyncPatch, User } from "../types";
 import { autoRetrySriDocuments } from "../utils/autoRetrySriDocuments";
 import { autoInvoiceOfflineTickets } from "../utils/autoInvoiceTickets";
 import { mergeAppDataSnapshots } from "../utils/dataMerge";
-import { showMessage } from "../utils/dialogs";
+import { showInfo, showSuccess,showError, showWarning } from "../utils/dialogs";
 import { shortText } from "../utils/format";
 import { applyPendingSyncResult, clearPendingSyncItems, markPendingSyncAttempt, normalizeSyncRequestId, sortPendingSyncFifo } from "../utils/pendingSync";
 import { isSessionTokenExpired } from "../utils/sessionToken";
@@ -29,6 +37,9 @@ import {
 } from "../utils/syncDecisions";
 import { formatAuditDate, formatSyncStatus, SyncState } from "../utils/support";
 import { sanitizeAppData } from "../validation";
+import { getIncrementalDeviceId } from "../services/incrementalDeviceIdentity";
+import { localIncrementalPilotEnabled, runIncrementalCatalogPilot } from "../services/incrementalCatalogSync";
+import { markIncrementalCursorInactive } from "../services/incrementalCursorStorage";
 
 type RefreshReason = "login" | "active" | "manual";
 type ConnectivityReason = "network" | "active" | "pending";
@@ -106,7 +117,8 @@ export function useSyncAndBackup({
     if (!password) {
       throw new Error("Para sincronizar debe iniciar sesion una vez con internet. Luego la app seguira trabajando offline con el token guardado.");
     }
-    const result = await loginBackend(backendUrl, email, password, sessionRef.current?.companyId || "");
+    const deviceId = await getIncrementalDeviceId();
+    const result = await loginBackend(backendUrl, email, password, "", sessionRef.current?.companyId || "", { deviceId, deviceLabel: Platform.OS, platform: Platform.OS });
     const token = result.token || "";
     backendTokenRef.current = token;
     setBackendToken(token);
@@ -282,50 +294,152 @@ export function useSyncAndBackup({
     setData(restored);
     setSyncState("synced");
     if (options?.notify) {
-      showMessage("Datos actualizados", `Se cargaron cambios del servidor (${formatAuditDate(snapshot.updatedAt)}).`);
+      showSuccess("Datos actualizados", `Se cargaron cambios del servidor (${formatAuditDate(snapshot.updatedAt)}).`);
     }
   }, [dataRef, setData, setSyncState]);
 
-  const refreshFromBackend = useCallback(async (reason: RefreshReason = "manual") => {
-    const current = dataRef.current;
-    if (!sessionRef.current || current.autoBackupEnabled === false || !current.backendUrl) return;
-    if (!canLoadRemoteSnapshot(current, Boolean(pendingAutoBackupRef.current), autoBackupRunningRef.current)) {
-      if (reason === "manual") showMessage("Sincronizacion pendiente", "Primero se debe terminar de subir el cambio local antes de cargar datos del servidor.");
+ const refreshFromBackend = useCallback(async (reason: RefreshReason = "manual") => {
+  const current = dataRef.current;
+
+  if (
+    !sessionRef.current ||
+    current.autoBackupEnabled === false ||
+    !current.backendUrl
+  ) {
+    return;
+  }
+
+  if (
+    !canLoadRemoteSnapshot(
+      current,
+      Boolean(pendingAutoBackupRef.current),
+      autoBackupRunningRef.current
+    )
+  ) {
+    if (reason === "manual") {
+      showWarning(
+        "Sincronización pendiente",
+        "Primero se debe terminar de subir el cambio local antes de cargar datos del servidor."
+      );
+    }
+    return;
+  }
+
+  if (remoteRefreshRunningRef.current) return;
+
+  const now = Date.now();
+
+  if (
+    reason !== "manual" &&
+    now - lastRemoteRefreshRef.current < REMOTE_REFRESH_THROTTLE_MS
+  ) {
+    return;
+  }
+
+  remoteRefreshRunningRef.current = true;
+  lastRemoteRefreshRef.current = now;
+
+  try {
+    const token = await ensureBackendToken(current.backendUrl);
+
+    if (localIncrementalPilotEnabled() && sessionRef.current?.companyId) {
+      try {
+        const incremental = await runIncrementalCatalogPilot({ data: current, token, companyId: sessionRef.current.companyId });
+        if (incremental.data) {
+          dataRef.current = incremental.data;
+          setData(incremental.data);
+          setSyncState("synced");
+        }
+        if (incremental.status === "applied" || incremental.status === "bootstrapped") {
+          if (reason === "manual") showSuccess("Catálogos actualizados", `${incremental.applied} cambio(s) incremental(es) aplicado(s).`);
+          return;
+        }
+      } catch (incrementalError) {
+        await markIncrementalCursorInactive(sessionRef.current.companyId);
+        // eslint-disable-next-line no-console
+        console.warn(JSON.stringify({ event: "sync_incremental_snapshot_fallback", code: incrementalError instanceof Error ? incrementalError.message : "UNKNOWN" }));
+      }
+    }
+
+    // Primero consultamos únicamente la fecha del snapshot.
+    const metadata = await getRemoteSnapshotMetadata(
+      current.backendUrl,
+      token
+    );
+
+    if (!metadata.updatedAt) {
+      if (reason === "manual") {
+        showInfo(
+          "Sin copia remota",
+          "El servidor todavía no tiene una copia de datos para esta empresa."
+        );
+      }
       return;
     }
-    if (remoteRefreshRunningRef.current) return;
 
-    const now = Date.now();
-    if (reason !== "manual" && now - lastRemoteRefreshRef.current < REMOTE_REFRESH_THROTTLE_MS) return;
-    remoteRefreshRunningRef.current = true;
-    lastRemoteRefreshRef.current = now;
+    const remoteUpdatedAt = new Date(metadata.updatedAt).getTime();
+    const localSyncedAt = current.autoBackupLastAt
+      ? new Date(current.autoBackupLastAt).getTime()
+      : 0;
 
-    try {
-      const token = await ensureBackendToken(current.backendUrl);
-      const snapshot = await restoreAppData<AppData>(current.backendUrl, token);
-      if (!snapshot?.data) return;
-
-      const remoteUpdatedAt = new Date(snapshot.updatedAt).getTime();
-      const localSyncedAt = current.autoBackupLastAt ? new Date(current.autoBackupLastAt).getTime() : 0;
-      if (!Number.isFinite(remoteUpdatedAt) || remoteUpdatedAt <= localSyncedAt + 1000) {
-        if (reason === "manual") showMessage("Datos al dia", "Este dispositivo ya tiene la ultima copia del servidor.");
-        return;
+    if (
+      !Number.isFinite(remoteUpdatedAt) ||
+      remoteUpdatedAt <= localSyncedAt + 1000
+    ) {
+      if (reason === "manual") {
+        showSuccess(
+          "Datos al día",
+          "Este dispositivo ya tiene la última copia del servidor."
+        );
       }
-
-      await applyRemoteSnapshot({ data: snapshot.data, updatedAt: snapshot.updatedAt }, { notify: reason === "manual" });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudo actualizar desde el servidor.";
-      const persisted = await updateStoredData((current) => ({
-        ...current,
-        autoBackupLastError: shortText(`Actualizacion servidor: ${message}`, 180)
-      }));
-      dataRef.current = persisted;
-      setData(persisted);
-      setSyncState("error");
-    } finally {
-      remoteRefreshRunningRef.current = false;
+      return;
     }
-  }, [applyRemoteSnapshot, dataRef, ensureBackendToken, sessionRef, setData, setSyncState]);
+
+    // Solo descargamos los 250 KB cuando realmente hubo cambios.
+    const snapshot = await restoreAppData<AppData>(
+      current.backendUrl,
+      token
+    );
+
+    if (!snapshot?.data) return;
+
+    await applyRemoteSnapshot(
+      {
+        data: snapshot.data,
+        updatedAt: snapshot.updatedAt
+      },
+      {
+        notify: reason === "manual"
+      }
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "No se pudo actualizar desde el servidor.";
+
+    const persisted = await updateStoredData((stored) => ({
+      ...stored,
+      autoBackupLastError: shortText(
+        `Actualización servidor: ${message}`,
+        180
+      )
+    }));
+
+    dataRef.current = persisted;
+    setData(persisted);
+    setSyncState("error");
+  } finally {
+    remoteRefreshRunningRef.current = false;
+  }
+}, [
+  applyRemoteSnapshot,
+  dataRef,
+  ensureBackendToken,
+  sessionRef,
+  setData,
+  setSyncState
+]);
 
   const runManualSync = useCallback(async () => {
     setAppMenuVisible(false);
@@ -386,7 +500,7 @@ export function useSyncAndBackup({
         if (autoInvoiceResult.processed > 0) {
           await runAutoBackup(dataRef.current);
           if (autoInvoiceResult.authorized > 0) {
-            showMessage("Tickets facturados", `${autoInvoiceResult.authorized} ticket(s) offline fueron facturados automaticamente.`);
+            showSuccess("Tickets facturados", `${autoInvoiceResult.authorized} ticket(s) offline fueron facturados automaticamente.`);
           }
         }
         const retryBaseData = dataRef.current;
@@ -400,10 +514,10 @@ export function useSyncAndBackup({
         if (autoRetryResult.processed > 0 || autoRetryResult.expired > 0) {
           await runAutoBackup(dataRef.current);
           if (autoRetryResult.expired > 0) {
-            showMessage("SRI fuera de fecha", `${autoRetryResult.expired} documento(s) se marcaron como anulados por estar fuera del dia permitido.`);
+            showWarning("SRI fuera de fecha", `${autoRetryResult.expired} documento(s) se marcaron como anulados por estar fuera del dia permitido.`);
           }
           if (autoRetryResult.authorized > 0) {
-            showMessage("SRI actualizado", `${autoRetryResult.authorized} documento(s) fueron autorizados en reintento automatico.`);
+            showSuccess("SRI actualizado", `${autoRetryResult.authorized} documento(s) fueron autorizados en reintento automatico.`);
           }
         }
       }
@@ -425,7 +539,7 @@ export function useSyncAndBackup({
     try {
       await runManualSync();
       await syncAfterConnectivityRestored("pending");
-      showMessage("Sincronizacion", formatSyncStatus(syncState, dataRef.current));
+      showSuccess("Sincronizacion", formatSyncStatus(syncState, dataRef.current));
     } finally {
       setSyncActionLoading(false);
     }
@@ -435,9 +549,9 @@ export function useSyncAndBackup({
     setSyncActionLoading(true);
     try {
       const health = await checkBackendHealth(dataRef.current.backendUrl);
-      showMessage("Servidor OK", `Backend responde: ${health.ok ? "SI" : "NO"}\nServicio: ${health.service || "FactuDarwin"}\nBase: ${health.database?.engine || "desconocida"}`);
+      showSuccess("Servidor OK", `Backend responde: ${health.ok ? "SI" : "NO"}\nServicio: ${health.service || "FactuDarwin"}\nBase: ${health.database?.engine || "desconocida"}`);
     } catch (error) {
-      showMessage("Servidor no disponible", error instanceof Error ? error.message : "No se pudo probar el servidor.");
+      showError("Servidor no disponible", error instanceof Error ? error.message : "No se pudo probar el servidor.");
     } finally {
       setSyncActionLoading(false);
     }

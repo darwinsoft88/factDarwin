@@ -26,12 +26,14 @@ type InventoryMovementSectionProps = {
   showSaveButton?: boolean;
   filteredProducts: Product[];
   productId: string;
+  productPickerVisible: boolean;
   productSearch: string;
   quantity: string;
   reason: string;
   selectedProduct?: Product;
   type: InventoryMovementType;
   onProductChange: (value: string) => void;
+  onProductPickerVisibleChange: (visible: boolean) => void;
   onProductSearchChange: (value: string) => void;
   onQuantityChange: (value: string) => void;
   onReasonChange: (value: string) => void;
@@ -44,19 +46,20 @@ export function InventoryMovementSection({
   showSaveButton = true,
   filteredProducts,
   onProductChange,
+  onProductPickerVisibleChange,
   onProductSearchChange,
   onQuantityChange,
   onReasonChange,
   onSave,
   onTypeChange,
   productId,
+  productPickerVisible,
   productSearch,
   quantity,
   reason,
   selectedProduct,
   type
 }: InventoryMovementSectionProps) {
-  const [productPickerVisible, setProductPickerVisible] = React.useState(false);
   const [productPage, setProductPage] = React.useState(1);
   const productPagination = React.useMemo(() => {
     const totalPages = Math.max(1, Math.ceil(filteredProducts.length / LIST_BATCH_SIZE));
@@ -72,20 +75,16 @@ export function InventoryMovementSection({
     setProductPage(1);
   }, [productSearch]);
 
-  React.useEffect(() => {
-    if (productPickerVisible) setProductPage(1);
-  }, [productPickerVisible]);
-
   const selectProduct = (id: string) => {
     onProductChange(id);
-    setProductPickerVisible(false);
+    onProductPickerVisibleChange(false);
   };
 
   const content = (
     <>
       <View style={styles.inputGroup}>
         <Text style={styles.label}>Producto</Text>
-        <Pressable style={styles.productSelectButton} onPress={() => setProductPickerVisible(true)}>
+        <Pressable style={styles.productSelectButton} onPress={() => onProductPickerVisibleChange(true)}>
           <View style={styles.productIcon}>
             <MaterialCommunityIcons name="package-variant-closed" size={16} color="#047857" />
           </View>
@@ -96,6 +95,17 @@ export function InventoryMovementSection({
           <MaterialCommunityIcons name="magnify" size={20} color="#0f766e" />
         </Pressable>
       </View>
+      <InventoryProductPickerModal
+        filteredProducts={filteredProducts}
+        onClose={() => onProductPickerVisibleChange(false)}
+        onPageChange={setProductPage}
+        onProductSearchChange={onProductSearchChange}
+        onSelectProduct={selectProduct}
+        productId={productId}
+        productPagination={productPagination}
+        productSearch={productSearch}
+        visible={productPickerVisible}
+      />
       <Select
         label="Tipo"
         value={type}
@@ -110,17 +120,6 @@ export function InventoryMovementSection({
       <Input label={type === "ajuste" ? "Nuevo stock" : "Cantidad"} value={quantity} onChangeText={(value) => onQuantityChange(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
       <Input label="Motivo" value={reason} onChangeText={onReasonChange} placeholder={movementReason(type)} />
       {showSaveButton ? <PrimaryButton label="Guardar movimiento" onPress={onSave} /> : null}
-      <InventoryProductPickerModal
-        filteredProducts={filteredProducts}
-        onClose={() => setProductPickerVisible(false)}
-        onPageChange={setProductPage}
-        onProductSearchChange={onProductSearchChange}
-        onSelectProduct={selectProduct}
-        productId={productId}
-        productPagination={productPagination}
-        productSearch={productSearch}
-        visible={productPickerVisible}
-      />
     </>
   );
 

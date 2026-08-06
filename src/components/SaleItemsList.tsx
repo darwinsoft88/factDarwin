@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from "react-native";
+import { Animated, PanResponder, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { money, calculateLineDiscount, calculateLineSubtotal, calculateLineTax, calculateLineTotal } from "../sri";
 import { SaleItem } from "../types";
 import { catalogItemBadge, catalogItemIcon, isServiceItem } from "../utils/catalogItems";
@@ -38,7 +38,7 @@ export function SaleItemsList({ items, onAdjustQuantity, onEdit, onDelete }: Sal
       </View>
       <View style={styles.gestureHint}>
         <MaterialCommunityIcons name="gesture-swipe-left" size={14} color="#0f766e" />
-        <Text style={styles.gestureHintText}>Toque un item para editar. Deslice fuerte a la izquierda para eliminar.</Text>
+        <Text style={styles.gestureHintText}>Toque un item para editar. Deslice a la izquierda para eliminar.</Text>
       </View>
       {items.map((item, index) => {
         const rowKey = `${item.sourceLineKey || item.productId}-${item.code}-${index}`;
@@ -94,10 +94,17 @@ function SwipeSaleItemRow({ item, index, isLast, onAdjustQuantity, onEdit, onDel
       onDelete(index);
     });
   };
-
+// para que funcione el gesto de deslizar para eliminar, se utiliza un PanResponder que detecta el movimiento horizontal del dedo sobre la fila del item. Si el desplazamiento horizontal es suficiente (más del 35% del ancho de la fila), se llama a la función deleteWithSlide para eliminar el item. Si no, se cierra la fila volviendo a su posición original.
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_event, gesture) => Math.abs(gesture.dx) > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_event, gesture) => {
+        if (Platform.OS === "web") {
+          return Math.abs(gesture.dx) > 5 && Math.abs(gesture.dx) > Math.abs(gesture.dy);
+        }
+        return Math.abs(gesture.dx) > 10 && Math.abs(gesture.dx) > Math.abs(gesture.dy);
+      },
+      onPanResponderTerminationRequest: () => false,
       onPanResponderMove: (_event, gesture) => {
         const rowWidth = Math.max(rowWidthRef.current, 320);
         const nextValue = Math.max(-rowWidth, Math.min(0, gesture.dx));
@@ -105,7 +112,9 @@ function SwipeSaleItemRow({ item, index, isLast, onAdjustQuantity, onEdit, onDel
       },
       onPanResponderRelease: (_event, gesture) => {
         const rowWidth = Math.max(rowWidthRef.current, 320);
-        const shouldDelete = gesture.dx <= -(rowWidth * 0.45);
+        const shouldDelete = Platform.OS === "web"
+          ? gesture.dx <= -(rowWidth * 0.2) && Math.abs(gesture.dx) > 10
+          : gesture.dx <= -(rowWidth * 0.25) && Math.abs(gesture.dx) > 15;
         if (shouldDelete) deleteWithSlide();
         else closeRow();
       },

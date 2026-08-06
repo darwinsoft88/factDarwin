@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { ProductEditModal } from "../components/ProductEditModal";
 import { ProductFormValues } from "../components/ProductForm";
 import { ProductListItemProps, ProductListSection } from "../components/ProductListSection";
@@ -9,7 +9,12 @@ import { AppData, CatalogItemType, Product, User } from "../types";
 import { productCost, productMinStock } from "../utils/accounting";
 import { canDeleteCatalog, canEditCatalog } from "../utils/appAccess";
 import { appendAudit } from "../utils/audit";
-import { confirmAction, showMessage } from "../utils/dialogs";
+import {
+  confirmAction,
+  showError,
+  showSuccess,
+  showWarning
+} from "../utils/dialogs";
 import { isInventoryProduct, isServiceItem } from "../utils/catalogItems";
 import { createInventoryMovement } from "../utils/inventory";
 import { generateId } from "../utils/id";
@@ -45,6 +50,7 @@ export function ProductsScreen({
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState("");
   const [editModalVisible, setEditModalVisible] = useState(false);
+  const [savingProduct, setSavingProduct] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [productScannerVisible, setProductScannerVisible] = useState(false);
   const [productPage, setProductPage] = useState(1);
@@ -64,28 +70,30 @@ export function ProductsScreen({
 
   const verifyScannedProductCode = () => {
     if (!canEdit) {
-      Alert.alert("Acceso restringido", "Su usuario no tiene permiso para modificar items.");
+      showWarning("Acceso restringido", "Su usuario no tiene permiso para modificar items.");
       return;
     }
 
     const code = normalizeProductCode(form.code);
     if (!code) {
-      Alert.alert("Codigo requerido", "Escanee o ingrese el codigo de barras.");
+      showWarning("Codigo requerido", "Escanee o ingrese el codigo de barras.");
       return;
     }
     const duplicate = findDuplicateProductCode(data.products, code, editingId);
     setForm({ ...form, code });
     if (duplicate) {
       setProductSearch(code);
-      Alert.alert("Codigo ya registrado", `El codigo ${duplicate.code} ya pertenece a ${duplicate.name}.`);
+      showWarning("Codigo ya registrado", `El codigo ${duplicate.code} ya pertenece a ${duplicate.name}.`);
       return;
     }
-    showMessage("Codigo listo", `Codigo ${code} disponible para guardar.`);
+    showSuccess("Codigo listo", `Codigo ${code} disponible para guardar.`);
   };
 
   const save = async (options?: { forceLoss?: boolean }) => {
+    if (savingProduct) return;
+
     if (!canEdit) {
-      Alert.alert("Acceso restringido", "Su usuario no tiene permiso para modificar productos.");
+      showWarning("Acceso restringido", "Su usuario no tiene permiso para modificar productos.");
       return;
     }
 
@@ -99,22 +107,22 @@ export function ProductsScreen({
     const productData = { itemType, code: normalizeProductCode(form.code), name: form.name.trim(), price, cost, stock, minStock, ivaRate: Number(form.ivaRate), updatedAt: new Date().toISOString() };
 
     if (!productData.code || !productData.name || !Number.isFinite(price) || price <= 0) {
-      Alert.alert("Datos incompletos", `Ingrese codigo, nombre y precio del ${itemName}.`);
+      showWarning("Datos incompletos", `Ingrese codigo, nombre y precio del ${itemName}.`);
       return;
     }
 
     if (!isService && (!Number.isFinite(stock) || stock < 0)) {
-      Alert.alert("Stock invalido", "Ingrese un stock mayor o igual a cero.");
+      showWarning("Stock invalido", "Ingrese un stock mayor o igual a cero.");
       return;
     }
     if (!isService && (!Number.isFinite(cost) || cost < 0 || !Number.isFinite(minStock) || minStock < 0)) {
-      Alert.alert("Costos invalidos", "Ingrese costo y stock minimo mayor o igual a cero.");
+      showWarning("Costos invalidos", "Ingrese costo y stock minimo mayor o igual a cero.");
       return;
     }
 
     const duplicate = findDuplicateProductCode(data.products, productData.code, editingId);
     if (duplicate) {
-      Alert.alert("Codigo duplicado", `Ya existe un item con el codigo ${duplicate.code}: ${duplicate.name}.`);
+      showWarning("Codigo duplicado", `Ya existe un item con el codigo ${duplicate.code}: ${duplicate.name}.`);
       return;
     }
 
@@ -130,48 +138,61 @@ export function ProductsScreen({
       return;
     }
 
-    if (editingId) {
-      const currentProduct = data.products.find((product) => product.id === editingId);
-      const movement =
-        currentProduct && isInventoryProduct(productData) && currentProduct.stock !== productData.stock
-          ? createInventoryMovement(currentProduct, "ajuste", Math.abs(productData.stock - currentProduct.stock), productData.stock, "Ajuste desde productos", user.id)
-          : null;
-      const updatedProduct = { ...currentProduct, ...productData, id: editingId } as Product;
-      const nextData = appendAudit({
-        ...data,
-        products: data.products.map((product) => (product.id === editingId ? updatedProduct : product)),
-        inventoryMovements: movement ? [movement, ...(data.inventoryMovements || [])] : data.inventoryMovements
-      }, user, "PRODUCT_UPDATED", "product", editingId, `Producto actualizado: ${productData.code} - ${productData.name}`, { stockBefore: currentProduct?.stock, stockAfter: productData.stock });
-      await persist(nextData);
-      await syncPatchToBackend(data.backendUrl, backendToken, {
-        baseData: data,
-        products: [updatedProduct],
-        inventoryMovements: movement ? [movement] : [],
-        auditLogs: nextData.auditLogs.slice(0, 1)
-      }, "Producto pendiente de sincronizar", nextData, persist);
-      showMessage(isService ? "Servicio actualizado" : "Producto actualizado", `El ${itemName} se edito con exito.`);
-    } else {
-      const product: Product = { id: generateId(), ...productData };
-      const movement = isInventoryProduct(product) && product.stock > 0 ? createInventoryMovement(product, "entrada", product.stock, product.stock, "Stock inicial", user.id, 0) : null;
-      const nextData = appendAudit({ ...data, products: [product, ...data.products], inventoryMovements: movement ? [movement, ...(data.inventoryMovements || [])] : data.inventoryMovements }, user, "PRODUCT_CREATED", "product", product.id, `Producto creado: ${product.code} - ${product.name}`, { stock: product.stock });
-      await persist(nextData);
-      await syncPatchToBackend(data.backendUrl, backendToken, {
-        baseData: data,
-        products: [product],
-        inventoryMovements: movement ? [movement] : [],
-        auditLogs: nextData.auditLogs.slice(0, 1)
-      }, "Producto pendiente de sincronizar", nextData, persist);
-      showMessage(isService ? "Servicio guardado" : "Producto guardado", `El ${itemName} se guardo con exito.`);
-    }
+    setSavingProduct(true);
+    try {
+      const successTitle = editingId
+        ? (isService ? "Servicio actualizado" : "Producto actualizado")
+        : (isService ? "Servicio guardado" : "Producto guardado");
+      const successMessage = editingId ? `El ${itemName} se edito con exito.` : `El ${itemName} se guardo con exito.`;
+      let synced = false;
 
-    setEditingId("");
-    setEditModalVisible(false);
-    setForm(emptyForm);
+      if (editingId) {
+        const currentProduct = data.products.find((product) => product.id === editingId);
+        const movement =
+          currentProduct && isInventoryProduct(productData) && currentProduct.stock !== productData.stock
+            ? createInventoryMovement(currentProduct, "ajuste", Math.abs(productData.stock - currentProduct.stock), productData.stock, "Ajuste desde productos", user.id)
+            : null;
+        const updatedProduct = { ...currentProduct, ...productData, id: editingId } as Product;
+        const nextData = appendAudit({
+          ...data,
+          products: data.products.map((product) => (product.id === editingId ? updatedProduct : product)),
+          inventoryMovements: movement ? [movement, ...(data.inventoryMovements || [])] : data.inventoryMovements
+        }, user, "PRODUCT_UPDATED", "product", editingId, `Producto actualizado: ${productData.code} - ${productData.name}`, { stockBefore: currentProduct?.stock, stockAfter: productData.stock });
+        await persist(nextData);
+        synced = await syncPatchToBackend(data.backendUrl, backendToken, {
+          baseData: data,
+          products: [updatedProduct],
+          inventoryMovements: movement ? [movement] : [],
+          auditLogs: nextData.auditLogs.slice(0, 1)
+        }, "Producto pendiente de sincronizar", nextData, persist);
+      } else {
+        const product: Product = { id: generateId(), ...productData };
+        const movement = isInventoryProduct(product) && product.stock > 0 ? createInventoryMovement(product, "entrada", product.stock, product.stock, "Stock inicial", user.id, 0) : null;
+        const nextData = appendAudit({ ...data, products: [product, ...data.products], inventoryMovements: movement ? [movement, ...(data.inventoryMovements || [])] : data.inventoryMovements }, user, "PRODUCT_CREATED", "product", product.id, `Producto creado: ${product.code} - ${product.name}`, { stock: product.stock });
+        await persist(nextData);
+        synced = await syncPatchToBackend(data.backendUrl, backendToken, {
+          baseData: data,
+          products: [product],
+          inventoryMovements: movement ? [movement] : [],
+          auditLogs: nextData.auditLogs.slice(0, 1)
+        }, "Producto pendiente de sincronizar", nextData, persist);
+      }
+
+      if (!synced) return;
+      setEditingId("");
+      setEditModalVisible(false);
+      setForm(emptyForm);
+      showSuccess(successTitle, successMessage);
+    } catch (error) {
+      showError("Error al guardar", error instanceof Error ? error.message : `No se pudo guardar el ${itemName}.`);
+    } finally {
+      setSavingProduct(false);
+    }
   };
 
   const edit = (product: Product) => {
     if (!canEdit) {
-      Alert.alert("Acceso restringido", "Su usuario no tiene permiso para modificar productos.");
+      showWarning("Acceso restringido", "Su usuario no tiene permiso para modificar productos.");
       return;
     }
 
@@ -191,7 +212,7 @@ export function ProductsScreen({
 
   const openCreate = () => {
     if (!canEdit) {
-      Alert.alert("Acceso restringido", "Su usuario no tiene permiso para crear productos.");
+      showWarning("Acceso restringido", "Su usuario no tiene permiso para crear productos.");
       return;
     }
     setEditingId("");
@@ -212,7 +233,7 @@ export function ProductsScreen({
       data.sales.some((sale) => sale.items.some((item) => item.productId === product.id)) ||
       (data.guides || []).some((guide) => guide.items.some((item) => item.productId === product.id));
     if (hasFiscalHistory) {
-      Alert.alert("Producto protegido", "Este producto ya tiene ventas o guias. Para conservar el historial fiscal no se puede eliminar.");
+      showWarning("Producto protegido", "Este producto ya tiene ventas o guias. Para conservar el historial fiscal no se puede eliminar.");
       return;
     }
     confirmAction("Eliminar producto", `Seguro que desea eliminar ${product.code} - ${product.name}? Esta accion quedara registrada en auditoria.`, () => {
@@ -234,7 +255,7 @@ export function ProductsScreen({
           deletions: { products: [product.id], inventoryMovements: inventoryMovementIds },
           auditLogs: nextData.auditLogs.slice(0, 1)
         }, "Producto eliminado pendiente de sincronizar", nextData, persist);
-        showMessage("Producto eliminado", "El producto se elimino con exito.");
+        showSuccess("Producto eliminado", "El producto se elimino con exito.");
       })();
     });
   };
@@ -267,9 +288,9 @@ export function ProductsScreen({
           const duplicate = findDuplicateProductCode(data.products, normalized, editingId);
           if (duplicate) {
             setProductSearch(normalized);
-            Alert.alert("Codigo ya registrado", `El codigo ${duplicate.code} ya pertenece a ${duplicate.name}.`);
+            showWarning("Codigo ya registrado", `El codigo ${duplicate.code} ya pertenece a ${duplicate.name}.`);
           } else {
-            showMessage("Codigo escaneado", `Codigo ${normalized} listo para guardar.`);
+            showSuccess("Codigo escaneado", `Codigo ${normalized} listo para guardar.`);
           }
         }}
       />
@@ -278,6 +299,7 @@ export function ProductsScreen({
           editingId={editingId}
           editingProductName={editingProductName}
           form={form}
+          saving={savingProduct}
           onChange={setForm}
           onClose={cancelEdit}
           onOpenScanner={() => setProductScannerVisible(true)}

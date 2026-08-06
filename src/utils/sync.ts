@@ -14,6 +14,55 @@ export type SyncMutationOptions = {
   persistMutation: SyncMutationWriter;
 };
 
+export type SyncPatchResult = {
+  confirmed: boolean;
+  localCleanupPending: boolean;
+  errorMessage?: string;
+};
+
+export async function syncPatchToBackendResult(
+  backendUrl: string,
+  backendToken: string,
+  patch: IncrementalPatch,
+  pendingTitle: string
+): Promise<SyncPatchResult> {
+  const identifiedPatch = identifyIncrementalPatch(patch);
+  const pendingItem = buildPendingSyncItem(identifiedPatch, pendingTitle, "Pendiente de envio.");
+  const persisted = await updateStoredData((current) => appendPendingSync(current, pendingItem));
+  const durablePending = findPendingSyncRequest(persisted, identifiedPatch.requestId);
+  if (!durablePending) throw new Error("No se pudo confirmar la persistencia durable del pendiente de sincronizacion.");
+
+  try {
+    await mergeBackendData(backendUrl, durablePending.patch as IdentifiedIncrementalPatch, backendToken);
+  } catch (error) {
+    const errorMessage = userFriendlyActionError(error, "sync");
+    try {
+      await updateStoredData((current) => markPendingRequestError(current, identifiedPatch.requestId, errorMessage));
+    } catch {
+      // El pendiente original ya es durable; el error de marcado no cambia el resultado remoto.
+    }
+    return {
+      confirmed: false,
+      localCleanupPending: true,
+      errorMessage
+    };
+  }
+
+  try {
+    await updateStoredData((current) => clearPendingSyncRequest(current, identifiedPatch.requestId));
+    return {
+      confirmed: true,
+      localCleanupPending: false
+    };
+  } catch (error) {
+    return {
+      confirmed: true,
+      localCleanupPending: true,
+      errorMessage: userFriendlyActionError(error, "sync")
+    };
+  }
+}
+
 async function syncPatchToBackendInternal(backendUrl: string, backendToken: string, patch: IncrementalPatch, pendingTitle: string, localData?: AppData, persist?: (data: AppData) => Promise<void>, mutationOptions?: SyncMutationOptions) {
   void localData;
   void persist;

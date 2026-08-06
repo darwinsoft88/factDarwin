@@ -2,6 +2,7 @@ const crypto = require("node:crypto");
 const { DOMParser } = require("@xmldom/xmldom");
 const config = require("./config");
 const { buildRidePdf } = require("./ride-pdf");
+const { getTenantLogo } = require("./tenant-assets");
 
 class EmailBuildError extends Error {
   constructor(code, message, retryable = false) {
@@ -24,17 +25,18 @@ async function buildDocumentEmail(operation, options = {}) {
     const document = snapshot.document || {};
     const client = snapshot.client || {};
     const issuer = snapshot.issuer || {};
+    const tenantLogo = resolveTenantLogo(operation.companyId);
     const recipient = normalizeRecipient(operation.recipientEmail || operation.payload?.delivery?.recipientEmail);
     const xmlAttachment = buildXmlAttachment(documentType, document, limits);
     emit("email_xml_validated", attachmentLog(xmlAttachment, startedAt));
 
     let pdf;
     try {
-      pdf = buildRidePdf({
+      pdf = await buildRidePdf({
         documentType,
         document,
         client,
-        issuer,
+        issuer: tenantLogo ? { ...issuer, logoPath: tenantLogo.filePath } : issuer,
         sourceDocument: snapshot.sourceDocument || null
       });
     } catch (error) {
@@ -83,6 +85,14 @@ async function buildDocumentEmail(operation, options = {}) {
       retryable: buildError.retryable
     });
     throw buildError;
+  }
+}
+
+function resolveTenantLogo(companyId) {
+  try {
+    return companyId ? getTenantLogo(companyId) : null;
+  } catch {
+    return null;
   }
 }
 

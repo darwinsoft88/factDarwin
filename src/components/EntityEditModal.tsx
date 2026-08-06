@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Animated, BackHandler, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { useKeyboardInset } from "../hooks/useKeyboardInset";
+import { AppOverlayPortal } from "./AppToast";
 
 type EntityEditModalProps = {
   visible: boolean;
@@ -11,7 +12,9 @@ type EntityEditModalProps = {
   confirmLabel?: string;
   cancelLabel?: string;
   closeLabel?: string;
+  confirming?: boolean;
   children: React.ReactNode;
+  onClosed?: () => void;
   onClose: () => void;
   onConfirm: () => void;
 };
@@ -23,16 +26,56 @@ export function EntityEditModal({
   confirmLabel = "Guardar cambios",
   cancelLabel = "Cancelar",
   closeLabel = "Cerrar",
+  confirming = false,
   children,
+  onClosed,
   onClose,
   onConfirm
 }: EntityEditModalProps) {
   const keyboardInset = useKeyboardInset();
   const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const [rendered, setRendered] = useState(visible);
+  const opacity = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  const wasVisible = useRef(visible);
+  const onClosedRef = useRef(onClosed);
+
+  useEffect(() => {
+    onClosedRef.current = onClosed;
+  }, [onClosed]);
+
+  useEffect(() => {
+    if (visible) {
+      wasVisible.current = true;
+      setRendered(true);
+      Animated.timing(opacity, { duration: 180, toValue: 1, useNativeDriver: Platform.OS !== "web" }).start();
+      return () => opacity.stopAnimation();
+    }
+
+    if (!wasVisible.current) return undefined;
+    wasVisible.current = false;
+    Animated.timing(opacity, { duration: 180, toValue: 0, useNativeDriver: Platform.OS !== "web" }).start(({ finished }) => {
+      if (!finished) return;
+      setRendered(false);
+      onClosedRef.current?.();
+    });
+    return () => opacity.stopAnimation();
+  }, [opacity, visible]);
+
+  useEffect(() => {
+    if (!visible) return undefined;
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      onClose();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [onClose, visible]);
+
+  if (!rendered) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+    <AppOverlayPortal>
+      <Animated.View accessibilityViewIsModal style={[styles.portalModal, { opacity }]}>
+        <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
         <View style={[styles.backdrop, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_SAFE_BOTTOM_PADDING }]}>
           <View style={styles.modal}>
             <View style={styles.header}>
@@ -56,20 +99,24 @@ export function EntityEditModal({
                   <MaterialCommunityIcons name="arrow-left" size={16} color="#334155" />
                   <Text style={styles.cancelText}>{cancelLabel}</Text>
                 </Pressable>
-                <Pressable style={styles.confirmButton} onPress={onConfirm}>
+                <Pressable disabled={confirming} style={[styles.confirmButton, confirming && styles.confirmButtonDisabled]} onPress={onConfirm}>
                   <MaterialCommunityIcons name="content-save-outline" size={17} color="#ffffff" />
-                  <Text style={styles.confirmText}>{confirmLabel}</Text>
+                  <Text style={styles.confirmText}>{confirming ? "Guardando..." : confirmLabel}</Text>
                 </Pressable>
               </View>
             </ScrollView>
           </View>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
+      </Animated.View>
+    </AppOverlayPortal>
   );
 }
 
 const styles = StyleSheet.create({
+  portalModal: {
+    ...StyleSheet.absoluteFillObject
+  },
   keyboardAvoiding: {
     flex: 1
   },
@@ -165,6 +212,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     flexDirection: "row",
     gap: 6
+  },
+  confirmButtonDisabled: {
+    opacity: 0.65
   },
   confirmText: {
     color: "#ffffff",

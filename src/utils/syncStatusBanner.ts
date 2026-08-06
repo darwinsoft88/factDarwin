@@ -17,6 +17,10 @@ export type SyncStatusBannerView = {
   viewLabel?: string;
 };
 
+export function countUniqueAttentionDocuments(...documentIdGroups: string[][]) {
+  return new Set(documentIdGroups.flat().filter(Boolean)).size;
+}
+
 export function buildSyncStatusBannerView({
   documentCount,
   hasError,

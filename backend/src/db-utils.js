@@ -368,9 +368,15 @@ function applySnapshotPatch(currentData, patch = {}) {
     };
   }
 
-  for (const field of ["users", "sales", "guides", "receivedRetentions", "cashClosings", "creditPayments", "creditAdjustments"]) {
+  for (const field of ["users", "sales", "guides", "receivedRetentions", "cashClosings", "creditAdjustments"]) {
     data[field] = mergeById(data[field] || [], patch[field] || []);
   }
+
+  data.creditPayments = mergeCreditPayments(
+    data.creditPayments || [],
+    patch.creditPayments || []
+  );
+
   data.clients = mergeByLatestUpdatedAt(data.clients || [], patch.clients || []);
   data.products = mergeByLatestUpdatedAt(data.products || [], patch.products || []);
 
@@ -510,6 +516,7 @@ function assertNoCreditOverpayments(data) {
     const originalCredit = Math.max(0, roundMoney(Number(sale.total || 0) - initialPayments));
     const paid = paidBySale.get(sale.id) || 0;
     if (paid > originalCredit + 0.009) {
+
       throwBadSnapshot(`El abono supera el saldo real de ${sale.sequence || "la factura"}. Sincronice datos antes de cobrar nuevamente.`);
     }
   }
@@ -713,6 +720,51 @@ function mergeById(currentItems, incomingItems) {
   incomingItems.forEach((item) => {
     if (item?.id) byId.set(item.id, item);
   });
+  return Array.from(byId.values());
+}
+
+function mergeCreditPayments(currentItems = [], incomingItems = []) {
+  const byId = new Map();
+
+  for (const payment of currentItems) {
+    if (payment?.id) byId.set(payment.id, payment);
+  }
+
+  for (const incoming of incomingItems) {
+    if (!incoming?.id) continue;
+
+    const current = byId.get(incoming.id);
+
+    if (!current) {
+      byId.set(incoming.id, incoming);
+      continue;
+    }
+
+    const currentVoided = Boolean(current.voidedAt);
+    const incomingVoided = Boolean(incoming.voidedAt);
+
+    if (currentVoided && !incomingVoided) {
+      continue;
+    }
+
+    if (!currentVoided && incomingVoided) {
+      byId.set(incoming.id, incoming);
+      continue;
+    }
+
+    if (currentVoided && incomingVoided) {
+      byId.set(
+        incoming.id,
+        timestampOf(incoming.voidedAt) >= timestampOf(current.voidedAt)
+          ? incoming
+          : current
+      );
+      continue;
+    }
+
+    byId.set(incoming.id, incoming);
+  }
+
   return Array.from(byId.values());
 }
 

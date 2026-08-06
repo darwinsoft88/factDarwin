@@ -12,6 +12,7 @@ import { AppData, Client, PaymentMethod, Sale } from "../types";
 import { creditBalance, creditSaleScopeText } from "../utils/credit";
 import { documentNumber } from "../utils/documents";
 import { formatShortDate } from "../utils/format";
+import { AppToast } from "./AppToast";
 
 type CreditBulkPaymentModalProps = {
   bulkClient?: Client;
@@ -142,6 +143,7 @@ export function CreditBulkPaymentModal({
           </View>
         </View>
       </KeyboardAvoidingView>
+      <AppToast />
     </Modal>
   );
 }

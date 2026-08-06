@@ -17,6 +17,8 @@ export type AuthState = {
   setRecoverStatus: Dispatch<SetStateAction<{ tone: "info" | "error" | "success"; message: string } | null>>;
   loginStatus: { tone: "info" | "error" | "success"; message: string } | null;
   setLoginStatus: Dispatch<SetStateAction<{ tone: "info" | "error" | "success"; message: string } | null>>;
+  loggingIn: boolean;
+  setLoggingIn: Dispatch<SetStateAction<boolean>>;
   loginErrorModalMessage: string;
   setLoginErrorModalMessage: (message: string) => void;
   passwordChangeVisible: boolean;
@@ -39,6 +41,8 @@ export type AuthState = {
   setPendingLogin: React.Dispatch<React.SetStateAction<{ data: AppData; user: User; token: string; passwordHash?: string } | null>>;
   email: string;
   setEmail: React.Dispatch<React.SetStateAction<string>>;
+  username: string;
+  setUsername: React.Dispatch<React.SetStateAction<string>>;
   password: string;
   setPassword: React.Dispatch<React.SetStateAction<string>>;
   showLoginPassword: boolean;
@@ -83,6 +87,7 @@ export function useAuthState(initialBackendUrl: string): AuthState {
   const [recoveringPassword, setRecoveringPassword] = useState(false);
   const [recoverStatus, setRecoverStatus] = useState<{ tone: "info" | "error" | "success"; message: string } | null>(null);
   const [loginStatus, setLoginStatus] = useState<{ tone: "info" | "error" | "success"; message: string } | null>(null);
+  const [loggingIn, setLoggingIn] = useState(false);
   const [loginErrorModalMessage, setLoginErrorModalMessage] = useState("");
   const [passwordChangeVisible, setPasswordChangeVisible] = useState(false);
   const [newPasswordForm, setNewPasswordForm] = useState({ password: "", confirm: "" });
@@ -94,6 +99,7 @@ export function useAuthState(initialBackendUrl: string): AuthState {
   const [establishmentSwitcherVisible, setEstablishmentSwitcherVisible] = useState(false);
   const [pendingLogin, setPendingLogin] = useState<{ data: AppData; user: User; token: string; passwordHash?: string } | null>(null);
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [recoveryIdentifier, setRecoveryIdentifier] = useState("");
@@ -131,6 +137,8 @@ export function useAuthState(initialBackendUrl: string): AuthState {
     setRecoverStatus,
     loginStatus,
     setLoginStatus,
+    loggingIn,
+    setLoggingIn,
     loginErrorModalMessage,
     setLoginErrorModalMessage,
     passwordChangeVisible,
@@ -153,6 +161,8 @@ export function useAuthState(initialBackendUrl: string): AuthState {
     setPendingLogin,
     email,
     setEmail,
+    username,
+    setUsername,
     password,
     setPassword,
     showLoginPassword,

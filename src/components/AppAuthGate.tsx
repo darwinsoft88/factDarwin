@@ -25,11 +25,14 @@ export function AppAuthGate({
       setAuthBackendUrl={authState.setAuthBackendUrl}
       email={authState.email}
       setEmail={authState.setEmail}
+      username={authState.username}
+      setUsername={authState.setUsername}
       password={authState.password}
       setPassword={authState.setPassword}
       showLoginPassword={authState.showLoginPassword}
       setShowLoginPassword={authState.setShowLoginPassword}
       login={login}
+      loggingIn={authState.loggingIn}
       loginStatus={authState.loginStatus}
       loginErrorModalMessage={authState.loginErrorModalMessage}
       setLoginErrorModalMessage={authState.setLoginErrorModalMessage}

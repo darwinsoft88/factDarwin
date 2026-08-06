@@ -1010,7 +1010,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 12,
     right: 12,
-    bottom: MODAL_SAFE_BOTTOM_PADDING + 8,
+    bottom: MODAL_SAFE_BOTTOM_PADDING + 20,
     zIndex: 60
   },
   checkoutBreakdown: {
@@ -1139,14 +1139,18 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     paddingHorizontal: MODAL_EDGE_PADDING,
     paddingTop: MODAL_EDGE_PADDING,
-    paddingBottom: Platform.OS === "web" ? MODAL_EDGE_PADDING : 0
+    paddingBottom: Platform.OS === "android"
+      ? MODAL_SAFE_BOTTOM_PADDING
+      : Platform.OS === "web"
+        ? MODAL_EDGE_PADDING
+        : 0
   },
   paymentSheet: {
     maxHeight: "92%",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    borderBottomLeftRadius: Platform.OS === "web" ? 18 : 0,
-    borderBottomRightRadius: Platform.OS === "web" ? 18 : 0,
+    borderBottomLeftRadius: Platform.OS === "android" || Platform.OS === "web" ? 18 : 0,
+    borderBottomRightRadius: Platform.OS === "android" || Platform.OS === "web" ? 18 : 0,
     backgroundColor: "#ffffff",
     overflow: "hidden",
     borderWidth: 1,

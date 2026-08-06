@@ -5,7 +5,7 @@ import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import scanBeep from "../../assets/sounds/scan-beep.wav";
 import { normalizeProductCode } from "../validation";
 import { PrimaryButton } from "./common";
-
+import { AppToast } from "./AppToast";
 type BarcodeScannerModalProps = {
   visible: boolean;
   title: string;
@@ -104,6 +104,7 @@ export function BarcodeScannerModal({ visible, title, onClose, onScan, continuou
           ) : null}
         </View>
       </View>
+      <AppToast />
     </Modal>
   );
 }

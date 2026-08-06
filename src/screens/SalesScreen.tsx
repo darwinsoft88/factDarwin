@@ -359,13 +359,12 @@ export function SalesScreen({
     createRide,
     createTicket,
     emailSale,
-    sendSaleEmail,
+    sendingEmailSaleId,
     whatsappSale
   } = useSaleDocumentActions({
     backendToken,
     data,
     persist,
-    setNotice,
     setProcessingMessage,
     user
   });
@@ -373,7 +372,8 @@ export function SalesScreen({
   const {
     closeRetentionForm,
     openRetentionForm,
-    saveReceivedRetention
+    saveReceivedRetention,
+    savingReceivedRetention
   } = useReceivedRetentionActions({
     backendToken,
     data,
@@ -414,7 +414,6 @@ export function SalesScreen({
     data,
     issuingCreditNote,
     persistMutation,
-    sendSaleEmail,
     setCreditNoteQuantities,
     setCreditNoteReason,
     setCreditNoteSourceId,
@@ -544,6 +543,7 @@ export function SalesScreen({
             openRetentionForm={openRetentionForm}
             retrySale={retrySale}
             retryingSaleId={retryingSaleId}
+            sendingEmailSaleId={sendingEmailSaleId}
             setEndDate={setSaleEndDate}
             setInvoiceSearch={setInvoiceSearch}
             setNotice={setNotice}
@@ -601,6 +601,7 @@ export function SalesScreen({
         saveLineEdit={saveLineEdit}
         saveQuickClient={saveQuickClient}
         saveReceivedRetention={saveReceivedRetention}
+        savingReceivedRetention={savingReceivedRetention}
         setCreditNoteQuantities={setCreditNoteQuantities}
         setCreditNoteReason={setCreditNoteReason}
         setAdditionalInfo={setAdditionalInfo}

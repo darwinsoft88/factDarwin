@@ -44,6 +44,12 @@ function mapOperation(row) {
   };
 }
 
+function maskRecipient(value) {
+  const [name, domain] = String(value || "").split("@");
+  if (!name || !domain) return "";
+  return `${name.slice(0, Math.min(2, name.length))}***@${domain}`;
+}
+
 function createDocumentEmailQueueRepository(options = {}) {
   const pool = options.pool || new Pool({
     connectionString: options.connectionString || config.databaseUrl,
@@ -174,6 +180,85 @@ function createDocumentEmailQueueRepository(options = {}) {
       [now]
     );
     return result.rows.map(mapOperation);
+  }
+
+  async function listOperations(companyId, options = {}) {
+    const allowedStatuses = ["pending", "processing", "accepted", "failed", "uncertain"];
+    const status = allowedStatuses.includes(options.status) ? options.status : "";
+    const limit = Math.max(1, Math.min(100, Number(options.limit) || 50));
+    const result = await pool.query(
+      `SELECT id, company_id AS "companyId", document_type AS "documentType",
+              document_id AS "documentId", document_number AS "documentNumber",
+              origin, status, recipient_email AS "recipientEmail",
+              attempts, max_attempts AS "maxAttempts", retryable,
+              next_attempt_at AS "nextAttemptAt", locked_at AS "lockedAt",
+              locked_by AS "lockedBy", accepted_at AS "acceptedAt",
+              failed_at AS "failedAt", smtp_message_id AS "smtpMessageId",
+              send_started_at AS "sendStartedAt", send_completed_at AS "sendCompletedAt",
+              sent_worker_id AS "sentWorkerId", last_error_code AS "lastErrorCode",
+              last_error_message AS "lastErrorMessage", created_at AS "createdAt",
+              updated_at AS "updatedAt"
+       FROM document_email_operations
+       WHERE company_id = $1
+         AND ($2 = '' OR status = $2)
+       ORDER BY created_at DESC, id DESC
+       LIMIT $3`,
+      [String(companyId || ""), status, limit]
+    );
+    return result.rows.map((row) => ({
+      ...row,
+      recipientEmail: undefined,
+      recipientMasked: maskRecipient(row.recipientEmail)
+    }));
+  }
+
+  async function retryOperation(companyId, operationId, requestedBy, now = new Date().toISOString()) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query(
+        `SELECT id, status, last_error_code AS "lastErrorCode"
+         FROM document_email_operations
+         WHERE id = $1 AND company_id = $2
+         FOR UPDATE`,
+        [String(operationId || ""), String(companyId || "")]
+      );
+      const operation = current.rows[0];
+      if (!operation) {
+        const error = new Error("No se encontro la operacion de correo.");
+        error.statusCode = 404;
+        throw error;
+      }
+      if (!["failed", "uncertain"].includes(operation.status)) {
+        const error = new Error("Solo se pueden reintentar operaciones fallidas o inciertas.");
+        error.statusCode = 409;
+        throw error;
+      }
+      const updated = await client.query(
+        `UPDATE document_email_operations
+         SET status = 'pending', retryable = TRUE, attempts = 0,
+             next_attempt_at = $1, locked_at = NULL, locked_by = NULL,
+             accepted_at = NULL, failed_at = NULL,
+             send_started_at = NULL, send_completed_at = NULL,
+             last_error_code = 'MANUAL_RETRY_REQUESTED',
+             last_error_message = $2, updated_at = $1
+         WHERE id = $3 AND company_id = $4
+         RETURNING ${returningColumns()}`,
+        [
+          now,
+          `Reintento administrativo solicitado por ${String(requestedBy || "admin").slice(0, 120)}. Error anterior: ${String(operation.lastErrorCode || "sin codigo").slice(0, 120)}.`,
+          operation.id,
+          String(companyId || "")
+        ]
+      );
+      await client.query("COMMIT");
+      return mapOperation(updated.rows[0]);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async function prepareSend(operation, workerId, messageId, now = new Date().toISOString()) {
@@ -334,7 +419,7 @@ function createDocumentEmailQueueRepository(options = {}) {
     if (ownsPool) await pool.end();
   }
 
-  return { claim, close, completeAccepted, completeSimulation, failSend, failTemporary, markBlockedSendOperations, markUncertain, prepareSend, recoverExpiredLeases };
+  return { claim, close, completeAccepted, completeSimulation, failSend, failTemporary, listOperations, markBlockedSendOperations, markUncertain, prepareSend, recoverExpiredLeases, retryOperation };
 }
 
 module.exports = {

@@ -1,6 +1,6 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { LIST_BATCH_SIZE } from "../constants/app";
 import { GuideTransporterType } from "../hooks/useGuideFormState";
 import { AppData, Client, Sale } from "../types";
@@ -133,6 +133,41 @@ export function GuideFormSection({
           <MaterialCommunityIcons name="magnify" size={20} color="#0f766e" />
         </Pressable>
       </View>
+      {documentPickerVisible ? (
+        <View style={styles.pickerPanel}>
+          <View style={styles.modalHeader}>
+            <View style={styles.flex}>
+              <Text style={styles.modalTitle}>Buscar documento origen</Text>
+              <Text style={styles.modalMeta}>Seleccione el documento que se va a trasladar</Text>
+            </View>
+            <Pressable style={styles.closeButton} onPress={() => setDocumentPickerVisible(false)}>
+              <Text style={styles.closeButtonText}>Cerrar</Text>
+            </Pressable>
+          </View>
+          <Input label="" value={documentSearch} onChangeText={onDocumentSearchChange} placeholder="Cliente, cedula/RUC, numero o clave" autoCapitalize="none" />
+          <View style={styles.resultHeader}>
+            <Text style={styles.resultLabel}>Documentos encontrados</Text>
+            <Text style={styles.resultCount}>{filteredMovableDocuments.length} registro(s)</Text>
+          </View>
+          <ScrollView style={styles.resultsBox} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+            {pageDocuments.map((sale) => {
+              const saleClient = clientsById.get(sale.clientId);
+              const selected = sale.id === sourceSaleId;
+              return (
+                <Pressable key={sale.id} style={[styles.documentRow, selected && styles.documentRowSelected]} onPress={() => selectDocument(sale.id)}>
+                  <View style={styles.flex}>
+                    <Text style={[styles.documentName, selected && styles.documentNameSelected]} numberOfLines={1}>{documentTypeLabel(sale)} {documentNumber(sale, data.issuer)} - {saleClient?.name || "Cliente"}</Text>
+                    <Text style={styles.documentMeta} numberOfLines={1}>{sale.status} | {sale.items.length} producto(s) | ${money(sale.total)}</Text>
+                  </View>
+                  {selected ? <MaterialCommunityIcons name="check-circle" size={22} color="#047857" /> : <MaterialCommunityIcons name="chevron-right" size={22} color="#64748b" />}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          {movableDocuments.length > 0 && filteredMovableDocuments.length === 0 ? <Empty text="No hay documentos con esa busqueda." /> : null}
+          <PaginationControls page={currentDocumentPage} pageSize={LIST_BATCH_SIZE} totalItems={filteredMovableDocuments.length} onPageChange={setDocumentPage} />
+        </View>
+      ) : null}
       {sourceSale && client ? <Text style={styles.inlineInfo}>Destino: {client.name} | Productos: {sourceSale.items.length}</Text> : null}
       <Input label="Transportista / razon social" value={transporterName} onChangeText={onTransporterNameChange} />
       <Select label="Tipo identificacion transportista" value={transporterType} onChange={(value) => onTransporterTypeChange(value as GuideTransporterType)} options={[{ label: "Cedula", value: "05" }, { label: "RUC", value: "04" }, { label: "Pasaporte", value: "06" }]} />
@@ -151,43 +186,6 @@ export function GuideFormSection({
         </View>
       </View>
       {showIssueButton ? <PrimaryButton label={issuingGuide ? "Procesando..." : "Emitir guia"} onPress={issuingGuide ? () => undefined : onIssue} /> : null}
-      <Modal visible={documentPickerVisible} transparent animationType="fade" onRequestClose={() => setDocumentPickerVisible(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setDocumentPickerVisible(false)}>
-          <Pressable style={styles.modalSheet}>
-            <View style={styles.modalHeader}>
-              <View style={styles.flex}>
-                <Text style={styles.modalTitle}>Buscar documento origen</Text>
-                <Text style={styles.modalMeta}>Seleccione el documento que se va a trasladar</Text>
-              </View>
-              <Pressable style={styles.closeButton} onPress={() => setDocumentPickerVisible(false)}>
-                <Text style={styles.closeButtonText}>Cerrar</Text>
-              </Pressable>
-            </View>
-            <Input label="" value={documentSearch} onChangeText={onDocumentSearchChange} placeholder="Cliente, cedula/RUC, numero o clave" autoCapitalize="none" />
-            <View style={styles.resultHeader}>
-              <Text style={styles.resultLabel}>Documentos encontrados</Text>
-              <Text style={styles.resultCount}>{filteredMovableDocuments.length} registro(s)</Text>
-            </View>
-            <ScrollView style={styles.resultsBox} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-              {pageDocuments.map((sale) => {
-                const saleClient = clientsById.get(sale.clientId);
-                const selected = sale.id === sourceSaleId;
-                return (
-                  <Pressable key={sale.id} style={[styles.documentRow, selected && styles.documentRowSelected]} onPress={() => selectDocument(sale.id)}>
-                    <View style={styles.flex}>
-                      <Text style={[styles.documentName, selected && styles.documentNameSelected]} numberOfLines={1}>{documentTypeLabel(sale)} {documentNumber(sale, data.issuer)} - {saleClient?.name || "Cliente"}</Text>
-                      <Text style={styles.documentMeta} numberOfLines={1}>{sale.status} | {sale.items.length} producto(s) | ${money(sale.total)}</Text>
-                    </View>
-                    {selected ? <MaterialCommunityIcons name="check-circle" size={22} color="#047857" /> : <MaterialCommunityIcons name="chevron-right" size={22} color="#64748b" />}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-            {movableDocuments.length > 0 && filteredMovableDocuments.length === 0 ? <Empty text="No hay documentos con esa busqueda." /> : null}
-            <PaginationControls page={currentDocumentPage} pageSize={LIST_BATCH_SIZE} totalItems={filteredMovableDocuments.length} onPageChange={setDocumentPage} />
-          </Pressable>
-        </Pressable>
-      </Modal>
     </>
   );
 
@@ -240,18 +238,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 2
   },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.38)",
-    justifyContent: "flex-end",
-    padding: 12
-  },
-  modalSheet: {
-    maxHeight: "86%",
+  pickerPanel: {
     borderRadius: 12,
     backgroundColor: "#ffffff",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
+    borderColor: "#cbd5e1",
     padding: 12,
     gap: 10
   },

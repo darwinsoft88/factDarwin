@@ -1,6 +1,7 @@
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
+import { LinearGradient } from "expo-linear-gradient";
 import React, { useMemo, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { AppLegalFooter } from "./AppLegalFooter";
 import { Input, PrimaryButton } from "./common";
 import { EstablishmentPickerModal } from "./EstablishmentPickerModal";
@@ -19,11 +20,14 @@ export type AuthScreenProps = {
   setAuthBackendUrl: (value: string) => void;
   email: string;
   setEmail: (value: string) => void;
+  username: string;
+  setUsername: (value: string) => void;
   password: string;
   setPassword: (value: string) => void;
   showLoginPassword: boolean;
   setShowLoginPassword: (value: boolean) => void;
   login: (companyId?: string) => Promise<void> | void;
+  loggingIn: boolean;
   loginStatus: { tone: "info" | "error" | "success"; message: string } | null;
   loginErrorModalMessage: string;
   setLoginErrorModalMessage: (message: string) => void;
@@ -70,11 +74,14 @@ export function AuthScreen({
   setAuthBackendUrl,
   email,
   setEmail,
+  username,
+  setUsername,
   password,
   setPassword,
   showLoginPassword,
   setShowLoginPassword,
   login,
+  loggingIn,
   loginStatus,
   loginErrorModalMessage,
   setLoginErrorModalMessage,
@@ -100,6 +107,7 @@ export function AuthScreen({
 }: AuthScreenProps) {
   const [serverSettingsVisible, setServerSettingsVisible] = useState(false);
   const uniqueCompanyOptions = useMemo(() => dedupeCompanyOptions(companyOptions), [companyOptions]);
+  const isRucLogin = /^\d{13}$/.test(email.trim());
   const serverUrlInput = __DEV__ ? (
     <View style={styles.serverUrlBlock}>
       <Pressable style={styles.serverUrlToggle} onPress={() => setServerSettingsVisible((visible) => !visible)}>
@@ -119,8 +127,15 @@ export function AuthScreen({
   ) : null;
 
   return (
-    <SafeAreaView style={styles.screen}>
+    <LinearGradient
+      colors={["#eef8f7", "#f7f9fc", "#eef4ff"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.screen}
+    >
       <ExpoStatusBar style="dark" />
+      <View style={styles.backgroundCircleTop} />
+      <View style={styles.backgroundCircleBottom} />
       <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
         <ScrollView
           contentContainerStyle={[
@@ -131,33 +146,76 @@ export function AuthScreen({
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         >
-          <View style={styles.loginBrandRow}>
-            <View style={styles.loginBrandMark}>
-              <Text style={styles.loginBrandMarkText}>FD</Text>
+          <View style={styles.loginHeader}>
+
+            <View style={styles.loginBrandRow}>
+              <View style={styles.loginBrandMark}>
+                <Text style={styles.loginBrandMarkText}>FD</Text>
+              </View>
+
+              <Text style={styles.loginBrand}>
+                {APP_BRAND}
+              </Text>
             </View>
-            <Text style={styles.loginBrand}>{APP_BRAND}</Text>
+
+            <Text style={styles.loginSlogan}>
+              Facturación inteligente para tu negocio.
+            </Text>
+
           </View>
+
           {authMode === "login" ? (
             <>
               <View style={styles.authCard}>
                 <Text style={styles.authTitle}>INICIAR SESION</Text>
                 {serverUrlInput}
-                <Input label="Correo o RUC" value={email} onChangeText={setEmail} autoCapitalize="none" />
+                <Input label="Empresa (RUC o correo)" value={email} onChangeText={(value) => {
+                  setEmail(value);
+
+                  if (!/^\d{13}$/.test(value.trim())) {
+                    setUsername("");
+                  }
+                }}
+                  autoCapitalize="none" autoCorrect={false}
+                  placeholder="Correo electrónico o RUC" />
+
+                {isRucLogin ? (
+                  <Input
+                    label="Usuario"
+                    value={username}
+                    onChangeText={setUsername}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="Ej. darwin, vendedor, caja1"
+                  />
+                ) : null}
+
                 <Input
                   label="Clave"
+
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showLoginPassword}
                   autoCapitalize="none"
                   autoComplete="current-password"
                   rightElement={<PasswordVisibilityButton visible={showLoginPassword} onPress={() => setShowLoginPassword(!showLoginPassword)} />}
+                  placeholder="Contraseña"
                 />
-                <PrimaryButton label="Ingresar" onPress={() => login()} />
+                <PrimaryButton
+                  label={loggingIn ? "Ingresando..." : "Ingresar"}
+                  onPress={() => login()}
+                  disabled={loggingIn}
+                />
                 {loginStatus ? <Text style={[styles.authFeedback, loginStatus.tone === "error" && styles.authFeedbackError, loginStatus.tone === "success" && styles.authFeedbackSuccess]}>{loginStatus.message}</Text> : null}
                 {uniqueCompanyOptions.length > 0 ? (
                   <View style={styles.companyChoiceList}>
                     {uniqueCompanyOptions.map((company) => (
-                      <Pressable key={company.id} style={styles.companyChoice} onPress={() => login(company.id)}>
+                      <Pressable
+                        key={company.id}
+                        style={[styles.companyChoice, loggingIn && styles.disabledButton]}
+                        onPress={() => login(company.id)}
+                        disabled={loggingIn}
+                      >
                         <Text style={styles.companyChoiceTitle}>{company.tradeName || company.businessName || "Empresa"}</Text>
                         <Text style={styles.companyChoiceMeta}>RUC {company.ruc} | {company.role || "usuario"}</Text>
                       </Pressable>
@@ -221,10 +279,10 @@ export function AuthScreen({
         subtitle="Seleccione con que sucursal o punto de emision va a trabajar."
         establishments={establishments}
         cancelLabel="Cancelar"
-        onSelect={(id) => { void chooseLoginEstablishment(id); }}
+        onSelect={chooseLoginEstablishment}
         onCancel={onCancelEstablishmentSelection}
       />
-    </SafeAreaView>
+    </LinearGradient>
   );
 }
 
@@ -246,55 +304,81 @@ const styles = StyleSheet.create({
   keyboardAvoiding: {
     flex: 1
   },
+
   loginPanel: {
     flexGrow: 1,
-    justifyContent: "center",
-    padding: 24,
-    backgroundColor: "#f7f9fc"
+    justifyContent: "flex-start",
+    paddingTop: 120,
+
+    paddingHorizontal: 18,
+    paddingVertical: 24
   },
+
   loginPanelForm: {
     justifyContent: "flex-start",
     paddingTop: 34
   },
   loginBrandRow: {
-    marginBottom: 28,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 10
+    gap: 10,
   },
+
   loginBrandMark: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
+    width: 46,
+    height: 46,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#0f766e"
   },
   loginBrandMarkText: {
     color: "#ffffff",
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "900"
   },
   loginBrand: {
     color: "#0f2f66",
-    fontSize: 30,
+    fontSize: 34,
+    letterSpacing: -0.5,
     lineHeight: 36,
     fontWeight: "900"
   },
+  /* authCard: {
+     borderRadius: 14,
+     padding: 26,
+     gap: 14,
+     backgroundColor: "#ffffff",
+     borderWidth: 1,
+     borderColor: "#edf1f7",
+     shadowColor: "#0f172a",
+     shadowOpacity: 0.16,
+     shadowRadius: 18,
+     shadowOffset: { width: 0, height: 10 },
+     elevation: 6
+   },*/
+
   authCard: {
-    borderRadius: 14,
-    padding: 26,
+    width: "92%",
+    alignSelf: "center",
+    borderRadius: 16,
+    padding: 24,
     gap: 14,
     backgroundColor: "#ffffff",
     borderWidth: 1,
     borderColor: "#edf1f7",
     shadowColor: "#0f172a",
-    shadowOpacity: 0.16,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    shadowOffset: {
+      width: 0,
+      height: 10
+    },
+
+    elevation: 8
   },
+
   serverUrlBlock: {
     gap: 4
   },
@@ -410,7 +494,45 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700"
   },
+  backgroundCircleTop: {
+    position: "absolute",
+
+    width: 180,
+    height: 180,
+
+    borderRadius: 90,
+
+    backgroundColor: "rgba(15,118,110,0.05)",
+
+    top: -60,
+    right: -60
+  },
+
+  backgroundCircleBottom: {
+    position: "absolute",
+
+    width: 160,
+    height: 160,
+
+    borderRadius: 80,
+
+    backgroundColor: "rgba(15,47,102,0.04)",
+
+    bottom: -60,
+    left: -60
+  },
+  loginHeader: {
+    alignItems: "center",
+    marginBottom: 28
+  },
   disabledButton: {
     opacity: 0.6
+  },
+  loginSlogan: {
+    marginTop: 4,
+    color: "#64748b",
+    fontSize: 14,
+    fontWeight: "700",
+    textAlign: "center"
   }
 });

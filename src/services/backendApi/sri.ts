@@ -1,9 +1,17 @@
 import { backendBaseUrl, postJson, readJson } from "./http";
 import { AuthorizationResponse, ReservedSequenceResponse } from "./types";
 
+const INVOICE_AUTHORIZATION_TIMEOUT_MS = 60000;
+
 export async function authorizeInvoice(backendUrl: string, xml: string, token = ""): Promise<AuthorizationResponse> {
   const baseUrl = backendBaseUrl(backendUrl);
-  const response = await postJson(`${baseUrl}/api/facturas/autorizar`, { xml }, "No hay conexion para autorizar el documento en este momento. El documento quedara guardado para reenviar cuando vuelva internet.", token);
+  const response = await postJson(
+    `${baseUrl}/api/facturas/autorizar`,
+    { xml },
+    "No hay conexion para autorizar el documento en este momento. El documento quedara guardado para reenviar cuando vuelva internet.",
+    token,
+    INVOICE_AUTHORIZATION_TIMEOUT_MS
+  );
   const result = (await readJson(response)) as AuthorizationResponse;
 
   if (!response.ok) {

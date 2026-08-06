@@ -6,6 +6,7 @@ type ProductEditModalProps = {
   editingId: string;
   editingProductName: string;
   form: ProductFormValues;
+  saving?: boolean;
   onChange: React.Dispatch<React.SetStateAction<ProductFormValues>>;
   onClose: () => void;
   onOpenScanner: () => void;
@@ -18,6 +19,7 @@ export function ProductEditModal({
   editingId,
   editingProductName,
   form,
+  saving = false,
   onChange,
   onClose,
   onOpenScanner,
@@ -33,6 +35,7 @@ export function ProductEditModal({
       onClose={onClose}
       onConfirm={onSave}
       confirmLabel={editingId ? "Guardar cambios" : "Guardar producto"}
+      confirming={saving}
     >
       <ProductForm form={form} onChange={onChange} onOpenScanner={onOpenScanner} onVerifyCode={onVerifyCode} />
     </EntityEditModal>

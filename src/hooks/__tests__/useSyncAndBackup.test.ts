@@ -15,7 +15,7 @@ jest.mock("react", () => ({
 }));
 jest.mock("react-native", () => ({ Platform: { OS: "native" }, AppState: { addEventListener: jest.fn() } }));
 jest.mock("expo-network", () => ({ addNetworkStateListener: jest.fn(), getNetworkStateAsync: jest.fn() }));
-jest.mock("../../utils/dialogs", () => ({ showMessage: jest.fn() }));
+jest.mock("../../utils/dialogs", () => ({ showMessage: jest.fn(), showWarning: jest.fn() }));
 jest.mock("../../utils/sessionToken", () => ({ isSessionTokenExpired: jest.fn(() => false) }));
 jest.mock("../../services/security", () => ({ hashPassword: jest.fn(async () => "hash") }));
 jest.mock("../../utils/autoRetrySriDocuments", () => ({ autoRetrySriDocuments: jest.fn(async () => ({ attempted: 0 })) }));

@@ -77,6 +77,25 @@ const iosPwaStyle = `<style id="factudarwin-pwa-ios-fixes">
     max-width: 100vw;
     overflow-x: hidden;
   }
+
+  @supports (-webkit-touch-callout: none) {
+    @media (display-mode: standalone) {
+      html {
+        height: -webkit-fill-available;
+      }
+
+      body,
+      #root {
+        height: 100vh;
+        height: 100dvh;
+        min-height: -webkit-fill-available;
+      }
+
+      #root > div {
+        min-height: 100%;
+      }
+    }
+  }
 </style>`;
 
 if (!html.includes('id="factudarwin-pwa-ios-fixes"')) {

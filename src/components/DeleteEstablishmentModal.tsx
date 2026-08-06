@@ -2,6 +2,7 @@ import React from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { IssuerEstablishment } from "../types";
 import { Input } from "./common";
+import { AppToast } from "./AppToast";
 
 type DeleteEstablishmentModalProps = {
   visible: boolean;
@@ -50,6 +51,7 @@ export function DeleteEstablishmentModal({
           </View>
         </View>
       </View>
+      <AppToast />
     </Modal>
   );
 }

@@ -22,7 +22,13 @@ import { activeEstablishment } from "../utils/establishments";
 import { documentNumber } from "../utils/documents";
 import { formatShortDate } from "../utils/format";
 import { mergeAppDataSnapshots } from "../utils/dataMerge";
-import { confirmAction, showMessage } from "../utils/dialogs";
+import {
+  confirmAction,
+  showError,
+  showInfo,
+  showSuccess,
+  showWarning,
+} from "../utils/dialogs";
 import { parseDecimal } from "../utils/numbers";
 import { paginateItems } from "../utils/pagination";
 import { syncPatchToBackend } from "../utils/sync";
@@ -293,7 +299,7 @@ export function CreditsScreen({
       setLocalData(persisted);
       return persisted;
     } catch (error) {
-      showMessage("No se pudo actualizar la cartera", error instanceof Error ? error.message : "La informacion remota no pudo guardarse localmente.");
+      showError("No se pudo actualizar la cartera", error instanceof Error ? error.message : "La informacion remota no pudo guardarse localmente.");
       throw error;
     }
   };
@@ -302,7 +308,7 @@ export function CreditsScreen({
     if (paymentIntentInProgressRef.current) return;
     const targetSale = selectedSale;
     if (!targetSale) {
-      showMessage("Sin credito", "No hay una factura a credito seleccionada.");
+      showWarning("Sin credito", "No hay una factura a credito seleccionada.");
       return;
     }
 
@@ -351,7 +357,7 @@ export function CreditsScreen({
       try {
         await syncPatchToBackend(persisted.backendUrl, backendToken, patch, "Abono pendiente de sincronizar", { persistMutation });
       } catch (syncError) {
-        showMessage("Abono guardado", syncError instanceof Error ? syncError.message : "El abono quedo guardado, pero no pudo prepararse su sincronizacion.");
+        showWarning("Abono guardado", syncError instanceof Error ? syncError.message : "El abono quedo guardado, pero no pudo prepararse su sincronizacion.");
       }
       setAmountText("");
       setNote("");
@@ -368,7 +374,7 @@ export function CreditsScreen({
         data: persisted
       });
     } catch (error) {
-      showMessage("Revise el abono", error instanceof Error ? error.message : "No se pudo registrar el abono.");
+      showError("Revise el abono", error instanceof Error ? error.message : "No se pudo registrar el abono.");
     } finally {
       paymentIntentInProgressRef.current = false;
       paymentLocksRef.current.delete(lockKey);
@@ -424,7 +430,7 @@ export function CreditsScreen({
       try {
         await syncPatchToBackend(persisted.backendUrl, backendToken, patch, "Cobro multiple pendiente de sincronizar", { persistMutation });
       } catch (syncError) {
-        showMessage("Cobro guardado", syncError instanceof Error ? syncError.message : "El cobro quedo guardado, pero no pudo prepararse su sincronizacion.");
+        showWarning("Cobro guardado", syncError instanceof Error ? syncError.message : "El cobro quedo guardado, pero no pudo prepararse su sincronizacion.");
       }
       closeBulkPayment();
       setReceiptSuccess({
@@ -435,7 +441,7 @@ export function CreditsScreen({
         data: persisted
       });
     } catch (error) {
-      showMessage("Revise el cobro", error instanceof Error ? error.message : "No se pudo registrar el cobro multiple.");
+      showError("Revise el cobro", error instanceof Error ? error.message : "No se pudo registrar el cobro multiple.");
     } finally {
       bulkPaymentIntentInProgressRef.current = false;
       paymentLocksRef.current.delete(lockKey);
@@ -445,7 +451,7 @@ export function CreditsScreen({
 
   const confirmVoidPayment = (payment: CreditPayment) => {
     if (isCreditPaymentVoided(payment)) {
-      showMessage("Abono anulado", "Este abono ya fue anulado anteriormente.");
+      showInfo("Abono anulado", "Este abono ya fue anulado anteriormente.");
       return;
     }
     const sale = data.sales.find((item) => item.id === payment.saleId);
@@ -492,7 +498,7 @@ export function CreditsScreen({
       setLocalData(persisted);
       if (!changed) {
         voidPaymentIntentRef.current.delete(payment.id);
-        showMessage("Abono anulado", "Este abono ya estaba anulado.");
+        showInfo("Abono anulado", "Este abono ya estaba anulado.");
         return;
       }
       try {
@@ -503,12 +509,12 @@ export function CreditsScreen({
           auditLogs: auditLogId ? persisted.auditLogs.filter((log) => log.id === auditLogId) : []
         }, "Anulacion de abono pendiente de sincronizar", { persistMutation });
       } catch (syncError) {
-        showMessage("Anulacion guardada", syncError instanceof Error ? syncError.message : "La anulacion quedo guardada, pero no pudo prepararse su sincronizacion.");
+        showWarning("Anulacion guardada", syncError instanceof Error ? syncError.message : "La anulacion quedo guardada, pero no pudo prepararse su sincronizacion.");
       }
       voidPaymentIntentRef.current.delete(payment.id);
-      showMessage("Abono anulado", `El cobro fue reversado correctamente.${updatedSale ? ` Saldo pendiente $${money(creditBalance(updatedSale))}.` : ""}`);
+      showSuccess("Abono anulado", `El cobro fue reversado correctamente.${updatedSale ? ` Saldo pendiente $${money(creditBalance(updatedSale))}.` : ""}`);
     } catch (error) {
-      showMessage("No se pudo anular", error instanceof Error ? error.message : "Revise el abono e intente nuevamente.");
+      showError("No se pudo anular", error instanceof Error ? error.message : "Revise el abono e intente nuevamente.");
     }
   };
 

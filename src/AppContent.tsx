@@ -32,7 +32,8 @@ import { AppData, User } from "./types";
 import { AppTab, appLicenseStatus } from "./utils/appAccess";
 import { isSessionTokenExpired } from "./utils/sessionToken";
 import { SyncState } from "./utils/support";
-import { AppToast } from "./components/AppToast";
+
+
 
 type Tab = AppTab;
 const LICENSE_WARNING_AUTO_HIDE_MS = 12_000;
@@ -317,7 +318,6 @@ export function AppContent() {
         syncState={syncState}
         xmlPreview={xmlPreview}
       />
-      <AppToast />
     </SafeAreaView>
   );
 }

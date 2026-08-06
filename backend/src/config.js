@@ -1,5 +1,9 @@
 const path = require("node:path");
 const dotenv = require("dotenv");
+const { buildShadowConfig } = require("./sync-shadow-config");
+const { buildPullDiagnosticConfig } = require("./sync-pull-config");
+const { buildIncrementalPilotConfig } = require("./sync-pilot-config");
+const { buildDocumentHistoryConfig } = require("./document-history-config");
 
 dotenv.config();
 
@@ -36,6 +40,10 @@ function resolveAutomaticEmailMode(value) {
 }
 
 const automaticAuthorizationEmailMode = resolveAutomaticEmailMode(process.env.AUTOMATIC_AUTHORIZATION_EMAIL_MODE);
+const incrementalSyncShadow = buildShadowConfig(process.env);
+const incrementalSyncPullDiagnostic = buildPullDiagnosticConfig(process.env, jwtSecret);
+const incrementalSyncPilot = buildIncrementalPilotConfig(process.env, jwtSecret);
+const historicalDocumentPagination = buildDocumentHistoryConfig(process.env, jwtSecret);
 const emailBuildLimits = {
   maxXmlBytes: boundedPositiveInteger(process.env.EMAIL_MAX_XML_BYTES, 5 * 1024 * 1024),
   maxPdfBytes: boundedPositiveInteger(process.env.EMAIL_MAX_PDF_BYTES, 10 * 1024 * 1024),
@@ -113,6 +121,10 @@ module.exports = {
   publicUrl: process.env.PUBLIC_BACKEND_URL || "",
   // Fase 2: solo off/simulate. El valor send se bloquea deliberadamente.
   automaticAuthorizationEmailMode,
+  incrementalSyncShadow,
+  incrementalSyncPullDiagnostic,
+  incrementalSyncPilot,
+  historicalDocumentPagination,
   emailBuildLimits,
   allowedOrigins,
   requireHttps: process.env.REQUIRE_HTTPS === "true" || isProduction,

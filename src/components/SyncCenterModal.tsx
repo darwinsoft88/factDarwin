@@ -8,6 +8,7 @@ import { buildDashboard } from "../utils/dashboard";
 import { documentTypeLabel } from "../utils/sales";
 import { sriPendingSendSummary } from "../utils/sriRetryPolicy";
 import { formatAuditDate, formatSyncStatus, SyncState } from "../utils/support";
+import { AppToast } from "./AppToast";
 
 type SyncCenterModalProps = {
   visible: boolean;
@@ -104,6 +105,7 @@ export function SyncCenterModal({ visible, data, syncState, syncActionLoading, o
           </ScrollView>
         </View>
       </View>
+      <AppToast />
     </Modal>
   );
 }

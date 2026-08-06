@@ -1,6 +1,6 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Empty, Input } from "./common";
 import { PaginationControls } from "./PaginationControls";
 import { LIST_BATCH_SIZE } from "../constants/app";
@@ -32,43 +32,41 @@ export function InventoryProductPickerModal({
   productSearch,
   visible
 }: InventoryProductPickerModalProps) {
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
-        <Pressable style={styles.modalSheet}>
-          <View style={styles.modalHeader}>
-            <View style={styles.flex}>
-              <Text style={styles.modalTitle}>Buscar producto</Text>
-              <Text style={styles.modalMeta}>Resultados paginados para inventario</Text>
-            </View>
-            <Pressable style={styles.closeButton} onPress={onClose}>
-              <Text style={styles.closeButtonText}>Cerrar</Text>
-            </Pressable>
-          </View>
-          <Input label="" value={productSearch} onChangeText={onProductSearchChange} placeholder="Codigo o nombre" autoCapitalize="none" />
-          <View style={styles.resultHeader}>
-            <Text style={styles.resultLabel}>Productos encontrados</Text>
-            <Text style={styles.resultCount}>{filteredProducts.length} registro(s)</Text>
-          </View>
-          <ScrollView style={styles.resultsBox} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
-            {productPagination.items.map((product) => {
-              const selected = product.id === productId;
-              return (
-                <Pressable key={product.id} style={[styles.productRow, selected && styles.productRowSelected]} onPress={() => onSelectProduct(product.id)}>
-                  <View style={styles.flex}>
-                    <Text style={[styles.productName, selected && styles.productNameSelected]} numberOfLines={1}>{product.code} - {product.name}</Text>
-                    <Text style={styles.productMeta} numberOfLines={1}>Stock {product.stock}/{productMinStock(product)} | Costo ${money(productCost(product))} | Publico ${money(product.price)}</Text>
-                  </View>
-                  {selected ? <MaterialCommunityIcons name="check-circle" size={22} color="#047857" /> : <MaterialCommunityIcons name="chevron-right" size={22} color="#64748b" />}
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          {filteredProducts.length === 0 ? <Empty text="No hay productos con esa busqueda." /> : null}
-          <PaginationControls page={productPagination.currentPage} pageSize={LIST_BATCH_SIZE} totalItems={filteredProducts.length} onPageChange={onPageChange} />
+    <View style={styles.pickerPanel}>
+      <View style={styles.modalHeader}>
+        <View style={styles.flex}>
+          <Text style={styles.modalTitle}>Buscar producto</Text>
+          <Text style={styles.modalMeta}>Resultados paginados para inventario</Text>
+        </View>
+        <Pressable style={styles.closeButton} onPress={onClose}>
+          <Text style={styles.closeButtonText}>Cerrar</Text>
         </Pressable>
-      </Pressable>
-    </Modal>
+      </View>
+      <Input label="" value={productSearch} onChangeText={onProductSearchChange} placeholder="Codigo o nombre" autoCapitalize="none" />
+      <View style={styles.resultHeader}>
+        <Text style={styles.resultLabel}>Productos encontrados</Text>
+        <Text style={styles.resultCount}>{filteredProducts.length} registro(s)</Text>
+      </View>
+      <ScrollView style={styles.resultsBox} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+        {productPagination.items.map((product) => {
+          const selected = product.id === productId;
+          return (
+            <Pressable key={product.id} style={[styles.productRow, selected && styles.productRowSelected]} onPress={() => onSelectProduct(product.id)}>
+              <View style={styles.flex}>
+                <Text style={[styles.productName, selected && styles.productNameSelected]} numberOfLines={1}>{product.code} - {product.name}</Text>
+                <Text style={styles.productMeta} numberOfLines={1}>Stock {product.stock}/{productMinStock(product)} | Costo ${money(productCost(product))} | Publico ${money(product.price)}</Text>
+              </View>
+              {selected ? <MaterialCommunityIcons name="check-circle" size={22} color="#047857" /> : <MaterialCommunityIcons name="chevron-right" size={22} color="#64748b" />}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      {filteredProducts.length === 0 ? <Empty text="No hay productos con esa busqueda." /> : null}
+      <PaginationControls page={productPagination.currentPage} pageSize={LIST_BATCH_SIZE} totalItems={filteredProducts.length} onPageChange={onPageChange} />
+    </View>
   );
 }
 
@@ -77,18 +75,11 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0
   },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.38)",
-    justifyContent: "flex-end",
-    padding: 12
-  },
-  modalSheet: {
-    maxHeight: "86%",
+  pickerPanel: {
     borderRadius: 12,
     backgroundColor: "#ffffff",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
+    borderColor: "#cbd5e1",
     padding: 12,
     gap: 10
   },

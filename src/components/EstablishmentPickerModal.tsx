@@ -1,6 +1,14 @@
-import React from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { IssuerEstablishment } from "../types";
+import {
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
+} from "react-native";
 
 type EstablishmentPickerModalProps = {
   visible: boolean;
@@ -10,7 +18,7 @@ type EstablishmentPickerModalProps = {
   activeId?: string;
   cancelLabel: string;
   cancelVariant?: "secondary" | "cancel";
-  onSelect: (id: string) => void;
+  onSelect: (id: string) => Promise<void> | void;
   onCancel: () => void;
 };
 
@@ -25,25 +33,82 @@ export function EstablishmentPickerModal({
   onSelect,
   onCancel
 }: EstablishmentPickerModalProps) {
+  const selectingRef = useRef(false);
+  const [selectingId, setSelectingId] = useState("");
   const cancelStyle = cancelVariant === "cancel" ? styles.actionSheetCancel : styles.secondaryActionButton;
   const cancelTextStyle = cancelVariant === "cancel" ? styles.actionSheetCancelText : styles.secondaryActionText;
 
+  useEffect(() => {
+    if (visible) return;
+    selectingRef.current = false;
+    setSelectingId("");
+  }, [visible]);
+
+  const selectEstablishment = useCallback(async (id: string) => {
+    if (selectingRef.current) return;
+    selectingRef.current = true;
+    setSelectingId(id);
+    try {
+      await onSelect(id);
+    } finally {
+      selectingRef.current = false;
+      setSelectingId("");
+    }
+  }, [onSelect]);
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+    <Modal
+  visible={visible}
+  transparent
+  animationType="none"
+  presentationStyle="overFullScreen"
+  statusBarTranslucent
+  onRequestClose={onCancel}
+>
       <View style={styles.smallNoticeBackdrop}>
         <View style={styles.establishmentPickerModal}>
           <Text style={styles.smallNoticeTitle}>{title}</Text>
           <Text style={styles.smallNoticeText}>{subtitle}</Text>
-          {establishments.map((item) => {
-            const active = item.id === activeId;
-            return (
-              <Pressable key={item.id} style={[styles.establishmentPickerOption, active && styles.establishmentPickerOptionActive]} onPress={() => onSelect(item.id)}>
-                <Text style={styles.companyChoiceTitle}>{item.name}</Text>
-                <Text style={styles.companyChoiceMeta}>{item.establishment}-{item.emissionPoint} | Sec. factura {item.sequential}</Text>
-              </Pressable>
-            );
-          })}
-          <Pressable style={cancelStyle} onPress={onCancel}>
+          <ScrollView
+            style={styles.establishmentList}
+            contentContainerStyle={styles.establishmentListContent}
+            showsVerticalScrollIndicator
+            persistentScrollbar
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            overScrollMode="always"
+          >
+            {establishments.map((item) => {
+              const active = item.id === activeId;
+              const selecting = item.id === selectingId;
+
+              return (
+                <Pressable
+                  key={item.id}
+                  style={[
+                    styles.establishmentPickerOption,
+                    active && styles.establishmentPickerOptionActive,
+                    Boolean(selectingId) && styles.establishmentPickerOptionDisabled
+                  ]}
+                  disabled={Boolean(selectingId)}
+                  onPress={() => { void selectEstablishment(item.id); }}
+                >
+                  <Text style={styles.companyChoiceTitle}>{item.name}</Text>
+
+                  <Text style={styles.companyChoiceMeta}>
+                    {selecting
+                      ? "Ingresando..."
+                      : `${item.establishment}-${item.emissionPoint} | Sec. factura ${item.sequential}`}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Pressable
+            style={[cancelStyle, Boolean(selectingId) && styles.establishmentPickerOptionDisabled]}
+            disabled={Boolean(selectingId)}
+            onPress={onCancel}
+          >
             <Text style={cancelTextStyle}>{cancelLabel}</Text>
           </Pressable>
         </View>
@@ -54,21 +119,39 @@ export function EstablishmentPickerModal({
 
 const styles = StyleSheet.create({
   smallNoticeBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.35)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24
-  },
+  flex: 1,
+  width: "100%",
+  backgroundColor: "rgba(15, 23, 42, 0.35)",
+  justifyContent: "center",
+  alignItems: "center",
+  paddingHorizontal: 24,
+  paddingVertical: 24
+},
   establishmentPickerModal: {
-    width: "100%",
-    maxWidth: 380,
+    alignSelf: "center",
+    width: 340,
+
+    maxWidth: 340,
+    maxHeight: "85%",
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#e5e7eb",
     backgroundColor: "#ffffff",
     padding: 18,
-    gap: 10
+    gap: 10,
+    transform: Platform.OS === "web"
+  ? [{ translateX: -8 }]
+  : undefined
+  },
+  establishmentList: {
+    flexShrink: 1,
+    minHeight: 80,
+    maxHeight: 420
+  },
+
+  establishmentListContent: {
+    gap: 10,
+    paddingBottom: 12
   },
   smallNoticeTitle: {
     color: "#111827",
@@ -94,6 +177,9 @@ const styles = StyleSheet.create({
   establishmentPickerOptionActive: {
     borderColor: "#0f766e",
     backgroundColor: "#ccfbf1"
+  },
+  establishmentPickerOptionDisabled: {
+    opacity: 0.6
   },
   companyChoiceTitle: {
     color: "#0f172a",

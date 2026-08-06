@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleShee
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { sanitizeIntegerInput } from "../utils/numbers";
 import { Input, PrimaryButton } from "./common";
-
+import { AppToast } from "./AppToast";
 export type NewEstablishmentForm = {
   name: string;
   establishment: string;
@@ -56,6 +56,7 @@ export function NewEstablishmentModal({ visible, form, onChange, onClose, onSave
           </View>
         </View>
       </KeyboardAvoidingView>
+      <AppToast />
     </Modal>
   );
 }
