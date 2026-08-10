@@ -2,12 +2,16 @@ import React, { useEffect, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { LIST_BATCH_SIZE } from "../constants/app";
-import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import {
+  MODAL_EDGE_PADDING,
+  MODAL_SAFE_BOTTOM_PADDING
+} from "../constants/layout";
 import { AdditionalInfoField, Client, DocumentType, PaymentMethod, Product, Sale, SaleItem, SalePaymentSplit } from "../types";
 import { PaymentCondition } from "../types";
 import { money } from "../sri";
 import { toInputDate } from "../utils/format";
 import { documentTypeLabel } from "../utils/sales";
+import { documentCollectsPayment } from "../utils/documentWorkflow";
 import { isConsumerFinalClient } from "../validation";
 import { useFloatingOverlay } from "../context/FloatingOverlayContext";
 import {
@@ -32,6 +36,8 @@ import { SaleTotalsBox } from "./SaleTotalsBox";
 import { CalendarDateInput } from "./CalendarDateInput";
 import { Input, Section } from "./common";
 
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 type PaymentChoice = PaymentMethod | "credito";
 
@@ -41,12 +47,12 @@ const PAYMENT_CHOICE_OPTIONS: {
   detail: string;
   icon: MaterialIconName;
 }[] = [
-  ...SPLIT_PAYMENT_METHOD_OPTIONS.map((option) => ({
-    ...option,
-    icon: option.icon as MaterialIconName
-  })),
-  { value: "credito", title: "Credito al cliente", detail: "Cuentas por cobrar", icon: "account-clock-outline" }
-];
+    ...SPLIT_PAYMENT_METHOD_OPTIONS.map((option) => ({
+      ...option,
+      icon: option.icon as MaterialIconName
+    })),
+    { value: "credito", title: "Credito al cliente", detail: "Cuentas por cobrar", icon: "account-clock-outline" }
+  ];
 
 const CREDIT_TERM_OPTIONS = [
   { label: "Semanal", days: 7 },
@@ -172,10 +178,16 @@ export function SaleFormSection({
   const { setOverlay } = useFloatingOverlay();
   const creditAllowed = Boolean(selectedClient && !isConsumerFinalClient(selectedClient));
   const paymentActionLabel = submitActionLabel(documentType, editingSale, sourceTicket, sourceProforma);
+  const effectiveDocumentType = sourceTicket || sourceProforma ? documentType : editingSale?.documentType || documentType;
+  const collectsPayment = documentCollectsPayment(effectiveDocumentType);
   const itemCount = items.length;
   const unitCount = items.reduce((sum, item) => sum + item.quantity, 0);
   const openPaymentModal = () => {
     if (issuing) return;
+    if (!collectsPayment) {
+      issue();
+      return;
+    }
     setSalePayments((current) =>
       paymentCondition === "credito"
         ? normalizePartialSalePayments(current, paymentMethod)
@@ -222,6 +234,7 @@ export function SaleFormSection({
         issuing={issuing}
         itemCount={itemCount}
         onSubmit={openPaymentModal}
+        proformaMode={effectiveDocumentType === "proforma"}
         onToggle={() => setCheckoutSummaryOpen((current) => !current)}
         subtotal={saleSummaryTotals.subtotal}
         tax={saleSummaryTotals.tax}
@@ -232,6 +245,7 @@ export function SaleFormSection({
     return () => setOverlay(null);
   }, [
     checkoutSummaryOpen,
+    effectiveDocumentType,
     issuing,
     itemCount,
     saleSummaryTotals.discount,
@@ -312,7 +326,7 @@ export function SaleFormSection({
       />
       <DismissibleNotice message={issueNotice} onDismiss={() => setIssueNotice("")} />
       <SalePaymentModal
-        visible={paymentModalVisible}
+        visible={paymentModalVisible && collectsPayment}
         actionLabel={paymentActionLabel}
         creditAllowed={creditAllowed}
         creditDueDate={creditDueDate}
@@ -445,6 +459,7 @@ function SaleCheckoutDock({
   itemCount,
   onSubmit,
   onToggle,
+  proformaMode,
   subtotal,
   tax,
   total,
@@ -456,13 +471,25 @@ function SaleCheckoutDock({
   itemCount: number;
   onSubmit: () => void;
   onToggle: () => void;
+  proformaMode: boolean;
   subtotal: number;
   tax: number;
   total: number;
   unitCount: number;
 }) {
+  const insets = useSafeAreaInsets();
+
   return (
-    <View pointerEvents="box-none" style={styles.checkoutOverlay}>
+    <View
+  pointerEvents="box-none"
+  style={[
+    styles.checkoutOverlay,
+    {
+      bottom: 63 + Math.max(insets.bottom, 8) + 2
+    }
+  ]}
+>
+
       {expanded ? (
         <View style={styles.checkoutBreakdown}>
           <View style={styles.checkoutBreakdownHeader}>
@@ -490,15 +517,15 @@ function SaleCheckoutDock({
           <MaterialCommunityIcons name={expanded ? "chevron-down" : "chevron-up"} size={24} color="#d1fae5" />
         </Pressable>
         <View style={styles.checkoutTotalBlock}>
-          <Text style={styles.checkoutLabel}>Total a cobrar</Text>
+          <Text style={styles.checkoutLabel}>{proformaMode ? "Total proforma" : "Total a cobrar"}</Text>
           <Text style={styles.checkoutTotal}>${money(total)}</Text>
           <Text style={styles.checkoutMeta}>{itemCount} lineas | {unitCount} unidades</Text>
         </View>
         <Pressable style={[styles.checkoutPayButton, issuing && styles.checkoutPayButtonDisabled]} onPress={issuing ? undefined : onSubmit}>
-          <MaterialCommunityIcons name="wallet-outline" size={21} color="#ffffff" />
+          <MaterialCommunityIcons name={proformaMode ? "file-document-check-outline" : "wallet-outline"} size={21} color="#ffffff" />
           <View style={styles.checkoutPayTextBlock}>
-            <Text style={styles.checkoutPayTitle}>{issuing ? "Procesando..." : "Cobrar"}</Text>
-            <Text style={styles.checkoutPayAmount}>${money(total)}</Text>
+            <Text style={styles.checkoutPayTitle}>{issuing ? "Procesando..." : proformaMode ? "Guardar proforma" : "Cobrar"}</Text>
+            {!proformaMode ? <Text style={styles.checkoutPayAmount}>${money(total)}</Text> : null}
           </View>
         </Pressable>
       </View>
@@ -564,8 +591,8 @@ function SaleSplitPaymentsEditor({
         ? `Credito $${money(creditAmount)}`
         : "Pagado"
       : balanced
-      ? "Cuadrado"
-      : `Falta $${money(Math.max(0, balance))}`;
+        ? "Cuadrado"
+        : `Falta $${money(Math.max(0, balance))}`;
   const displayedPayments = normalizedPayments;
   const singlePayment = displayedPayments.length === 1 ? displayedPayments[0] : undefined;
   const shouldSyncSingleCashPayment = !isCredit && singlePayment?.paymentMethod === "01";
@@ -728,63 +755,63 @@ function SaleSplitPaymentsEditor({
       </View>
 
       {displayedPayments.map((payment, index) => {
-          const selectedChoice: PaymentChoice = payment.paymentMethod;
-          const isTransfer = payment.paymentMethod === "20";
-          return (
-            <View key={payment.id} style={styles.paymentCompactCard}>
-              <View style={styles.paymentCompactRow}>
-                <View style={styles.paymentRowNumber}>
-                  <Text style={styles.paymentRowNumberText}>{index + 1}</Text>
-                </View>
-                <View style={styles.paymentRowMethod}>
-                  <PaymentMethodDropdown
-                    compact
-                    expanded={openMethodPickerId === payment.id}
-                    includeCredit
-                    method={selectedChoice}
-                    onSelect={(method) => selectPaymentMethod(payment, index, method)}
-                    onToggle={() => setOpenMethodPickerId((current) => (current === payment.id ? null : payment.id))}
-                  />
-                </View>
-                <TextInput
-                  style={styles.paymentAmountInput}
-                  value={amountDrafts[payment.id] ?? (payment.amount ? String(payment.amount) : "")}
-                  onChangeText={(value) => updatePaymentAmount(payment, value)}
-                  keyboardType="decimal-pad"
-                  placeholder="0.00"
-                  placeholderTextColor="#94a3b8"
-                  selectTextOnFocus
-                />
-                {displayedPayments.length > 1 || isCredit ? (
-                  <Pressable style={styles.paymentRowRemove} onPress={() => removePayment(payment.id)}>
-                    <MaterialCommunityIcons name="trash-can-outline" size={17} color="#991b1b" />
-                  </Pressable>
-                ) : (
-                  <View style={styles.paymentRowSpacer} />
-                )}
+        const selectedChoice: PaymentChoice = payment.paymentMethod;
+        const isTransfer = payment.paymentMethod === "20";
+        return (
+          <View key={payment.id} style={styles.paymentCompactCard}>
+            <View style={styles.paymentCompactRow}>
+              <View style={styles.paymentRowNumber}>
+                <Text style={styles.paymentRowNumberText}>{index + 1}</Text>
               </View>
-              {isTransfer ? (
-                <View style={styles.paymentCompactExtra}>
-                  <BankDropdown
-                    bank={payment.bank}
-                    expanded={openBankPickerId === payment.id}
-                    onToggle={() => setOpenBankPickerId((current) => (current === payment.id ? null : payment.id))}
-                    onSelect={(bank) => {
-                      updatePayment(payment.id, { bank });
-                      setOpenBankPickerId(null);
-                    }}
-                  />
-                  <Input
-                    label="Referencia bancaria (opcional)"
-                    value={payment.reference || ""}
-                    onChangeText={(value) => updatePayment(payment.id, { reference: value })}
-                    placeholder="Ej. comprobante, banco o numero"
-                  />
-                </View>
-              ) : null}
+              <View style={styles.paymentRowMethod}>
+                <PaymentMethodDropdown
+                  compact
+                  expanded={openMethodPickerId === payment.id}
+                  includeCredit
+                  method={selectedChoice}
+                  onSelect={(method) => selectPaymentMethod(payment, index, method)}
+                  onToggle={() => setOpenMethodPickerId((current) => (current === payment.id ? null : payment.id))}
+                />
+              </View>
+              <TextInput
+                style={styles.paymentAmountInput}
+                value={amountDrafts[payment.id] ?? (payment.amount ? String(payment.amount) : "")}
+                onChangeText={(value) => updatePaymentAmount(payment, value)}
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+                placeholderTextColor="#94a3b8"
+                selectTextOnFocus
+              />
+              {displayedPayments.length > 1 || isCredit ? (
+                <Pressable style={styles.paymentRowRemove} onPress={() => removePayment(payment.id)}>
+                  <MaterialCommunityIcons name="trash-can-outline" size={17} color="#991b1b" />
+                </Pressable>
+              ) : (
+                <View style={styles.paymentRowSpacer} />
+              )}
             </View>
-          );
-        })}
+            {isTransfer ? (
+              <View style={styles.paymentCompactExtra}>
+                <BankDropdown
+                  bank={payment.bank}
+                  expanded={openBankPickerId === payment.id}
+                  onToggle={() => setOpenBankPickerId((current) => (current === payment.id ? null : payment.id))}
+                  onSelect={(bank) => {
+                    updatePayment(payment.id, { bank });
+                    setOpenBankPickerId(null);
+                  }}
+                />
+                <Input
+                  label="Referencia bancaria (opcional)"
+                  value={payment.reference || ""}
+                  onChangeText={(value) => updatePayment(payment.id, { reference: value })}
+                  placeholder="Ej. comprobante, banco o numero"
+                />
+              </View>
+            ) : null}
+          </View>
+        );
+      })}
 
       {showCreditPayment ? (
         <View style={[styles.paymentCompactCard, styles.creditPaymentCard]}>
@@ -1010,7 +1037,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 12,
     right: 12,
-    bottom: MODAL_SAFE_BOTTOM_PADDING + 20,
     zIndex: 60
   },
   checkoutBreakdown: {

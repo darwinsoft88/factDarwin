@@ -1,4 +1,4 @@
-import { documentCreatesPendingSyncWhenOffline, documentRequiresServerBeforeSave, documentWorkflowPolicy } from "../documentWorkflow";
+import { documentCollectsPayment, documentCreatesPendingSyncWhenOffline, documentRequiresServerBeforeSave, documentWorkflowPolicy } from "../documentWorkflow";
 
 describe("documentWorkflow", () => {
   it("allows internal documents to be saved without server", () => {
@@ -18,5 +18,11 @@ describe("documentWorkflow", () => {
     expect(documentWorkflowPolicy("factura").sriDocument).toBe(true);
     expect(documentWorkflowPolicy("guia_remision").sriDocument).toBe(true);
     expect(documentWorkflowPolicy("proforma").sriDocument).toBe(false);
+  });
+
+  it("collects payment only for documents that represent a sale", () => {
+    expect(documentCollectsPayment("factura")).toBe(true);
+    expect(documentCollectsPayment("nota_venta")).toBe(true);
+    expect(documentCollectsPayment("proforma")).toBe(false);
   });
 });
