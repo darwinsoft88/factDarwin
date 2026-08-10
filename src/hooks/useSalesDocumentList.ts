@@ -8,6 +8,8 @@ import { documentTypeLabel, isConvertedSale, isCreditNoteSale, isInvoiceSale } f
 type UseSalesDocumentListParams = {
   data: AppData;
   sales?: AppData["sales"];
+  historicalClientNames?: Record<string, string>;
+  historicalMatchedIds?: Set<string>;
   invoiceSearch: string;
   saleEndDate: string;
   saleStartDate: string;
@@ -17,6 +19,8 @@ type UseSalesDocumentListParams = {
 export function useSalesDocumentList({
   data,
   sales = data.sales,
+  historicalClientNames = {},
+  historicalMatchedIds = new Set(),
   invoiceSearch,
   saleEndDate,
   saleStartDate,
@@ -27,36 +31,15 @@ export function useSalesDocumentList({
     [data, sales],
   );
   const filteredSales = useMemo(() => {
-    const search = invoiceSearch.trim().toLowerCase();
-    const startBoundary = saleStartDate.trim() ? parseInputDate(saleStartDate, "start") : null;
-    const endBoundary = saleEndDate.trim() ? parseInputDate(saleEndDate, "end") : null;
-
-    return scopedSales.filter((sale) => {
-      const client = data.clients.find((item) => item.id === sale.clientId);
-      const matchesStatus =
-        statusFilter === "TODAS" ||
-        sale.status === statusFilter ||
-        (statusFilter === "CONVERTIDA" && isConvertedSale(sale)) ||
-        (statusFilter === "FIRMADA" && sale.status === "PENDIENTE_SRI") ||
-        (statusFilter === "ENVIADA" && sale.status === "ENVIADA_SRI") ||
-        (statusFilter === "NOTA_CREDITO" && isCreditNoteSale(sale));
-      const saleDate = new Date(sale.createdAt);
-      const matchesStartDate = !saleStartDate.trim() || (startBoundary && !Number.isNaN(saleDate.getTime()) && saleDate >= startBoundary);
-      const matchesEndDate = !saleEndDate.trim() || (endBoundary && !Number.isNaN(saleDate.getTime()) && saleDate <= endBoundary);
-      const documentLabel = documentTypeLabel(sale);
-      const matchesSearch =
-        !search ||
-        sale.sequence.toLowerCase().includes(search) ||
-        sale.accessKey.toLowerCase().includes(search) ||
-        sale.authorizationNumber?.toLowerCase().includes(search) ||
-        documentLabel.toLowerCase().includes(search) ||
-        client?.name.toLowerCase().includes(search) ||
-        client?.identification.toLowerCase().includes(search);
-
-      const hiddenConvertedInNormalView = statusFilter === "TODAS" && !search && isConvertedSale(sale);
-      return !hiddenConvertedInNormalView && matchesStatus && matchesStartDate && matchesEndDate && matchesSearch;
-    }).sort(compareSalesNewestFirst);
-  }, [data.clients, invoiceSearch, saleEndDate, saleStartDate, scopedSales, statusFilter]);
+    return filterDocumentSales(scopedSales, data, {
+      invoiceSearch,
+      saleEndDate,
+      saleStartDate,
+      statusFilter,
+      historicalClientNames,
+      historicalMatchedIds,
+    });
+  }, [data, historicalClientNames, historicalMatchedIds, invoiceSearch, saleEndDate, saleStartDate, scopedSales, statusFilter]);
   const invoiceStats = useMemo(() => {
     const authorized = scopedSales.filter((sale) => isInvoiceSale(sale) && sale.status === "AUTORIZADA");
     const rejected = scopedSales.filter((sale) => isSriRejected(sale.status));
@@ -82,4 +65,50 @@ export function useSalesDocumentList({
     filteredSales,
     invoiceStats
   };
+}
+
+export function filterDocumentSales(
+  scopedSales: AppData["sales"],
+  data: AppData,
+  options: {
+    invoiceSearch: string;
+    saleEndDate: string;
+    saleStartDate: string;
+    statusFilter: string;
+    historicalClientNames?: Record<string, string>;
+    historicalMatchedIds?: Set<string>;
+  },
+) {
+    const { invoiceSearch, saleEndDate, saleStartDate, statusFilter, historicalClientNames = {}, historicalMatchedIds = new Set() } = options;
+    const search = invoiceSearch.trim().toLowerCase();
+    const startBoundary = saleStartDate.trim() ? parseInputDate(saleStartDate, "start") : null;
+    const endBoundary = saleEndDate.trim() ? parseInputDate(saleEndDate, "end") : null;
+
+    return scopedSales.filter((sale) => {
+      const client = data.clients.find((item) => item.id === sale.clientId);
+      const clientName = client?.name || historicalClientNames[sale.id] || "";
+      const matchesStatus =
+        statusFilter === "TODAS" ||
+        sale.status === statusFilter ||
+        (statusFilter === "CONVERTIDA" && isConvertedSale(sale)) ||
+        (statusFilter === "FIRMADA" && sale.status === "PENDIENTE_SRI") ||
+        (statusFilter === "ENVIADA" && sale.status === "ENVIADA_SRI") ||
+        (statusFilter === "NOTA_CREDITO" && isCreditNoteSale(sale));
+      const saleDate = new Date(sale.createdAt);
+      const matchesStartDate = !saleStartDate.trim() || (startBoundary && !Number.isNaN(saleDate.getTime()) && saleDate >= startBoundary);
+      const matchesEndDate = !saleEndDate.trim() || (endBoundary && !Number.isNaN(saleDate.getTime()) && saleDate <= endBoundary);
+      const documentLabel = documentTypeLabel(sale);
+      const matchesSearch =
+        !search ||
+        sale.sequence.toLowerCase().includes(search) ||
+        sale.accessKey.toLowerCase().includes(search) ||
+        sale.authorizationNumber?.toLowerCase().includes(search) ||
+        documentLabel.toLowerCase().includes(search) ||
+        clientName.toLowerCase().includes(search) ||
+        historicalMatchedIds.has(sale.id) ||
+        client?.identification.toLowerCase().includes(search);
+
+      const hiddenConvertedInNormalView = statusFilter === "TODAS" && !search && isConvertedSale(sale);
+      return !hiddenConvertedInNormalView && matchesStatus && matchesStartDate && matchesEndDate && matchesSearch;
+    }).sort(compareSalesNewestFirst);
 }

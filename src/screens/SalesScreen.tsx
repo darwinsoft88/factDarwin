@@ -18,12 +18,14 @@ import { useSaleLineEditor } from "../hooks/useSaleLineEditor";
 import { useSaleFormState } from "../hooks/useSaleFormState";
 import { useSalesDocumentList } from "../hooks/useSalesDocumentList";
 import { useSalesDocumentFilters, useSalesDocumentPagination } from "../hooks/useSalesDocumentFilters";
+import { useHistoricalDocuments } from "../hooks/useHistoricalDocuments";
 import { useQuickSaleClientEditor } from "../hooks/useQuickSaleClientEditor";
 import { useCreditNoteFormState } from "../hooks/useCreditNoteFormState";
 import { useReceivedRetentionActions } from "../hooks/useReceivedRetentionActions";
 import { useReceivedRetentionFormState } from "../hooks/useReceivedRetentionFormState";
 import { money, nextSequence } from "../sri";
 import { activeEstablishment } from "../utils/establishments";
+import { pageContainingFirstAppendedItem } from "../utils/documentHistory";
 import { nextInternalSequence, nextProformaSequence } from "../utils/sales";
 import { AppData, DocumentType, Sale, User } from "../types";
 
@@ -300,12 +302,28 @@ export function SalesScreen({
     statusFilter
   } = useSalesDocumentFilters();
 
+  const historicalDocuments = useHistoricalDocuments({
+    active: mode === "documents",
+    backendToken,
+    data,
+    filters: {
+      search: invoiceSearch,
+      startDate: saleStartDate,
+      endDate: saleEndDate,
+      status: statusFilter,
+    },
+    localSales: mode === "documents" ? salesHistory.sales : data.sales,
+    user,
+  });
+
   const {
     filteredSales,
     invoiceStats
   } = useSalesDocumentList({
     data,
-    sales: mode === "documents" ? salesHistory.sales : data.sales,
+    sales: historicalDocuments.sales,
+    historicalClientNames: historicalDocuments.historicalClientNames,
+    historicalMatchedIds: historicalDocuments.historicalIds,
     invoiceSearch,
     saleEndDate,
     saleStartDate,
@@ -519,7 +537,17 @@ export function SalesScreen({
             createRide={createRide}
             createTicket={createTicket}
             data={data}
-            historySales={salesHistory.sales}
+            historySales={historicalDocuments.sales}
+            historicalClientNames={historicalDocuments.historicalClientNames}
+            historicalIds={historicalDocuments.historicalIds}
+            canLoadOlder={historicalDocuments.canLoadOlder}
+            loadingOlder={historicalDocuments.loadingOlder}
+            onLoadOlder={() => {
+              const firstAppendedPage = pageContainingFirstAppendedItem(filteredSales.length, LIST_BATCH_SIZE);
+              void historicalDocuments.loadOlder().then((added) => {
+                if (added > 0) setSalePage(firstAppendedPage);
+              });
+            }}
             loadSaleDetail={salesHistory.loadDetail}
             editSale={(sale) => {
               editSale(sale);

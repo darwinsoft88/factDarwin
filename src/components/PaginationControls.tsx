@@ -7,15 +7,18 @@ type PaginationControlsProps = {
   pageSize: number;
   totalItems: number;
   onPageChange: (page: number) => void;
+  hasMoreItems?: boolean;
+  loadingMore?: boolean;
+  onRequestMore?: () => void;
 };
 
-export function PaginationControls({ page, pageSize, totalItems, onPageChange }: PaginationControlsProps) {
+export function PaginationControls({ page, pageSize, totalItems, onPageChange, hasMoreItems = false, loadingMore = false, onRequestMore }: PaginationControlsProps) {
   const totalPages = Math.max(1, Math.ceil(totalItems / Math.max(1, pageSize)));
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const canGoBack = currentPage > 1;
-  const canGoNext = currentPage < totalPages;
+  const canGoNext = currentPage < totalPages || hasMoreItems;
 
-  if (totalItems <= pageSize) {
+  if (totalItems <= pageSize && !hasMoreItems) {
     return totalItems > 0 ? <Text style={styles.summary}>Pagina 1 de 1 | {totalItems} registro(s)</Text> : null;
   }
 
@@ -39,10 +42,13 @@ export function PaginationControls({ page, pageSize, totalItems, onPageChange }:
         accessibilityRole="button"
         accessibilityLabel="Pagina siguiente"
         style={[styles.button, !canGoNext && styles.buttonDisabled]}
-        disabled={!canGoNext}
-        onPress={() => onPageChange(currentPage + 1)}
+        disabled={!canGoNext || loadingMore}
+        onPress={() => {
+          if (currentPage < totalPages) onPageChange(currentPage + 1);
+          else onRequestMore?.();
+        }}
       >
-        <Text style={[styles.buttonText, !canGoNext && styles.buttonTextDisabled]}>Siguiente</Text>
+        <Text style={[styles.buttonText, (!canGoNext || loadingMore) && styles.buttonTextDisabled]}>{loadingMore ? "Cargando..." : "Siguiente"}</Text>
         <MaterialCommunityIcons name="chevron-right" size={18} color={canGoNext ? "#0f766e" : "#94a3b8"} />
       </Pressable>
     </View>
