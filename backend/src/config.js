@@ -5,7 +5,9 @@ const { buildPullDiagnosticConfig } = require("./sync-pull-config");
 const { buildIncrementalPilotConfig } = require("./sync-pilot-config");
 const { buildDocumentHistoryConfig } = require("./document-history-config");
 
-dotenv.config();
+if (process.env.FACTUDARWIN_SKIP_DOTENV !== "true") {
+  dotenv.config();
+}
 
 const backendRoot = path.resolve(__dirname, "..");
 const resolveBackendPath = (value) => path.isAbsolute(value) ? value : path.resolve(backendRoot, value);

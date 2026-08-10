@@ -6,6 +6,7 @@ const test = require("node:test");
 
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "factudarwin-sync-"));
 process.env.DB_PATH = path.join(temporaryDirectory, "sync.db");
+process.env.FACTUDARWIN_SKIP_DOTENV = "true";
 delete process.env.DATABASE_URL;
 
 const { createCompanyAccount, mergeSnapshotPatch, saveSnapshot } = require("../db");
