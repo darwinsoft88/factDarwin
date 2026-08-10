@@ -5,7 +5,7 @@ import { AppTab, canAccessDeveloperTools, compactLicenseStatusLabel, roleLabel }
 import { normalizedEstablishments } from "../utils/establishments";
 import { SyncState } from "../utils/support";
 import { AuthState } from "../hooks/useAuthState";
-import { AppMenuModal } from "./AppMenuModal";
+import { ModernAppMenuModal } from "./ModernAppMenuModal";
 import { EstablishmentPickerModal } from "./EstablishmentPickerModal";
 import { LicenseModal } from "./LicenseModal";
 import { OnboardingModal } from "./OnboardingModal";
@@ -30,6 +30,8 @@ type AppGlobalModalsProps = {
   currentEstablishment: IssuerEstablishment;
   data: AppData;
   onboardingVisible: boolean;
+  availableTabs: AppTab[];
+
   session: User;
   supportDiagnostics: SupportDiagnosticsState;
   licenseVisible: boolean;
@@ -61,6 +63,7 @@ export function AppGlobalModals({
   chooseLoginEstablishment,
   currentEstablishment,
   data,
+  availableTabs,
   logout,
   licenseVisible,
   onOpenAdminSettings,
@@ -87,11 +90,13 @@ export function AppGlobalModals({
 }: AppGlobalModalsProps) {
   return (
     <>
-      <AppMenuModal
+      <ModernAppMenuModal
         visible={appMenuVisible}
         userLabel={session.name || roleLabel(session.role)}
         licenseLabel={compactLicenseStatusLabel(data.license)}
         canSwitchEstablishment={switchableEstablishments.length > 1}
+        availableTabs={availableTabs}
+        onNavigate={setTab}
         onClose={() => setAppMenuVisible(false)}
         onSync={() => { void onRunManualSync(); }}
         onOpenSyncCenter={onOpenSyncCenter}

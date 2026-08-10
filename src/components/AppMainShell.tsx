@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from "react-native";
 import { AppHeader } from "./AppHeader";
 import { AppTabs } from "./AppTabs";
+import { BottomAppTabs } from "./BottomAppTabs";
 import { BarcodeScannerModal } from "./BarcodeScannerModal";
 import { CalendarDateInput } from "./CalendarDateInput";
 import { CommercialSupportButton } from "./CommercialSupportButton";
@@ -26,6 +27,9 @@ import type { PersistMutation } from "../hooks/useSyncAndBackup";
 import type { ControlledSalesHistory } from "../hooks/useControlledSalesHistory";
 import { AppTab } from "../utils/appAccess";
 import { SyncState } from "../utils/support";
+
+const USE_BOTTOM_NAVIGATION = true;
+
 
 type AppMainShellProps = {
   activeTab: AppTab;
@@ -112,13 +116,15 @@ export function AppMainShell({
 
         <LicenseExpiryBanner license={data.license} onOpenLicense={onOpenLicense} visible={licenseBannerVisible} />
 
-        <AppTabs availableTabs={availableTabs} activeTab={activeTab} onChange={onTabChange} /> 
- {/*
-        <BottomAppTabs
-          availableTabs={availableTabs}
-          activeTab={activeTab}
-          onChange={onTabChange}
-        />*/}
+        {/* <AppTabs availableTabs={availableTabs} activeTab={activeTab} onChange={onTabChange} /> */}
+
+        {!USE_BOTTOM_NAVIGATION ? (
+          <AppTabs
+            availableTabs={availableTabs}
+            activeTab={activeTab}
+            onChange={onTabChange}
+          />
+        ) : null}
 
         <ScrollView
           contentContainerStyle={[
@@ -158,6 +164,15 @@ export function AppMainShell({
         {hasSalesOverlay ? floatingOverlay : null}
 
         {showCommercialSupport ? <CommercialSupportButton data={data} user={session} bottomInset={keyboardInset} onOpenDiagnostics={onOpenSupport} /> : null}
+
+        {USE_BOTTOM_NAVIGATION ? (
+          <BottomAppTabs
+            availableTabs={availableTabs}
+            activeTab={activeTab}
+            onChange={onTabChange}
+            onOpenMore={onOpenMenu}
+          />
+        ) : null}
       </FloatingOverlayContext.Provider>
     </KeyboardAvoidingView>
   );

@@ -220,7 +220,7 @@ export function AppContent() {
     return () => clearTimeout(timer);
   }, [data.license, ready, session]);
 
- 
+
 
   if (bootstrapStatus === "recovery-error") {
     return (
@@ -290,6 +290,7 @@ export function AppContent() {
 
       <AppGlobalModals
         appMenuVisible={appMenuVisible}
+        availableTabs={availableTabs}
         authState={authState}
         chooseLoginEstablishment={chooseLoginEstablishment}
         currentEstablishment={currentEstablishment}
