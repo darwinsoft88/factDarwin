@@ -2,7 +2,7 @@ import type React from "react";
 import { useRef } from "react";
 import { Alert } from "react-native";
 import type { PersistMutation } from "./useSyncAndBackup";
-import { authorizeInvoice, reserveDocumentSequence } from "../services/backend";
+import { authorizeInvoice, getCompanySriEnvironment, reserveDocumentSequence } from "../services/backend";
 import { buildInvoiceXml, createAccessKey, nextSequence } from "../sri";
 import { AdditionalInfoField, AppData, Client, DocumentType, PaymentCondition, PaymentMethod, Sale, SaleItem, SalePaymentSplit, User } from "../types";
 import { appendAudit } from "../utils/audit";
@@ -20,6 +20,7 @@ import { applySaleInventoryOnce, buildStockCredits, reverseSaleInventoryOnce, Sa
 import { findPotentialDuplicatePendingInvoice, nextInternalSequence, nextProformaSequence, resolveSaleInventoryState } from "../utils/sales";
 import { normalizePartialSalePayments, normalizeSalePayments, salePaymentBalance } from "../utils/salePayments";
 import { sriUserMessage, userFriendlyActionError } from "../utils/sriMessages";
+import { applyCanonicalSriEnvironment } from "../utils/sriEnvironmentAuthority";
 import { statusForAuthorizationFailure } from "../utils/sriRetryPolicy";
 import { syncSalePatchToBackend } from "../utils/sync";
 import { normalizeClientForInvoice, validateBeforeInternalSale, validateBeforeIssue, validateBeforeProforma, validateEmissionPointLicense } from "../validation";
@@ -307,7 +308,6 @@ export function useSaleIssueFlow({
         const createdAt = editingSale?.createdAt || new Date().toISOString();
         const establishmentId = activeEstablishment(data.issuer).id;
         const capturedItems = items.map((item) => ({ ...item }));
-        const capturedPayments = resolvedPayments.map((payment) => ({ ...payment }));
         const capturedAdditionalInfo = additionalInfo.map((field) => ({ ...field }));
         const capturedTotals = { ...totals };
         const capturedUser = { ...user };
@@ -335,9 +335,8 @@ export function useSaleIssueFlow({
             subtotal: capturedTotals.subtotal,
             tax: capturedTotals.tax,
             total: capturedTotals.total,
-            paymentMethod: resolvedPaymentMethod,
-            payments: capturedPayments,
-            ...creditFields,
+            paymentMethod: "01",
+            payments: [],
             additionalInfo: capturedAdditionalInfo,
             status: "PROFORMA",
             items: capturedItems,
@@ -388,11 +387,24 @@ export function useSaleIssueFlow({
         return;
       }
 
-      const documentIssuer = activeIssuer(data);
-      const documentEstablishment = activeEstablishment(data.issuer);
-      const dataForDocument = { ...data, issuer: documentIssuer };
+      let emissionData = data;
+      if (!editingSale) {
+        try {
+          setProcessingMessage("Confirmando ambiente SRI...");
+          const canonical = await getCompanySriEnvironment(data.backendUrl, backendToken);
+          emissionData = await persistMutation((current) => applyCanonicalSriEnvironment(current, canonical), { skipAutoBackup: true });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "No fue posible confirmar el ambiente SRI vigente.";
+          setIssueNotice(message);
+          showError("Ambiente SRI no confirmado", message);
+          return;
+        }
+      }
+      const documentIssuer = activeIssuer(emissionData);
+      const documentEstablishment = activeEstablishment(emissionData.issuer);
+      const dataForDocument = { ...emissionData, issuer: documentIssuer };
       const validationErrors = validateBeforeIssue(dataForDocument, invoiceClient, items, totals, stockCredits);
-      validateEmissionPointLicense(data, documentIssuer, validationErrors);
+      validateEmissionPointLicense(emissionData, documentIssuer, validationErrors);
       if (validationErrors.length > 0) {
         const message = validationErrors.map((error) => `- ${error}`).join("\n");
         setIssueNotice(message);
@@ -402,7 +414,7 @@ export function useSaleIssueFlow({
       const saleId = editingSale?.id || uid();
       const editingSaleId = editingSale?.id;
       const sourceProformaId = sourceProforma?.id;
-      const renderedSource = editingSale?.sourceSaleId ? data.sales.find((item) => item.id === editingSale.sourceSaleId) : undefined;
+      const renderedSource = editingSale?.sourceSaleId ? emissionData.sales.find((item) => item.id === editingSale.sourceSaleId) : undefined;
       const sourceTicketId = sourceTicket?.id || (renderedSource?.documentType === "nota_venta" ? renderedSource.id : undefined);
       const inventoryOperationId = uid();
       const createdAt = editingSale?.createdAt || new Date().toISOString();
@@ -417,8 +429,8 @@ export function useSaleIssueFlow({
       const capturedPaymentCondition = paymentCondition;
       const capturedPaymentMethod = resolvedPaymentMethod;
       const capturedCreditDueDate = creditDueDate.trim();
-      const backendUrl = data.backendUrl;
-      const duplicatePending = !editingSale ? findPotentialDuplicatePendingInvoice(data.sales, {
+      const backendUrl = emissionData.backendUrl;
+      const duplicatePending = !editingSale ? findPotentialDuplicatePendingInvoice(emissionData.sales, {
         id: "draft",
         clientId,
         createdAt,
@@ -666,9 +678,25 @@ export function useSaleIssueFlow({
       });
       const finalSale = finalData.sales.find((item) => item.id === saleId);
       if (!finalSale) throw new Error("La factura no quedo disponible despues de persistir el resultado SRI.");
+      const operationMovements = (finalData.inventoryMovements || []).filter((movement) => movement.saleId === saleId && (movement.createdAt === retryAt || movement.createdAt === finalPersistedAt));
+      const stockChangedProductIds = new Set(operationMovements.map((movement) => movement.productId));
+      const synced = await syncSalePatchToBackend(backendUrl, backendToken, {
+        baseData: finalData,
+        issuer: finalData.issuer,
+        sales: finalData.sales.filter((item) => [saleId, sourceTicketId, sourceProformaId].filter(Boolean).includes(item.id)),
+        products: finalData.products.filter((product) => stockChangedProductIds.has(product.id)),
+        inventoryMovements: operationMovements,
+        auditLogs: finalData.auditLogs.slice(0, 1)
+      }, { persistMutation });
       resetCurrentDocumentForm();
       setIssuing(false);
       setProcessingMessage("");
+
+      if (!synced) {
+        setIssueNotice(`Factura ${finalSale.sequence}: resultado SRI pendiente de sincronizar.`);
+        return;
+      }
+
       setIssueNotice(finalSale.status === "AUTORIZADA" ? "Factura autorizada y guardada." : `Factura guardada con estado ${finalSale.status}.`);
 
       if (finalSale.status === "AUTORIZADA") {
@@ -692,16 +720,6 @@ export function useSaleIssueFlow({
         );
       }
 
-      const operationMovements = (finalData.inventoryMovements || []).filter((movement) => movement.saleId === saleId && (movement.createdAt === retryAt || movement.createdAt === finalPersistedAt));
-      const stockChangedProductIds = new Set(operationMovements.map((movement) => movement.productId));
-      await syncSalePatchToBackend(backendUrl, backendToken, {
-        baseData: finalData,
-        issuer: finalData.issuer,
-        sales: finalData.sales.filter((item) => [saleId, sourceTicketId, sourceProformaId].filter(Boolean).includes(item.id)),
-        products: finalData.products.filter((product) => stockChangedProductIds.has(product.id)),
-        inventoryMovements: operationMovements,
-        auditLogs: finalData.auditLogs.slice(0, 1)
-      }, finalData, persist);
     } finally {
       issueRunningRef.current = false;
       setIssuing(false);

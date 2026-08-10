@@ -1,5 +1,5 @@
-import { backendBaseUrl, postJson, readJson } from "./http";
-import { AuthorizationResponse, ReservedSequenceResponse } from "./types";
+import { authHeaders, backendBaseUrl, fetchWithTimeout, postJson, readJson } from "./http";
+import { AuthorizationResponse, ReservedSequenceResponse, SriEnvironmentResponse } from "./types";
 
 const INVOICE_AUTHORIZATION_TIMEOUT_MS = 60000;
 
@@ -42,6 +42,26 @@ export async function reserveDocumentSequence(backendUrl: string, payload: { doc
     throw new Error(result.error || "No se pudo reservar el secuencial en el backend.");
   }
 
+  return result;
+}
+
+export async function getCompanySriEnvironment(backendUrl: string, token = ""): Promise<SriEnvironmentResponse> {
+  const response = await fetchWithTimeout(`${backendBaseUrl(backendUrl)}/api/sri/environment`, { headers: authHeaders(token), cache: "no-store" }, 12_000, "No se pudo confirmar el ambiente SRI vigente.");
+  const result = await readJson(response) as SriEnvironmentResponse;
+  if (!response.ok || !["1", "2"].includes(String(result.environment)) || !Number.isSafeInteger(result.environmentVersion) || result.environmentVersion < 1) {
+    throw new Error(result.error || "No se pudo confirmar el ambiente SRI vigente.");
+  }
+  return result;
+}
+
+export async function updateCompanySriEnvironment(backendUrl: string, environment: "1" | "2", expectedVersion: number, token = ""): Promise<SriEnvironmentResponse> {
+  const response = await fetchWithTimeout(`${backendBaseUrl(backendUrl)}/api/sri/environment`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ environment, expectedVersion }),
+  }, 12_000, "No se pudo guardar el ambiente SRI empresarial.");
+  const result = await readJson(response) as SriEnvironmentResponse;
+  if (!response.ok) throw new Error(result.error || "No se pudo guardar el ambiente SRI empresarial.");
   return result;
 }
 

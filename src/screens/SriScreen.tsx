@@ -20,6 +20,7 @@ import { useSriEstablishmentUiState } from "../hooks/useSriEstablishmentUiState"
 import { useSriIssuerFormState } from "../hooks/useSriIssuerFormState";
 import { useSriIssuerLookup } from "../hooks/useSriIssuerLookup";
 import { useTechnicalLogsLoader } from "../hooks/useTechnicalLogsLoader";
+import { getCompanySriEnvironment, updateCompanySriEnvironment } from "../services/backend";
 import { AppData, Issuer, IssuerEstablishment, User } from "../types";
 import { appLicenseStatus, canAccessDeveloperTools, compactLicenseStatusLabel } from "../utils/appAccess";
 import { appendAudit } from "../utils/audit";
@@ -372,10 +373,21 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
       return;
     }
     const { creditNoteSequential, remissionSequential, removedIds, sequential } = validation.value;
-    const nextData = appendAudit({ ...data, backendUrl, autoBackupEnabled, issuer: nextIssuer, license }, user, "SRI_CONFIG_UPDATED", "issuer", issuer.ruc, "Configuracion SRI actualizada", { environment: nextIssuer.environment, establishment: nextIssuer.establishment, emissionPoint: nextIssuer.emissionPoint, sequential, remissionSequential, creditNoteSequential, autoBackupEnabled, removedEstablishments: removedIds, establishmentsUpdatedAt: nextIssuer.establishmentsUpdatedAt });
+    let canonicalEnvironment;
+    try {
+      canonicalEnvironment = await getCompanySriEnvironment(data.backendUrl, backendToken);
+      if (nextIssuer.environment !== data.issuer.environment) {
+        canonicalEnvironment = await updateCompanySriEnvironment(data.backendUrl, nextIssuer.environment, canonicalEnvironment.environmentVersion, backendToken);
+      }
+    } catch (error) {
+      showMessage("Ambiente SRI no confirmado", error instanceof Error ? error.message : "No fue posible confirmar el ambiente empresarial vigente.");
+      return;
+    }
+    const confirmedIssuer: Issuer = { ...nextIssuer, environment: canonicalEnvironment.environment, environmentVersion: canonicalEnvironment.environmentVersion };
+    const nextData = appendAudit({ ...data, backendUrl, autoBackupEnabled, issuer: confirmedIssuer, license }, user, "SRI_CONFIG_UPDATED", "issuer", issuer.ruc, "Configuracion SRI actualizada", { environment: confirmedIssuer.environment, environmentVersion: confirmedIssuer.environmentVersion, establishment: confirmedIssuer.establishment, emissionPoint: confirmedIssuer.emissionPoint, sequential, remissionSequential, creditNoteSequential, autoBackupEnabled, removedEstablishments: removedIds, establishmentsUpdatedAt: confirmedIssuer.establishmentsUpdatedAt });
     await persist(nextData);
-    await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, issuer: nextIssuer, auditLogs: nextData.auditLogs.slice(0, 1) }, "Configuracion SRI pendiente de sincronizar", nextData, persist);
-    setIssuer(nextIssuer);
+    await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, issuer: confirmedIssuer, auditLogs: nextData.auditLogs.slice(0, 1) }, "Configuracion SRI pendiente de sincronizar", nextData, persist);
+    setIssuer(confirmedIssuer);
     setSequentialText(String(sequential));
     setRemissionSequentialText(String(remissionSequential));
     setCreditNoteSequentialText(String(creditNoteSequential));
@@ -391,7 +403,7 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
     setEstablishmentStatus({ tone: "success", message: `${selectedEstablishment.name} ${nextIssuer.establishment}-${nextIssuer.emissionPoint} guardado correctamente.` });
     Alert.alert(
       "Configuracion guardada",
-      nextIssuer.environment === "2"
+      confirmedIssuer.environment === "2"
         ? "Produccion activada. Los proximos comprobantes se enviaran al ambiente real del SRI."
         : "Pruebas activadas. Los proximos comprobantes se enviaran al ambiente de pruebas del SRI."
     );

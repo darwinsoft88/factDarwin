@@ -328,7 +328,8 @@ export const initialData: AppData = {
   deletedIds: {
     clients: [],
     products: [],
-    users: []
+    users: [],
+    sales: []
   },
   historyPolicy: {
     mode: "full-local-snapshot"

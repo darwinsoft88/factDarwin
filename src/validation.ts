@@ -247,6 +247,7 @@ export function sanitizeAppData(data: AppData): AppData {
   const deletedClients = new Set(deletedIds.clients);
   const deletedProducts = new Set(deletedIds.products);
   const deletedUsers = new Set(deletedIds.users);
+  const deletedSales = new Set(deletedIds.sales);
   const deletedInventoryMovements = new Set(deletedIds.inventoryMovements);
   const seenClients = new Set<string>();
   const clients = data.clients.map((client) => {
@@ -307,7 +308,7 @@ export function sanitizeAppData(data: AppData): AppData {
     clients,
     products,
     users,
-    sales: (data.sales || []).map((sale) => ({ ...sale, status: normalizeSaleStatus(sale) })),
+    sales: (data.sales || []).filter((sale) => !deletedSales.has(sale.id)).map((sale) => ({ ...sale, status: normalizeSaleStatus(sale) })),
     creditPayments: data.creditPayments || [],
     inventoryMovements: (data.inventoryMovements || []).filter((movement) => !deletedInventoryMovements.has(movement.id)),
     auditLogs: data.auditLogs || [],
@@ -357,6 +358,7 @@ function normalizeDeletedIds(deletedIds: AppData["deletedIds"], auditLogs: AppDa
     clients: new Set<string>(deletedIds?.clients || []),
     products: new Set<string>(deletedIds?.products || []),
     users: new Set<string>(deletedIds?.users || []),
+    sales: new Set<string>(deletedIds?.sales || []),
     inventoryMovements: new Set<string>(deletedIds?.inventoryMovements || [])
   };
   (auditLogs || []).forEach((log) => {
@@ -369,6 +371,7 @@ function normalizeDeletedIds(deletedIds: AppData["deletedIds"], auditLogs: AppDa
     clients: Array.from(result.clients),
     products: Array.from(result.products),
     users: Array.from(result.users),
+    sales: Array.from(result.sales),
     inventoryMovements: Array.from(result.inventoryMovements)
   };
 }

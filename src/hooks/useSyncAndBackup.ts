@@ -41,7 +41,7 @@ import { getIncrementalDeviceId } from "../services/incrementalDeviceIdentity";
 import { localIncrementalPilotEnabled, runIncrementalCatalogPilot } from "../services/incrementalCatalogSync";
 import { markIncrementalCursorInactive } from "../services/incrementalCursorStorage";
 
-type RefreshReason = "login" | "active" | "manual";
+type RefreshReason = "login" | "active" | "manual" | "silent";
 type ConnectivityReason = "network" | "active" | "pending";
 export type PersistOptions = {
   skipAutoBackup?: boolean;
@@ -87,7 +87,6 @@ export function useSyncAndBackup({
   setSyncActionLoading,
   setSyncCenterVisible,
   setSyncState,
-  syncState,
   syncStateRef
 }: UseSyncAndBackupParams) {
   const autoBackupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -441,7 +440,7 @@ export function useSyncAndBackup({
   setSyncState
 ]);
 
-  const runManualSync = useCallback(async () => {
+  const runManualSync = useCallback(async (refreshReason: RefreshReason = "manual") => {
     setAppMenuVisible(false);
     if (dataRef.current.autoBackupEnabled === false || !dataRef.current.backendUrl) {
       const enabled = await updateStoredData((current) => sanitizeAppData({
@@ -457,7 +456,8 @@ export function useSyncAndBackup({
     if (current.autoBackupEnabled !== false && current.backendUrl && hasLocalSyncWork(current, syncStateRef.current)) {
       await runAutoBackup(current);
     }
-    await refreshFromBackend("manual");
+    if (dataRef.current.autoBackupLastError) return;
+    await refreshFromBackend(refreshReason);
   }, [dataRef, flushAutoBackup, refreshFromBackend, runAutoBackup, setAppMenuVisible, setData, syncStateRef]);
 
   const syncAfterConnectivityRestored = useCallback(async (reason: ConnectivityReason) => {
@@ -521,7 +521,7 @@ export function useSyncAndBackup({
           }
         }
       }
-      if ((dataRef.current.pendingSync || []).length === 0) {
+      if ((dataRef.current.pendingSync || []).length === 0 && !dataRef.current.autoBackupLastError) {
         await refreshFromBackend("active");
       }
     } finally {
@@ -537,13 +537,23 @@ export function useSyncAndBackup({
   const retryPendingSync = useCallback(async () => {
     setSyncActionLoading(true);
     try {
-      await runManualSync();
+      await runManualSync("silent");
       await syncAfterConnectivityRestored("pending");
-      showSuccess("Sincronizacion", formatSyncStatus(syncState, dataRef.current));
+      const finalData = dataRef.current;
+      const sriPending = sriPendingSendSummary(finalData).pendingCount;
+      if ((finalData.pendingSync || []).length > 0) {
+        showWarning("Sincronizacion pendiente", formatSyncStatus("pending", finalData));
+      } else if (finalData.autoBackupLastError) {
+        showError("No se pudo sincronizar", formatSyncStatus("error", finalData));
+      } else if (sriPending > 0) {
+        showWarning("SRI pendiente", `${sriPending} documento(s) siguen sin autorizacion definitiva del SRI.`);
+      } else {
+        showSuccess("Datos al dia", formatSyncStatus("synced", finalData));
+      }
     } finally {
       setSyncActionLoading(false);
     }
-  }, [dataRef, runManualSync, setSyncActionLoading, syncAfterConnectivityRestored, syncState]);
+  }, [dataRef, runManualSync, setSyncActionLoading, syncAfterConnectivityRestored]);
 
   const testSyncServer = useCallback(async () => {
     setSyncActionLoading(true);

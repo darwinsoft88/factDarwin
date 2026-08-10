@@ -290,6 +290,104 @@ describe("dataMerge", () => {
     expect(merged.sales.find((item) => item.id === "sale-credit")?.creditStatus).toBe("pagado");
   });
 
+  it("uses the durable server state for a synchronized SRI document", () => {
+    const base = sale("sale-stale", "000000327", "2026-08-01T17:02:00.000Z");
+    const remote = {
+      ...initialData,
+      sales: [{ ...base, status: "ANULADA" as const, inventoryState: "REVERSED" as const }]
+    };
+    const local = {
+      ...initialData,
+      sales: [{ ...base, status: "ERROR_SRI" as const, inventoryState: "REVERSED" as const }],
+      pendingSync: []
+    };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.sales).toHaveLength(1);
+    expect(merged.sales[0]).toMatchObject({ id: "sale-stale", status: "ANULADA", inventoryState: "REVERSED" });
+  });
+
+  it("keeps a local sale while its exact change remains protected by the outbox", () => {
+    const base = sale("sale-pending", "000000328", "2026-08-08T10:00:00.000Z");
+    const remoteSale = { ...base, status: "ERROR_SRI" as const, sriMessage: "estado remoto anterior" };
+    const localSale = { ...base, status: "PENDIENTE_SRI" as const, sriMessage: "cambio local pendiente" };
+    const remote = { ...initialData, sales: [remoteSale] };
+    const local = {
+      ...initialData,
+      sales: [localSale],
+      pendingSync: [{
+        id: "pending-sale",
+        title: "Documento pendiente",
+        attempts: 1,
+        createdAt: "2026-08-08T10:00:01.000Z",
+        patch: { requestId: "sync_sale_pending", sales: [localSale] }
+      }]
+    };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.sales[0]?.sriMessage).toBe("cambio local pendiente");
+    expect(merged.pendingSync).toHaveLength(1);
+  });
+
+  it("does not regress a locally authorized retry while its durable sync is pending", () => {
+    const base = sale("sale-retry", "000000339", "2026-08-09T23:27:58.289Z");
+    const remoteSale = { ...base, status: "ENVIADA" as const, sriMessage: "En revision SRI" };
+    const localSale = { ...base, status: "AUTORIZADA" as const, authorizationNumber: "authorization-339", authorizedXml: "<autorizado />" };
+    const remote = { ...initialData, sales: [remoteSale] };
+    const local: AppData = {
+      ...initialData,
+      sales: [localSale],
+      pendingSync: [{
+        id: "pending-retry-339",
+        title: "Documento pendiente",
+        attempts: 0,
+        createdAt: "2026-08-09T23:30:00.000Z",
+        patch: { requestId: "sync_retry_339", sales: [localSale] }
+      }]
+    };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.sales[0]).toMatchObject({ status: "AUTORIZADA", authorizationNumber: "authorization-339" });
+    expect(merged.pendingSync).toHaveLength(1);
+  });
+
+  it("does not revive a sale protected by a durable deletion tombstone", () => {
+    const removedSale = sale("sale-removed", "000000025", "2026-07-27T23:56:30.000Z");
+    const remote: AppData = {
+      ...initialData,
+      sales: [],
+      deletedIds: { ...(initialData.deletedIds || {}), sales: [removedSale.id] }
+    };
+    const local: AppData = { ...initialData, sales: [removedSale] };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.sales).toEqual([]);
+    expect(merged.deletedIds?.sales).toEqual([removedSale.id]);
+  });
+
+  it("keeps a sales tombstone idempotent across repeated syncs without affecting another document", () => {
+    const removedSale = sale("sale-removed", "000000025", "2026-07-27T23:56:30.000Z");
+    const keptSale = sale("sale-kept", "000000019", "2026-08-08T22:45:50.000Z");
+    const remote: AppData = {
+      ...initialData,
+      sales: [keptSale],
+      deletedIds: { ...(initialData.deletedIds || {}), sales: [removedSale.id] }
+    };
+    const staleLocal: AppData = { ...initialData, sales: [removedSale, keptSale] };
+
+    const firstSync = mergeAppDataSnapshots(remote, staleLocal);
+    const secondSync = mergeAppDataSnapshots(remote, firstSync);
+    const thirdSync = mergeAppDataSnapshots(remote, secondSync);
+
+    expect(thirdSync.sales.map((item) => item.id)).toEqual([keptSale.id]);
+    expect(thirdSync.deletedIds?.sales).toEqual([removedSale.id]);
+    expect(thirdSync.pendingSync).toEqual([]);
+  });
+
   it("keeps exclusive remote and local adjustments without deduplicating by note or amount", () => {
     const remote = creditAdjustment("remote", { sourceCreditNoteId: "same-note", amount: 10 });
     const local = creditAdjustment("local", { sourceCreditNoteId: "same-note", amount: 10 });

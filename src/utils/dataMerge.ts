@@ -13,7 +13,8 @@ export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): 
     issuer: {
       ...remoteData.issuer,
       ...localData.issuer,
-      environment: localData.issuer.environment,
+      environment: canonicalIssuerEnvironment(remoteData.issuer, localData.issuer).environment,
+      environmentVersion: canonicalIssuerEnvironment(remoteData.issuer, localData.issuer).environmentVersion,
       establishments: mergeIssuerEstablishments(remoteData.issuer, localData.issuer),
       establishmentsUpdatedAt: newerTimestamp(remoteData.issuer?.establishmentsUpdatedAt, localData.issuer?.establishmentsUpdatedAt),
       sequential: mergeIssuerSequence(remoteData.issuer?.sequential, localData.issuer?.sequential, sameSequenceScope),
@@ -23,7 +24,7 @@ export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): 
     users: mergeById(remoteData.users || [], localData.users || []),
     clients: mergeByLatestUpdatedAt(remoteData.clients || [], localData.clients || []),
     products: mergeByLatestUpdatedAt(remoteData.products || [], localData.products || []),
-    sales: prependUniqueById(remoteData.sales || [], localData.sales || []),
+    sales: mergeSalesWithRemoteAuthority(remoteData.sales || [], localData.sales || [], localData),
     creditPayments: mergeCreditPaymentsWithinBalances(remoteData.sales || [], localData.sales || [], remoteData.creditPayments || [], localData.creditPayments || []),
     creditAdjustments: mergeCreditAdjustments(
       remoteData.creditAdjustments || [],
@@ -44,6 +45,18 @@ export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): 
     historyPolicy: remoteData.historyPolicy || localData.historyPolicy
   };
   return sanitizeAppData(reconcileProductStockFromMovements(reconcileCreditBalancesFromPayments(merged)));
+}
+
+function canonicalIssuerEnvironment(remoteIssuer: Issuer, localIssuer: Issuer) {
+  const remoteVersion = normalizedEnvironmentVersion(remoteIssuer.environmentVersion);
+  const localVersion = normalizedEnvironmentVersion(localIssuer.environmentVersion);
+  if (remoteVersion >= localVersion) return { environment: remoteIssuer.environment, environmentVersion: remoteVersion };
+  return { environment: localIssuer.environment, environmentVersion: localVersion };
+}
+
+function normalizedEnvironmentVersion(value: unknown) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : 1;
 }
 
 export type CreditAdjustmentMergeErrorCode =
@@ -182,6 +195,7 @@ function mergeDeletedIds(remoteDeleted?: AppData["deletedIds"], localDeleted?: A
     clients: Array.from(new Set([...(remoteDeleted?.clients || []), ...(localDeleted?.clients || [])])),
     products: Array.from(new Set([...(remoteDeleted?.products || []), ...(localDeleted?.products || [])])),
     users: Array.from(new Set([...(remoteDeleted?.users || []), ...(localDeleted?.users || [])])),
+    sales: Array.from(new Set([...(remoteDeleted?.sales || []), ...(localDeleted?.sales || [])])),
     inventoryMovements: Array.from(new Set([...(remoteDeleted?.inventoryMovements || []), ...(localDeleted?.inventoryMovements || [])]))
   };
 }
@@ -260,6 +274,42 @@ function prependUniqueById<T extends { id: string }>(remoteItems: T[], localItem
     result.push(item);
   });
   return result;
+}
+
+function mergeSalesWithRemoteAuthority(remoteSales: Sale[], localSales: Sale[], localData: AppData) {
+  const remoteById = new Map(remoteSales.filter((sale) => sale?.id).map((sale) => [sale.id, sale]));
+  const protectedLocalIds = pendingSaleIds(localData);
+  const seen = new Set<string>();
+  const result: Sale[] = [];
+
+  localSales.forEach((localSale) => {
+    if (!localSale?.id || seen.has(localSale.id)) return;
+    const remoteSale = remoteById.get(localSale.id);
+    result.push(remoteSale && !protectedLocalIds.has(localSale.id) ? remoteSale : localSale);
+    seen.add(localSale.id);
+  });
+  remoteSales.forEach((remoteSale) => {
+    if (!remoteSale?.id || seen.has(remoteSale.id)) return;
+    result.push(remoteSale);
+    seen.add(remoteSale.id);
+  });
+  return result;
+}
+
+function pendingSaleIds(data: AppData) {
+  const ids = new Set<string>();
+  (data.pendingSync || []).forEach((pending) => {
+    const patch = pending.patch;
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) return;
+    const sales = (patch as { sales?: unknown }).sales;
+    if (!Array.isArray(sales)) return;
+    sales.forEach((sale) => {
+      if (sale && typeof sale === "object" && !Array.isArray(sale) && typeof (sale as { id?: unknown }).id === "string") {
+        ids.add((sale as { id: string }).id);
+      }
+    });
+  });
+  return ids;
 }
 
 function mergeCreditPaymentsWithinBalances(

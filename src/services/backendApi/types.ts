@@ -136,7 +136,18 @@ export type ReservedSequenceResponse = {
   documentType?: "factura" | "nota_credito" | "guia_remision";
   sequence?: string;
   accessKey?: string;
+  environment?: "1" | "2";
+  environmentVersion?: number;
   error?: string;
+};
+
+export type SriEnvironmentResponse = {
+  ok: boolean;
+  environment: "1" | "2";
+  environmentVersion: number;
+  changed?: boolean;
+  error?: string;
+  canonical?: { environment: "1" | "2"; environmentVersion: number };
 };
 
 export type CompanyAssetsStatus = {

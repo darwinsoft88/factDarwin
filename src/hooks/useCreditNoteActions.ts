@@ -1,6 +1,6 @@
 import React from "react";
 import { Alert } from "react-native";
-import { authorizeInvoice, reserveDocumentSequence } from "../services/backend";
+import { authorizeInvoice, getCompanySriEnvironment, reserveDocumentSequence } from "../services/backend";
 import { buildCreditNoteXml, calculateTotals, createCreditNoteAccessKey, nextSequence } from "../sri";
 import { AppData, Client, Sale, User } from "../types";
 import type { PersistMutation } from "./useSyncAndBackup";
@@ -13,6 +13,7 @@ import { formatSriDate } from "../utils/format";
 import { applyCreditNoteInventoryOnce } from "../utils/inventory";
 import { buildCreditNoteItemsFromQuantities, formatQuantity, getCreditLineAvailable, getCreditLineKey, hasCreditNoteBalance, isFinalConsumerClient, isInvoiceSale, validateCreditNoteQuantities } from "../utils/sales";
 import { explainSriResult, sriUserMessage } from "../utils/sriMessages";
+import { applyCanonicalSriEnvironment } from "../utils/sriEnvironmentAuthority";
 import { syncSalePatchToBackend } from "../utils/sync";
 import { validateEmissionPointLicense } from "../validation";
 
@@ -137,9 +138,17 @@ export function useCreditNoteActions({
     }
 
     const createdAt = new Date().toISOString();
-    const reservationIssuer = issuerForSale(data.issuer, creditNoteSource);
+    let confirmedData: AppData;
+    try {
+      const canonical = await getCompanySriEnvironment(data.backendUrl, backendToken);
+      confirmedData = await persistMutation((current) => applyCanonicalSriEnvironment(current, canonical), { skipAutoBackup: true });
+    } catch (error) {
+      showError("Ambiente SRI no confirmado", error instanceof Error ? error.message : "No fue posible confirmar el ambiente SRI vigente.");
+      return;
+    }
+    const reservationIssuer = issuerForSale(confirmedData.issuer, creditNoteSource);
     const licenseErrors: string[] = [];
-    validateEmissionPointLicense(data, reservationIssuer, licenseErrors);
+    validateEmissionPointLicense(confirmedData, reservationIssuer, licenseErrors);
     if (licenseErrors.length > 0) {
       const message = licenseErrors.join("\n");
       showWarning("Plan requerido", message);
@@ -149,7 +158,7 @@ export function useCreditNoteActions({
     let accessKey = createCreditNoteAccessKey(new Date(createdAt), reservationIssuer, sequence);
     try {
       setProcessingMessage("Preparando numero de nota de credito...");
-      const reserved = await reserveDocumentSequence(data.backendUrl, { documentType: "nota_credito", issuer: reservationIssuer, createdAt }, backendToken);
+      const reserved = await reserveDocumentSequence(confirmedData.backendUrl, { documentType: "nota_credito", issuer: reservationIssuer, createdAt }, backendToken);
       if (Number(reserved.sequence) < Number(sequence)) {
         throw new Error(`El servidor devolvio el secuencial ${reserved.sequence}, menor al configurado ${sequence}. Guarde SRI y sincronice antes de emitir.`);
       }

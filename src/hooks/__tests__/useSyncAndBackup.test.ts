@@ -1,8 +1,9 @@
 import { initialData } from "../../database/storage";
 import { AppData, User } from "../../types";
 import { useSyncAndBackup } from "../useSyncAndBackup";
-import { backupAppData, mergeBackendData } from "../../services/backend";
+import { backupAppData, mergeBackendData, restoreAppData } from "../../services/backend";
 import { migrateStoredPendingSyncRequestIds } from "../../database/storage";
+import { showSuccess, showWarning } from "../../utils/dialogs";
 
 let mockStoredData: AppData;
 
@@ -15,7 +16,7 @@ jest.mock("react", () => ({
 }));
 jest.mock("react-native", () => ({ Platform: { OS: "native" }, AppState: { addEventListener: jest.fn() } }));
 jest.mock("expo-network", () => ({ addNetworkStateListener: jest.fn(), getNetworkStateAsync: jest.fn() }));
-jest.mock("../../utils/dialogs", () => ({ showMessage: jest.fn(), showWarning: jest.fn() }));
+jest.mock("../../utils/dialogs", () => ({ showMessage: jest.fn(), showInfo: jest.fn(), showSuccess: jest.fn(), showError: jest.fn(), showWarning: jest.fn() }));
 jest.mock("../../utils/sessionToken", () => ({ isSessionTokenExpired: jest.fn(() => false) }));
 jest.mock("../../services/security", () => ({ hashPassword: jest.fn(async () => "hash") }));
 jest.mock("../../utils/autoRetrySriDocuments", () => ({ autoRetrySriDocuments: jest.fn(async () => ({ attempted: 0 })) }));
@@ -35,6 +36,7 @@ jest.mock("../../database/storage", () => {
 jest.mock("../../services/backend", () => ({
   backupAppData: jest.fn(async () => ({ ok: true, updatedAt: "2026-07-01T00:00:00.000Z" })),
   checkBackendHealth: jest.fn(),
+  getRemoteSnapshotMetadata: jest.fn(async () => ({ updatedAt: "2026-07-01T00:00:00.000Z" })),
   loginBackend: jest.fn(),
   mergeBackendData: jest.fn(async () => ({ ok: true })),
   restoreAppData: jest.fn(async () => null)
@@ -42,7 +44,10 @@ jest.mock("../../services/backend", () => ({
 
 const mergeMock = mergeBackendData as jest.MockedFunction<typeof mergeBackendData>;
 const backupMock = backupAppData as jest.MockedFunction<typeof backupAppData>;
+const restoreMock = restoreAppData as jest.MockedFunction<typeof restoreAppData>;
 const migrateMock = migrateStoredPendingSyncRequestIds as jest.MockedFunction<typeof migrateStoredPendingSyncRequestIds>;
+const showSuccessMock = showSuccess as jest.MockedFunction<typeof showSuccess>;
+const showWarningMock = showWarning as jest.MockedFunction<typeof showWarning>;
 
 function pendingData(patch: Record<string, unknown>): AppData {
   return {
@@ -116,5 +121,39 @@ describe("useSyncAndBackup pending replay", () => {
     await hook.runManualSync();
     expect(mockStoredData.pendingSync).toHaveLength(1);
     expect((mockStoredData.pendingSync?.[0]?.patch as { requestId: string }).requestId).toBe("sync_offline");
+    expect(restoreMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not report data up to date while an SRI document is still pending", async () => {
+    mockStoredData = {
+      ...initialData,
+      backendUrl: "https://backend.test",
+      autoBackupEnabled: true,
+      sales: [{
+        id: "sale-sri-pending",
+        documentType: "factura",
+        establishment: "002",
+        emissionPoint: "010",
+        clientId: "client-1",
+        userId: "user-1",
+        createdAt: new Date().toISOString(),
+        sequence: "000000339",
+        accessKey: "0908202601172377209900110020100000003391234567815",
+        subtotal: 1,
+        tax: 0.15,
+        total: 1.15,
+        paymentMethod: "01",
+        paymentCondition: "contado",
+        status: "ENVIADA",
+        inventoryState: "APPLIED",
+        items: []
+      }]
+    };
+    const { hook } = useTestHook(mockStoredData);
+
+    await hook.retryPendingSync();
+
+    expect(showWarningMock).toHaveBeenCalledWith("SRI pendiente", expect.stringContaining("1 documento"));
+    expect(showSuccessMock).not.toHaveBeenCalledWith("Datos al dia", expect.any(String));
   });
 });

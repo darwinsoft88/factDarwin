@@ -192,6 +192,38 @@ describe("storage pending outbox", () => {
     expect(loaded.creditAdjustments?.[1]?.reverseOperationId).toBe("credit-adjustment-reverse:1");
   });
 
+  it("preserves a sales tombstone across restart and never restores its stale document", async () => {
+    const removedSale: Sale = {
+      id: "sale-removed",
+      documentType: "factura",
+      clientId: "c-final",
+      userId: "u-admin",
+      createdAt: "2026-07-27T23:56:30.000Z",
+      sequence: "000000025",
+      accessKey: "test-access-key",
+      subtotal: 1,
+      tax: 0,
+      total: 1,
+      paymentMethod: "01",
+      status: "AUTORIZADA",
+      items: []
+    };
+    const keptSale = { ...removedSale, id: "sale-kept", sequence: "000000019", accessKey: "production-access-key" };
+
+    await saveData({
+      ...initialData,
+      sales: [keptSale, removedSale],
+      deletedIds: { ...(initialData.deletedIds || {}), sales: [removedSale.id] }
+    });
+    const firstOpen = await loadData();
+    const secondOpen = await loadData();
+
+    expect(firstOpen.sales.map((sale) => sale.id)).toEqual([keptSale.id]);
+    expect(secondOpen.sales.map((sale) => sale.id)).toEqual([keptSale.id]);
+    expect(secondOpen.deletedIds?.sales).toEqual([removedSale.id]);
+    expect(secondOpen.pendingSync).toEqual([]);
+  });
+
   it("materializes an adjustment that exists only in the durable outbox", async () => {
     const pendingAdjustment = adjustment({ id: "outbox-adjustment" });
     store.set(outboxKey, JSON.stringify([pending("adjustment-only", { requestId: "sync_adjustment", creditAdjustments: [pendingAdjustment] })]));

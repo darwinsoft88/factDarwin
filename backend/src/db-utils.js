@@ -356,6 +356,7 @@ function applySnapshotPatch(currentData, patch = {}) {
       remissionSequential: mergeIssuerSequence(data.issuer?.remissionSequential, patch.issuer.remissionSequential, sameSequenceScope),
       creditNoteSequential: mergeIssuerSequence(data.issuer?.creditNoteSequential, patch.issuer.creditNoteSequential, sameSequenceScope)
     };
+    applyCanonicalIssuerEnvironment(currentData, data);
   }
   if (patch.license && typeof patch.license === "object") {
     data.license = {
@@ -394,6 +395,24 @@ function applySnapshotPatch(currentData, patch = {}) {
   return normalizeDocumentScopes(data);
 }
 
+function applyCanonicalIssuerEnvironment(currentData, nextData) {
+  if (!nextData?.issuer) return nextData;
+  const currentIssuer = currentData?.issuer;
+  if (currentIssuer) {
+    nextData.issuer.environment = normalizeEnvironment(currentIssuer.environment) || "1";
+    nextData.issuer.environmentVersion = environmentVersion(currentIssuer.environmentVersion);
+  } else {
+    nextData.issuer.environment = normalizeEnvironment(nextData.issuer.environment) || "1";
+    nextData.issuer.environmentVersion = environmentVersion(nextData.issuer.environmentVersion);
+  }
+  return nextData;
+}
+
+function environmentVersion(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : 1;
+}
+
 function addedEstablishmentIds(currentIssuer = {}, incomingIssuer = {}) {
   const currentIds = new Set(normalizedEstablishmentIds(currentIssuer.establishments || []));
   return normalizedEstablishmentIds(incomingIssuer.establishments || []).filter((id) => !currentIds.has(id));
@@ -422,6 +441,7 @@ function mergeDeletedIds(current = {}, incoming = {}, deletions = {}) {
     clients: mergeIdLists(current.clients, incoming.clients, deletions.clients),
     products: mergeIdLists(current.products, incoming.products, deletions.products),
     users: mergeIdLists(current.users, incoming.users, deletions.users),
+    sales: mergeIdLists(current.sales, incoming.sales, deletions.sales),
     inventoryMovements: mergeIdLists(current.inventoryMovements, incoming.inventoryMovements, deletions.inventoryMovements)
   };
 }
@@ -436,7 +456,7 @@ function mergeIdLists(...lists) {
 
 function applyDeletedIdFilters(data) {
   const deleted = data.deletedIds || {};
-  for (const field of ["clients", "products", "users", "inventoryMovements"]) {
+  for (const field of ["clients", "products", "users", "sales", "inventoryMovements"]) {
     if (!Array.isArray(data[field])) continue;
     const ids = new Set(deleted[field] || []);
     data[field] = data[field].filter((item) => !ids.has(item?.id));
@@ -817,6 +837,7 @@ module.exports = {
   MAX_DOMAIN_OPERATION_ID_LENGTH,
   MAX_SYNC_REQUEST_ID_LENGTH,
   applySnapshotPatch,
+  applyCanonicalIssuerEnvironment,
   assertDomainOperationReplay,
   createDomainEntityOperationConflictError,
   createDomainOperationError,
@@ -824,6 +845,7 @@ module.exports = {
   compactSnapshotForStorage,
   hashSyncPayload,
   hashDomainOperation,
+  environmentVersion,
   normalizeClientIdentification,
   normalizeDocumentScopes,
   normalizeProductCode,

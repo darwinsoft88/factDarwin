@@ -1,4 +1,4 @@
-import { authorizeInvoice, reserveDocumentSequence } from "../services/backend";
+import { authorizeInvoice, getCompanySriEnvironment, reserveDocumentSequence } from "../services/backend";
 import { buildInvoiceXml } from "../sri";
 import type { AppDataMutation } from "../database/storage";
 import { AppData, Sale, User } from "../types";
@@ -11,6 +11,7 @@ import { isTicketOffline } from "./invoiceStatus";
 import { isConvertedSale, resolveSaleInventoryState } from "./sales";
 import { statusForAuthorizationFailure } from "./sriRetryPolicy";
 import { sriUserMessage, userFriendlyActionError } from "./sriMessages";
+import { applyCanonicalSriEnvironment } from "./sriEnvironmentAuthority";
 import { normalizeClientForInvoice, validateBeforeIssue, validateEmissionPointLicense } from "../validation";
 
 type DurableAppDataMutation = (
@@ -136,7 +137,7 @@ export async function autoInvoiceOfflineTickets({
   const candidateIds = pendingAutoInvoiceTickets(initialData, maxTickets).map((ticket) => ticket.id);
 
   for (const ticketId of candidateIds) {
-    const latest = getCurrentData();
+    let latest = getCurrentData();
     const ticket = latest.sales.find((sale) => sale.id === ticketId);
     if (!ticket || !isAutoInvoiceTicket(ticket, latest.sales)) continue;
     const expectedTicketFingerprint = ticketFingerprint(ticket);
@@ -151,6 +152,15 @@ export async function autoInvoiceOfflineTickets({
     const client = latest.clients.find((item) => item.id === ticket.clientId);
     if (!client) {
       const changed = await persistTicketFailure(ticketId, expectedTicketFingerprint, attemptedAt, "No se encontro el cliente del ticket offline.", persistMutation, user);
+      if (changed) processed += 1;
+      failed += 1;
+      continue;
+    }
+    try {
+      const canonical = await getCompanySriEnvironment(latest.backendUrl, backendToken);
+      latest = await persistMutation((current) => applyCanonicalSriEnvironment(current, canonical), { skipAutoBackup: true });
+    } catch (error) {
+      const changed = await persistTicketFailure(ticketId, expectedTicketFingerprint, attemptedAt, userFriendlyActionError(error, "reserve-sequence"), persistMutation, user);
       if (changed) processed += 1;
       failed += 1;
       continue;

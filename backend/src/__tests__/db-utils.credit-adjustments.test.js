@@ -417,3 +417,13 @@ test("compactSnapshotForStorage preserves referenced sale, note and adjustment",
   assert.equal(ids.has("unreferenced-old"), false);
   assert.equal(compacted.creditAdjustments.length, 1);
 });
+
+test("a durable sales tombstone prevents an old device from reviving a removed sale", () => {
+  const current = baseData({ sales: [], deletedIds: { sales: ["sale-1"] } });
+  const kept = sale({ id: "sale-kept", sequence: "000000002", accessKey: "kept-access-key" });
+  const first = applySnapshotPatch(current, { sales: [sale(), kept] });
+  const merged = applySnapshotPatch(first, { sales: [sale(), kept], deletedIds: { sales: ["sale-1"] } });
+
+  assert.deepEqual(merged.sales.map((item) => item.id), ["sale-kept"]);
+  assert.deepEqual(merged.deletedIds.sales, ["sale-1"]);
+});

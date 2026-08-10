@@ -13,6 +13,7 @@ import { isTicketOffline } from "../utils/invoiceStatus";
 import { canEditSale, documentTypeLabel, isCreditNoteSale, isInvoiceSale, resolveSaleInventoryState } from "../utils/sales";
 import { explainSriResult, sriUserMessage } from "../utils/sriMessages";
 import { isDocumentCorrectionIssue, isStaleSriPendingDocument, isTransientSriIssue, staleSriPendingMessage } from "../utils/sriRetryPolicy";
+import { syncSalePatchToBackend } from "../utils/sync";
 import {
   confirmAction,
   getLocalVoidReason,
@@ -236,7 +237,7 @@ export function useSaleDocumentWorkflowActions({
     try {
       let applied = false;
       let persistedSale: Sale | undefined;
-      await persistMutation((current) => {
+      const persisted = await persistMutation((current) => {
         const currentSale = current.sales.find((item) => item.id === saleId);
         if (!currentSale || retryFingerprint(currentSale) !== requestFingerprint || isClosedSale(currentSale)) return current;
         const currentClient = current.clients.find((item) => item.id === clientId);
@@ -299,20 +300,34 @@ export function useSaleDocumentWorkflowActions({
         showInfo("Documento actualizado", "El documento cambio durante el reintento y la respuesta no se aplico sobre datos obsoletos.");
         return;
       }
-const title = explainSriResult(sriResult).title;
-const message = persistedSale.status === "AUTORIZADA"
-  ? `${documentTypeLabel(persistedSale)} autorizada.`
-  : sriUserMessage(sriResult);
+      const durableSale = persistedSale as Sale;
+      const retryMovements = (persisted.inventoryMovements || []).filter((movement) => movement.saleId === saleId && movement.createdAt === retryAt);
+      const changedProductIds = new Set(retryMovements.map((movement) => movement.productId));
+      const synced = await syncSalePatchToBackend(data.backendUrl, backendToken, {
+        baseData: persisted,
+        sales: persisted.sales.filter((item) => item.id === saleId || item.id === durableSale.sourceSaleId),
+        products: persisted.products.filter((product) => changedProductIds.has(product.id)),
+        inventoryMovements: retryMovements,
+        auditLogs: persisted.auditLogs.slice(0, 1)
+      }, { persistMutation });
+      if (!synced) {
+        return;
+      }
+      const title = explainSriResult(sriResult).title;
+      const message = durableSale.status === "AUTORIZADA"
+        ? `${documentTypeLabel(durableSale)} autorizada.`
+        : sriUserMessage(sriResult);
 
-if (persistedSale.status === "AUTORIZADA" && resolveSaleInventoryState(persistedSale) === "RECONCILIATION_PENDING") {
-  showError("Factura autorizada; inventario pendiente", "El SRI autorizo la factura, pero el inventario requiere reconciliacion. Use Reconciliar inventario para recuperarlo sin reenviar al SRI.");
-} else if (persistedSale.status === "AUTORIZADA") {
-  showSuccess(title, message);
-} else if (persistedSale.status === "PENDIENTE_SRI") {
-  showWarning(title, message);
-} else {
-  showError(title, message);
-}    } catch (error) {
+      if (durableSale.status === "AUTORIZADA" && resolveSaleInventoryState(durableSale) === "RECONCILIATION_PENDING") {
+        showError("Factura autorizada; inventario pendiente", "El SRI autorizo la factura, pero el inventario requiere reconciliacion. Use Reconciliar inventario para recuperarlo sin reenviar al SRI.");
+      } else if (durableSale.status === "AUTORIZADA") {
+        showSuccess(title, message);
+      } else if (durableSale.status === "PENDIENTE_SRI") {
+        showWarning(title, message);
+      } else {
+        showError(title, message);
+      }
+    } catch (error) {
       const rawMessage = error instanceof Error ? error.message : "";
       const normalizedMessage = rawMessage.toLowerCase();
       const storageQuotaExceeded =

@@ -8,7 +8,7 @@ import { useGuideDocumentFilters } from "../hooks/useGuideDocumentFilters";
 import { useGuideFormState } from "../hooks/useGuideFormState";
 import { useControlledRemissionGuides } from
   "../hooks/useControlledRemissionGuides";
-import { authorizeRemissionGuide, reserveDocumentSequence } from "../services/backend";
+import { authorizeRemissionGuide, getCompanySriEnvironment, reserveDocumentSequence } from "../services/backend";
 import { buildRemissionGuideXml, createGuideAccessKey, nextSequence } from "../sri";
 import { AppData, Client, RemissionGuide, Sale, User } from "../types";
 import { canAccessDeveloperTools, canRetryDocuments } from "../utils/appAccess";
@@ -22,6 +22,7 @@ import { parseInputDate } from "../utils/format";
 import { generateId } from "../utils/id";
 import { handlePdfDocument, openHtmlViewer } from "../utils/printFiles";
 import { explainSriResult, sriUserMessage } from "../utils/sriMessages";
+import { applyCanonicalSriEnvironment } from "../utils/sriEnvironmentAuthority";
 import { syncSalePatchToBackend } from "../utils/sync";
 import { validateEmissionPointLicense, validateGuideForm } from "../validation";
 
@@ -154,10 +155,19 @@ export function GuidesScreen({
     try {
       const createdAt = new Date().toISOString();
       const accessKeyDate = parseInputDate(startDate, "start") || new Date(createdAt);
-      const documentIssuer = activeIssuer(data);
-      const documentEstablishment = activeEstablishment(data.issuer);
+      let confirmedData: AppData;
+      try {
+        const canonical = await getCompanySriEnvironment(data.backendUrl, backendToken);
+        confirmedData = applyCanonicalSriEnvironment(data, canonical);
+        await persist(confirmedData);
+      } catch (error) {
+        showError("Ambiente SRI no confirmado", error instanceof Error ? error.message : "No fue posible confirmar el ambiente SRI vigente.");
+        return;
+      }
+      const documentIssuer = activeIssuer(confirmedData);
+      const documentEstablishment = activeEstablishment(confirmedData.issuer);
       const licenseErrors: string[] = [];
-      validateEmissionPointLicense(data, documentIssuer, licenseErrors);
+      validateEmissionPointLicense(confirmedData, documentIssuer, licenseErrors);
       if (licenseErrors.length > 0) {
         Alert.alert("Plan requerido", licenseErrors.map((error) => `- ${error}`).join("\n"));
         return;
@@ -166,7 +176,7 @@ export function GuidesScreen({
       let accessKey = createGuideAccessKey(accessKeyDate, documentIssuer, sequence);
       try {
         setProcessingMessage("Preparando numero de guia...");
-        const reserved = await reserveDocumentSequence(data.backendUrl, { documentType: "guia_remision", issuer: documentIssuer, createdAt: accessKeyDate.toISOString() }, backendToken);
+        const reserved = await reserveDocumentSequence(confirmedData.backendUrl, { documentType: "guia_remision", issuer: documentIssuer, createdAt: accessKeyDate.toISOString() }, backendToken);
         if (Number(reserved.sequence) < Number(sequence)) {
           throw new Error(`El servidor devolvio el secuencial ${reserved.sequence}, menor al configurado ${sequence}. Guarde SRI y sincronice antes de emitir.`);
         }
@@ -192,14 +202,14 @@ export function GuidesScreen({
         ...buildGuideDraftFields(),
         items: sourceSale.items
       };
-      if (isAccessKeyUsed(data, guide.accessKey)) {
+      if (isAccessKeyUsed(confirmedData, guide.accessKey)) {
         throw new Error(`La clave de acceso ${guide.accessKey} ya existe en otro comprobante. Revise el secuencial de guias antes de emitir.`);
       }
       xml = buildRemissionGuideXml(guide, client, documentIssuer, sourceSale);
       draftData = {
-        ...data,
-        issuer: updateIssuerEstablishmentSequence(data.issuer, documentEstablishment.id, "remissionSequential", Math.max((documentIssuer.remissionSequential || 1) + 1, Number(sequence) + 1)),
-        guides: [guide, ...(data.guides || [])]
+        ...confirmedData,
+        issuer: updateIssuerEstablishmentSequence(confirmedData.issuer, documentEstablishment.id, "remissionSequential", Math.max((documentIssuer.remissionSequential || 1) + 1, Number(sequence) + 1)),
+        guides: [guide, ...(confirmedData.guides || [])]
       };
       await persist(draftData);
 

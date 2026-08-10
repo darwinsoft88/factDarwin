@@ -157,6 +157,8 @@ export type Issuer = {
   emissionPoint: string;
   sequential: number;
   environment: Environment;
+  /** Version monotonica asignada exclusivamente por el backend. */
+  environmentVersion?: number;
   taxRegime?: TaxRegime;
   taxpayerType: "natural" | "juridica";
   accountingRequired: "SI" | "NO";
@@ -379,6 +381,7 @@ export type AppData = {
     clients?: string[];
     products?: string[];
     users?: string[];
+    sales?: string[];
     inventoryMovements?: string[];
   };
   license?: AppLicense;

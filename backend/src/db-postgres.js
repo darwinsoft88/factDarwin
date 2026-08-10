@@ -5,10 +5,12 @@ const config = require("./config");
 const { createAutomaticEmailOperations } = require("./document-email-operations");
 const {
   applySnapshotPatch,
+  applyCanonicalIssuerEnvironment,
   assertDomainOperationReplay,
   compactSnapshotForStorage,
   createDomainEntityOperationConflictError,
   createSyncOperationMismatchError,
+  environmentVersion,
   normalizeClientIdentification,
   normalizeDocumentScopes,
   normalizeProductCode,
@@ -444,7 +446,7 @@ async function saveSnapshot(data, companyId = "", changeContext = {}) {
         : null;
       mergedData = currentData
         ? normalizeDocumentScopes(applySnapshotPatch(currentData, { ...data, baseData: currentData }))
-        : normalizeDocumentScopes(data);
+        : normalizeDocumentScopes(applyCanonicalIssuerEnvironment(null, data));
       mergedData = reconcileProductStockFromMovements(mergedData);
       validateSnapshot(mergedData);
       const storedData = compactSnapshotForStorage(mergedData);
@@ -581,16 +583,20 @@ async function restoreTenantSnapshot(companyId = "", backup = {}, options = {}) 
     throw error;
   }
 
-  const restoredData = reconcileProductStockFromMovements(normalizeDocumentScopes(data));
+  let restoredData = reconcileProductStockFromMovements(normalizeDocumentScopes(data));
   validateSnapshot(restoredData);
-  const storedData = compactSnapshotForStorage(restoredData);
   const updatedAt = new Date().toISOString();
-  const summary = summarizeSnapshot(restoredData);
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const current = await client.query("SELECT data FROM saas_snapshots WHERE company_id = $1 FOR UPDATE", [normalizedCompanyId]);
+    const currentData = current.rows[0]?.data
+      ? typeof current.rows[0].data === "string" ? JSON.parse(current.rows[0].data) : current.rows[0].data
+      : null;
+    restoredData = applyCanonicalIssuerEnvironment(currentData, restoredData);
+    const storedData = compactSnapshotForStorage(restoredData);
+    const summary = summarizeSnapshot(restoredData);
     if (current.rows[0]?.data) {
       await client.query("INSERT INTO saas_snapshot_history (company_id, data, created_at) VALUES ($1, $2::jsonb, $3)", [normalizedCompanyId, JSON.stringify(current.rows[0].data), updatedAt]);
     }
@@ -891,6 +897,61 @@ async function mergeSnapshotPatch(patch, companyId = "", syncOperation = null, c
 async function addAudit(event, payload) {
   await ensureSchema();
   await insertBackendAudit(pool, event, payload);
+}
+
+async function getCompanySriEnvironment(companyId = "") {
+  const snapshot = await getSnapshot(companyId);
+  if (!snapshot?.data?.issuer) return null;
+  return {
+    environment: String(snapshot.data.issuer.environment || "1"),
+    environmentVersion: environmentVersion(snapshot.data.issuer.environmentVersion)
+  };
+}
+
+async function updateCompanySriEnvironment(companyId = "", environment = "", expectedVersion = 0) {
+  await ensureSchema();
+  if (!companyId || !["1", "2"].includes(String(environment))) throw sriEnvironmentError("SRI_ENVIRONMENT_INVALID", 400);
+  const client = await pool.connect();
+  const updatedAt = new Date().toISOString();
+  try {
+    await client.query("BEGIN");
+    const locked = await client.query("SELECT data FROM saas_snapshots WHERE company_id = $1 FOR UPDATE", [companyId]);
+    if (!locked.rows[0]?.data) throw sriEnvironmentError("SRI_ENVIRONMENT_NOT_CONFIGURED", 404);
+    const data = typeof locked.rows[0].data === "string" ? JSON.parse(locked.rows[0].data) : locked.rows[0].data;
+    const currentVersion = environmentVersion(data.issuer?.environmentVersion);
+    const currentEnvironment = String(data.issuer?.environment || "1");
+    if (currentEnvironment === String(environment)) {
+      await client.query("COMMIT");
+      return { environment: currentEnvironment, environmentVersion: currentVersion, updatedAt: null, changed: false };
+    }
+    if (Number(expectedVersion) !== currentVersion) {
+      const error = sriEnvironmentError("SRI_ENVIRONMENT_VERSION_CONFLICT", 409);
+      error.canonical = { environment: currentEnvironment, environmentVersion: currentVersion };
+      throw error;
+    }
+    const next = JSON.parse(JSON.stringify(data));
+    next.issuer = { ...next.issuer, environment: String(environment), environmentVersion: currentVersion + 1 };
+    validateSnapshot(next);
+    const storedData = compactSnapshotForStorage(next);
+    await client.query("UPDATE saas_snapshots SET data = $1::jsonb, updated_at = $2 WHERE company_id = $3", [JSON.stringify(storedData), updatedAt, companyId]);
+    await client.query("INSERT INTO saas_snapshot_history (company_id, data, created_at) VALUES ($1, $2::jsonb, $3)", [companyId, JSON.stringify(storedData), updatedAt]);
+    await syncNormalizedTables(client, next, updatedAt, companyId);
+    await insertBackendAudit(client, "SRI_ENVIRONMENT_CHANGED", { companyId, environment: String(environment), environmentVersion: currentVersion + 1 });
+    await client.query("COMMIT");
+    return { environment: String(environment), environmentVersion: currentVersion + 1, updatedAt, changed: true };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function sriEnvironmentError(code, statusCode) {
+  const error = new Error(code);
+  error.code = code;
+  error.statusCode = statusCode;
+  return error;
 }
 
 async function maximumSyncChangeSequence(companyId, timeoutMs = 5000) {
@@ -1490,6 +1551,13 @@ async function upsertRows(client, table, rows) {
 
 async function applyNormalizedDeletions(client, deletedIds, companyId = "") {
   if (!companyId) return;
+  const saleIds = (Array.isArray(deletedIds.sales) ? deletedIds.sales : [])
+    .flatMap((id) => [scopedRowId(companyId, id), String(id || "")])
+    .filter(Boolean);
+  if (saleIds.length) {
+    await client.query("DELETE FROM sale_items WHERE company_id = $1 AND sale_id = ANY($2)", [companyId, saleIds]);
+    await client.query("DELETE FROM sales WHERE company_id = $1 AND id = ANY($2)", [companyId, saleIds]);
+  }
   for (const [table, ids] of [["clients", deletedIds.clients], ["products", deletedIds.products], ["users", deletedIds.users]]) {
     const scopedIds = (Array.isArray(ids) ? ids : []).flatMap((id) => [scopedRowId(companyId, id), String(id || "")]).filter(Boolean);
     if (scopedIds.length) {
@@ -2275,6 +2343,7 @@ module.exports = {
   exportTenantSnapshot,
   getAudit,
   getDomainOperation,
+  getCompanySriEnvironment,
   getSnapshot,
   findDocumentByAccessKey,
   initialize: ensureSchema,
@@ -2297,5 +2366,6 @@ module.exports = {
   searchProducts,
   changeCompanyUserPassword,
   getSnapshotMetadata,
-  saveSnapshot
+  saveSnapshot,
+  updateCompanySriEnvironment
 };

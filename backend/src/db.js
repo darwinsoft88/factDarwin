@@ -1,5 +1,5 @@
 const config = require("./config");
-const { applySnapshotPatch, assertDomainOperationReplay, compactSnapshotForStorage, createDomainEntityOperationConflictError, createSyncOperationMismatchError, normalizeDocumentScopes, prepareDomainOperation, scopeFromDocument } = require("./db-utils");
+const { applySnapshotPatch, applyCanonicalIssuerEnvironment, assertDomainOperationReplay, compactSnapshotForStorage, createDomainEntityOperationConflictError, createSyncOperationMismatchError, environmentVersion, normalizeDocumentScopes, prepareDomainOperation, scopeFromDocument } = require("./db-utils");
 
 if (config.databaseUrl) {
   module.exports = require("./db-postgres");
@@ -406,6 +406,46 @@ if (config.databaseUrl) {
     };
   }
 
+  async function getCompanySriEnvironment(companyId = "") {
+    const snapshot = await getSnapshot(companyId);
+    if (!snapshot?.data?.issuer) return null;
+    return { environment: String(snapshot.data.issuer.environment || "1"), environmentVersion: environmentVersion(snapshot.data.issuer.environmentVersion) };
+  }
+
+  const updateCompanySriEnvironmentTx = db.transaction((companyId, environment, expectedVersion, updatedAt) => {
+    const row = db.prepare("SELECT data FROM saas_snapshots WHERE company_id = @companyId").get({ companyId });
+    if (!row?.data) throw sriEnvironmentError("SRI_ENVIRONMENT_NOT_CONFIGURED", 404);
+    const data = JSON.parse(String(row.data));
+    const currentVersion = environmentVersion(data.issuer?.environmentVersion);
+    const currentEnvironment = String(data.issuer?.environment || "1");
+    if (currentEnvironment === environment) return { environment: currentEnvironment, environmentVersion: currentVersion, updatedAt: null, changed: false };
+    if (Number(expectedVersion) !== currentVersion) {
+      const error = sriEnvironmentError("SRI_ENVIRONMENT_VERSION_CONFLICT", 409);
+      error.canonical = { environment: currentEnvironment, environmentVersion: currentVersion };
+      throw error;
+    }
+    const next = { ...data, issuer: { ...data.issuer, environment, environmentVersion: currentVersion + 1 } };
+    validateSnapshot(next);
+    const storedData = compactSnapshotForStorage(next);
+    db.prepare("UPDATE saas_snapshots SET data = @data, updated_at = @updatedAt WHERE company_id = @companyId").run({ companyId, data: JSON.stringify(storedData), updatedAt });
+    db.prepare("INSERT INTO saas_snapshot_history (company_id, data, created_at) VALUES (@companyId, @data, @updatedAt)").run({ companyId, data: JSON.stringify(storedData), updatedAt });
+    syncNormalizedTables(next, updatedAt, companyId);
+    insertBackendAudit("SRI_ENVIRONMENT_CHANGED", { companyId, environment, environmentVersion: currentVersion + 1 });
+    return { environment, environmentVersion: currentVersion + 1, updatedAt, changed: true };
+  });
+
+  async function updateCompanySriEnvironment(companyId = "", environment = "", expectedVersion = 0) {
+    if (!companyId || !["1", "2"].includes(String(environment))) throw sriEnvironmentError("SRI_ENVIRONMENT_INVALID", 400);
+    return updateCompanySriEnvironmentTx(companyId, String(environment), expectedVersion, new Date().toISOString());
+  }
+
+  function sriEnvironmentError(code, statusCode) {
+    const error = new Error(code);
+    error.code = code;
+    error.statusCode = statusCode;
+    return error;
+  }
+
   async function saveSnapshot(data, companyId = "") {
     data = reconcileProductStockFromMovements(normalizeDocumentScopes(data));
     validateSnapshot(data);
@@ -427,7 +467,7 @@ if (config.databaseUrl) {
     const currentData = row?.data ? JSON.parse(String(row.data)) : null;
     const mergedData = currentData
       ? normalizeDocumentScopes(applySnapshotPatch(currentData, { ...data, baseData: currentData }))
-      : normalizeDocumentScopes(data);
+      : normalizeDocumentScopes(applyCanonicalIssuerEnvironment(null, data));
     const reconciledData = reconcileProductStockFromMovements(mergedData);
     validateSnapshot(reconciledData);
     const storedData = compactSnapshotForStorage(reconciledData);
@@ -1173,6 +1213,17 @@ if (config.databaseUrl) {
 
   function applyNormalizedDeletions(deletedIds, companyId = "") {
     if (!companyId) return;
+    const saleIds = (Array.isArray(deletedIds.sales) ? deletedIds.sales : [])
+      .flatMap((id) => [scopedRowId(companyId, id), String(id || "")])
+      .filter(Boolean);
+    if (saleIds.length) {
+      const deleteItems = db.prepare("DELETE FROM sale_items WHERE company_id = @companyId AND sale_id = @saleId");
+      const deleteSale = db.prepare("DELETE FROM sales WHERE company_id = @companyId AND id = @id");
+      saleIds.forEach((id) => {
+        deleteItems.run({ companyId, saleId: id });
+        deleteSale.run({ companyId, id });
+      });
+    }
     for (const [table, ids] of [["clients", deletedIds.clients], ["products", deletedIds.products], ["users", deletedIds.users]]) {
       const deleteRow = db.prepare(`DELETE FROM ${table} WHERE company_id = @companyId AND id = @id`);
       (Array.isArray(ids) ? ids : []).flatMap((id) => [scopedRowId(companyId, id), String(id || "")]).filter(Boolean).forEach((id) => {
@@ -1865,6 +1916,7 @@ if (config.databaseUrl) {
     findDocumentByAccessKey,
     getAudit,
     getDomainOperation,
+    getCompanySriEnvironment,
     getSnapshot,
     initialize,
     listGuidesHistory,
@@ -1878,6 +1930,7 @@ if (config.databaseUrl) {
     searchClients,
     searchProducts,
     saveSnapshot,
-    getSnapshotMetadata
+    getSnapshotMetadata,
+    updateCompanySriEnvironment
   };
 }

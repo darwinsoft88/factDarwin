@@ -12,6 +12,7 @@ const {
   exportTenantSnapshot,
   findDocumentByAccessKey,
   getAudit,
+  getCompanySriEnvironment,
   getIncrementalPilotBootstrap,
   getSnapshot,
   getSnapshotMetadata,
@@ -29,7 +30,8 @@ const {
   restoreTenantSnapshot,
   saveSnapshot,
   searchClients,
-  searchProducts
+  searchProducts,
+  updateCompanySriEnvironment
 } = db;
 const { authenticateUser, hashPassword, requireAuth, signToken } = require("./auth");
 const { sendInvoiceEmail, sendPasswordResetEmail, sendTestEmail } = require("./email");
@@ -428,6 +430,28 @@ app.post("/api/auth/change-password", requireAuth(["admin", "vendedor", "cajero"
   }
 });
 
+app.get("/api/sri/environment", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+  try {
+    const canonical = await getCompanySriEnvironment?.(req.user?.companyId || "");
+    if (!canonical) { res.status(404).json({ ok: false, error: "No existe configuracion SRI empresarial." }); return; }
+    res.json({ ok: true, ...canonical });
+  } catch (error) { next(error); }
+});
+
+app.put("/api/sri/environment", requireAuth(["admin"]), async (req, res, next) => {
+  try {
+    const { environment, expectedVersion } = req.body || {};
+    const result = await updateCompanySriEnvironment(req.user?.companyId || "", String(environment || ""), Number(expectedVersion));
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    if (String(error.code || "").startsWith("SRI_ENVIRONMENT_")) {
+      res.status(error.statusCode || 400).json({ ok: false, error: error.code, canonical: error.canonical });
+      return;
+    }
+    next(error);
+  }
+});
+
 app.post("/api/facturas/firmar", requireAuth(["admin", "vendedor", "cajero"]), requireSriLicense, async (req, res, next) => {
   try {
     const { xml } = req.body || {};
@@ -479,6 +503,15 @@ app.post("/api/secuenciales/reservar", requireAuth(["admin", "vendedor", "cajero
       res.status(400).json({ error: issuerErrors.join(" ") });
       return;
     }
+    const canonicalEnvironment = await getCompanySriEnvironment?.(req.user?.companyId || "");
+    if (!canonicalEnvironment || String(issuer.environment) !== canonicalEnvironment.environment || Number(issuer.environmentVersion || 0) !== canonicalEnvironment.environmentVersion) {
+      res.status(409).json({
+        error: "No se pudo confirmar el ambiente SRI vigente. Actualice la configuracion empresarial e intente nuevamente.",
+        code: "SRI_ENVIRONMENT_STALE",
+        canonical: canonicalEnvironment || undefined
+      });
+      return;
+    }
     const scopeError = await validateEmissionPointAllowed(req.user?.companyId || "", issuer);
     if (scopeError) {
       res.status(402).json({ error: scopeError });
@@ -497,7 +530,7 @@ app.post("/api/secuenciales/reservar", requireAuth(["admin", "vendedor", "cajero
       emissionPoint: issuer.emissionPoint,
       sequence
     });
-    res.json({ ok: true, documentType, sequence, accessKey });
+    res.json({ ok: true, documentType, sequence, accessKey, ...canonicalEnvironment });
   } catch (error) {
     next(error);
   }
