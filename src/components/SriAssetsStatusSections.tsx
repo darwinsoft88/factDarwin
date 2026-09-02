@@ -12,11 +12,17 @@ type SriAssetsStatusSectionsProps = {
   certificatePassword: string;
   checkingAssetStatus: boolean;
   checklist: ReturnType<typeof buildProductionChecklist>;
+  changingEnvironment: boolean;
+  diagnosticOpen: boolean;
+  assetsOpen: boolean;
   issuer: Issuer;
   onCancelCertificateUpload: () => void;
   onCertificatePasswordChange: (value: string) => void;
   onConfirmCertificateUpload: () => void;
   onRefreshAssetsStatus: () => void;
+  onReturnToTests: () => void;
+  onDiagnosticOpenChange: (open: boolean) => void;
+  onAssetsOpenChange: (open: boolean) => void;
   onUploadCertificate: () => void;
   onUploadLogo: () => void;
   pendingCertificateName: string;
@@ -30,11 +36,17 @@ export function SriAssetsStatusSections({
   certificatePassword,
   checkingAssetStatus,
   checklist,
+  changingEnvironment,
+  diagnosticOpen,
+  assetsOpen,
   issuer,
   onCancelCertificateUpload,
   onCertificatePasswordChange,
   onConfirmCertificateUpload,
   onRefreshAssetsStatus,
+  onReturnToTests,
+  onDiagnosticOpenChange,
+  onAssetsOpenChange,
   onUploadCertificate,
   onUploadLogo,
   pendingCertificateName,
@@ -42,7 +54,7 @@ export function SriAssetsStatusSections({
 }: SriAssetsStatusSectionsProps) {
   return (
     <>
-      <CollapsibleSection title="Logo y firma electronica">
+      <CollapsibleSection title="Logo y firma electronica" open={assetsOpen} onOpenChange={onAssetsOpenChange}>
         <CompanyAssetsSection
           assetStatus={assetStatus}
           assetStatusTone={assetStatusTone}
@@ -60,8 +72,8 @@ export function SriAssetsStatusSections({
           onCancelCertificateUpload={onCancelCertificateUpload}
         />
       </CollapsibleSection>
-      <CollapsibleSection title="Estado de configuracion">
-        <ProductionStatusSection issuer={issuer} checklist={checklist} />
+      <CollapsibleSection title="Configuración avanzada · Diagnóstico técnico" open={diagnosticOpen} onOpenChange={onDiagnosticOpenChange}>
+        <ProductionStatusSection issuer={issuer} checklist={checklist} changingEnvironment={changingEnvironment} onReturnToTests={onReturnToTests} />
       </CollapsibleSection>
     </>
   );

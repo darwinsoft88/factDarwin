@@ -1,4 +1,4 @@
-import { buildCreditNoteXml, buildInvoiceXml } from "../sri";
+import { buildCreditNoteXml, buildInvoiceXml, buildRemissionGuideXml, createAccessKey } from "../sri";
 import { initialData } from "../../database";
 import { buildRideHtml } from "../../sri/ride";
 import { Client, Sale } from "../../types";
@@ -29,6 +29,54 @@ const sale: Sale = {
 };
 
 describe("SRI XML tax regime legends", () => {
+  const expectProviderIdentification = (xml: string) => {
+    expect(xml).toContain('<campoAdicional nombre="RUC Proveedor">1723772099001</campoAdicional>');
+    expect(xml).toContain('<campoAdicional nombre="Proveedor de facturacion">DarwinSoft</campoAdicional>');
+  };
+
+  it("uses Ecuador date consistently at a UTC day boundary", () => {
+    const createdAt = "2026-08-19T02:00:00.000Z";
+    const accessKey = createAccessKey(new Date(createdAt), initialData.issuer, "000000365");
+    const xml = buildInvoiceXml({ ...sale, createdAt, accessKey, sequence: "000000365" }, client, initialData.issuer);
+
+    expect(accessKey.startsWith("18082026")).toBe(true);
+    expect(xml).toContain("<fechaEmision>18/08/2026</fechaEmision>");
+  });
+
+  it("identifies the invoicing provider in every newly generated electronic document", () => {
+    const invoiceXml = buildInvoiceXml(sale, client, initialData.issuer);
+    const creditNoteXml = buildCreditNoteXml(
+      { ...sale, documentType: "nota_credito", supportDocumentNumber: "001-001-000000001", supportIssueDate: "26/05/2026" },
+      client,
+      initialData.issuer
+    );
+    const guideXml = buildRemissionGuideXml({
+      id: "g1",
+      sourceSaleId: sale.id,
+      clientId: client.id,
+      userId: "u1",
+      createdAt: sale.createdAt,
+      sequence: "000000001",
+      accessKey: sale.accessKey,
+      status: "BORRADOR",
+      transporterName: "Transportista",
+      transporterIdentification: "1723772099",
+      transporterIdentificationType: "05",
+      plate: "ABC-123",
+      startAddress: "Origen",
+      endAddress: "Destino",
+      route: "Ruta",
+      reason: "Venta",
+      startDate: "2026-05-26",
+      endDate: "2026-05-26",
+      items: sale.items
+    }, client, initialData.issuer, sale);
+
+    expectProviderIdentification(invoiceXml);
+    expectProviderIdentification(creditNoteXml);
+    expectProviderIdentification(guideXml);
+  });
+
   it("adds RIMPE negocio popular legend to invoice additional info", () => {
     const xml = buildInvoiceXml(sale, client, { ...initialData.issuer, taxRegime: "rimpe_negocio_popular" });
 

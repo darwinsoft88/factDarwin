@@ -1,5 +1,7 @@
 import React, { useMemo } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { Empty } from "./common";
 import { OperationTile } from "./metrics";
 import { AppData, PendingSyncItem } from "../types";
@@ -8,7 +10,7 @@ import { buildDashboard } from "../utils/dashboard";
 import { documentTypeLabel } from "../utils/sales";
 import { sriPendingSendSummary } from "../utils/sriRetryPolicy";
 import { formatAuditDate, formatSyncStatus, SyncState } from "../utils/support";
-import { AppToast } from "./AppToast";
+import { useAppTheme } from "../theme/AppTheme";
 
 type SyncCenterModalProps = {
   visible: boolean;
@@ -22,6 +24,12 @@ type SyncCenterModalProps = {
 };
 
 export function SyncCenterModal({ visible, data, syncState, syncActionLoading, onClose, onRetryPending, onReviewDocuments, onTestServer }: SyncCenterModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 12 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 12 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
   const pendingSync: PendingSyncItem[] = data.pendingSync || [];
   const sriSummary = sriPendingSendSummary(data);
   const dashboard = useMemo(() => buildDashboard(data), [data]);
@@ -29,34 +37,34 @@ export function SyncCenterModal({ visible, data, syncState, syncActionLoading, o
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.creditModalBackdrop}>
-        <View style={styles.diagnosticModal}>
-          <View style={styles.creditModalHeader}>
+      <View style={[styles.creditModalBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
+        <View style={[styles.diagnosticModal, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <View style={[styles.creditModalHeader, { borderBottomColor: theme.colors.border }]}>
             <View style={styles.flex}>
-              <Text style={styles.creditModalTitle}>Sincronizacion</Text>
-              <Text style={styles.creditModalMeta}>{formatSyncStatus(syncState, data)}</Text>
+              <Text style={[styles.creditModalTitle, { color: theme.colors.text }]}>Sincronizacion</Text>
+              <Text style={[styles.creditModalMeta, { color: theme.colors.textMuted }]}>{formatSyncStatus(syncState, data)}</Text>
             </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
+            <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+              <Text style={[styles.smallButtonText, { color: theme.colors.primaryStrong }]}>Cerrar</Text>
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.creditModalContent}>
-            <View style={styles.attentionCard}>
+            <View style={[styles.attentionCard, { borderColor: theme.colors.warning, backgroundColor: theme.colors.warningSoft }]}>
               <View style={styles.attentionCopy}>
-                <Text style={styles.sectionMiniTitle}>Documentos pendientes</Text>
-                <Text style={styles.attentionCount}>{sriSummary.pendingCount}</Text>
+                <Text style={[styles.sectionMiniTitle, { color: theme.colors.text }]}>Documentos pendientes</Text>
+                <Text style={[styles.attentionCount, { color: theme.colors.warning }]}>{sriSummary.pendingCount}</Text>
               </View>
-              <Pressable style={[styles.primaryButton, syncActionLoading && styles.disabledButton]} onPress={onRetryPending} disabled={syncActionLoading}>
-                <Text style={styles.primaryButtonText}>{syncActionLoading ? "Procesando..." : "Reintentar"}</Text>
+              <Pressable style={[styles.primaryButton, { backgroundColor: syncActionLoading ? theme.colors.textSubtle : theme.colors.primary }]} onPress={onRetryPending} disabled={syncActionLoading}>
+                <Text style={[styles.primaryButtonText, { color: theme.colors.onPrimary }]}>{syncActionLoading ? "Procesando..." : "Reintentar"}</Text>
               </Pressable>
             </View>
-            <View style={styles.attentionCard}>
+            <View style={[styles.attentionCard, { borderColor: theme.colors.warning, backgroundColor: theme.colors.warningSoft }]}>
               <View style={styles.attentionCopy}>
-                <Text style={styles.sectionMiniTitle}>Facturas por revisar</Text>
-                <Text style={styles.attentionCount}>{reviewCount}</Text>
+                <Text style={[styles.sectionMiniTitle, { color: theme.colors.text }]}>Facturas por revisar</Text>
+                <Text style={[styles.attentionCount, { color: theme.colors.warning }]}>{reviewCount}</Text>
               </View>
-              <Pressable style={styles.secondaryActionButton} onPress={onReviewDocuments}>
-                <Text style={styles.secondaryActionText}>Revisar</Text>
+              <Pressable style={[styles.secondaryActionButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onReviewDocuments}>
+                <Text style={[styles.secondaryActionText, { color: theme.colors.primaryStrong }]}>Revisar</Text>
               </Pressable>
             </View>
             <View style={styles.operationGrid}>
@@ -65,47 +73,46 @@ export function SyncCenterModal({ visible, data, syncState, syncActionLoading, o
               <OperationTile title="Fuera de fecha" value={String(sriSummary.staleCount)} detail="No reenviar al SRI" tone={sriSummary.staleCount ? "danger" : "success"} icon="calendar-alert" />
               <OperationTile title="Estado" value={syncState === "syncing" ? "Subiendo" : syncState === "error" ? "Error" : "OK"} detail={data.autoBackupEnabled === false ? "Modo manual" : "Respaldo automatico"} tone={syncState === "error" ? "danger" : syncState === "syncing" || pendingSync.length ? "warning" : "success"} icon="sync" />
             </View>
-            <Text selectable style={styles.inlineInfo}>Servidor: {data.backendUrl || "sin URL configurada"}</Text>
-            {data.autoBackupLastAt ? <Text style={styles.inlineInfo}>Ultima subida: {formatAuditDate(data.autoBackupLastAt)}</Text> : null}
-            {data.autoBackupLastError ? <Text style={[styles.inlineInfo, styles.errorText]}>Ultimo error: {data.autoBackupLastError}</Text> : null}
+            <Text selectable style={[styles.inlineInfo, { color: theme.colors.textMuted }]}>Servidor: {data.backendUrl || "sin URL configurada"}</Text>
+            {data.autoBackupLastAt ? <Text style={[styles.inlineInfo, { color: theme.colors.textMuted }]}>Ultima subida: {formatAuditDate(data.autoBackupLastAt)}</Text> : null}
+            {data.autoBackupLastError ? <Text style={[styles.inlineInfo, { color: theme.colors.danger }]}>Ultimo error: {data.autoBackupLastError}</Text> : null}
             <View style={styles.buttonRow}>
-              <Pressable style={[styles.primaryButton, syncActionLoading && styles.disabledButton]} onPress={onRetryPending} disabled={syncActionLoading}>
-                <Text style={styles.primaryButtonText}>{syncActionLoading ? "Procesando..." : "Reintentar pendientes"}</Text>
+              <Pressable style={[styles.primaryButton, { backgroundColor: syncActionLoading ? theme.colors.textSubtle : theme.colors.primary }]} onPress={onRetryPending} disabled={syncActionLoading}>
+                <Text style={[styles.primaryButtonText, { color: theme.colors.onPrimary }]}>{syncActionLoading ? "Procesando..." : "Reintentar pendientes"}</Text>
               </Pressable>
-              <Pressable style={styles.secondaryActionButton} onPress={onTestServer} disabled={syncActionLoading}>
-                <Text style={styles.secondaryActionText}>Probar servidor</Text>
+              <Pressable style={[styles.secondaryActionButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onTestServer} disabled={syncActionLoading}>
+                <Text style={[styles.secondaryActionText, { color: theme.colors.primaryStrong }]}>Probar servidor</Text>
               </Pressable>
             </View>
-            <Text style={styles.sectionMiniTitle}>Cola pendiente</Text>
+            <Text style={[styles.sectionMiniTitle, { color: theme.colors.text }]}>Cola pendiente</Text>
             {pendingSync.length === 0 ? <Empty text="No hay cambios pendientes. Este dispositivo esta limpio." /> : null}
             {pendingSync.map((item) => (
-              <View key={item.id} style={styles.pendingSyncCard}>
-                <Text style={styles.pendingSyncTitle}>{item.title}</Text>
-                <Text style={styles.pendingSyncMeta}>{formatAuditDate(item.createdAt)} | Intentos: {item.attempts}</Text>
-                {item.lastError ? <Text style={styles.pendingSyncError}>{item.lastError}</Text> : null}
+              <View key={item.id} style={[styles.pendingSyncCard, { borderColor: theme.colors.warning, backgroundColor: theme.colors.warningSoft }]}>
+                <Text style={[styles.pendingSyncTitle, { color: theme.colors.text }]}>{item.title}</Text>
+                <Text style={[styles.pendingSyncMeta, { color: theme.colors.textMuted }]}>{formatAuditDate(item.createdAt)} | Intentos: {item.attempts}</Text>
+                {item.lastError ? <Text style={[styles.pendingSyncError, { color: theme.colors.warning }]}>{item.lastError}</Text> : null}
               </View>
             ))}
-            <Text style={styles.sectionMiniTitle}>Documentos SRI pendientes</Text>
+            <Text style={[styles.sectionMiniTitle, { color: theme.colors.text }]}>Documentos SRI pendientes</Text>
             {sriSummary.pendingCount === 0 ? <Empty text="No hay facturas ni notas credito pendientes de envio SRI." /> : null}
             {sriSummary.pending.map((sale) => {
               const isStale = sriSummary.stale.some((item) => item.id === sale.id);
               return (
-                <View key={sale.id} style={[styles.pendingSyncCard, isStale && styles.staleSriCard]}>
-                  <Text style={styles.pendingSyncTitle}>{sale.sequence} | {documentTypeLabel(sale)}</Text>
-                  <Text style={styles.pendingSyncMeta}>{formatAuditDate(sale.createdAt)} | {displayInvoiceStatus(sale.status)}</Text>
-                  <Text style={[styles.pendingSyncError, !isStale && styles.pendingSriInfo]}>
+                <View key={sale.id} style={[styles.pendingSyncCard, { borderColor: isStale ? theme.colors.danger : theme.colors.warning, backgroundColor: isStale ? theme.colors.dangerSoft : theme.colors.warningSoft }]}>
+                  <Text style={[styles.pendingSyncTitle, { color: theme.colors.text }]}>{sale.sequence} | {documentTypeLabel(sale)}</Text>
+                  <Text style={[styles.pendingSyncMeta, { color: theme.colors.textMuted }]}>{formatAuditDate(sale.createdAt)} | {displayInvoiceStatus(sale.status)}</Text>
+                  <Text style={[styles.pendingSyncError, { color: isStale ? theme.colors.danger : theme.colors.primaryStrong }]}>
                     {isStale
                       ? "Fuera del dia permitido. No se debe reenviar; emita un nuevo comprobante con fecha actual."
                       : "Pendiente de envio o autorizacion SRI. Reintente durante el mismo dia."}
                   </Text>
-                  {sale.sriMessage ? <Text style={styles.pendingSyncMeta}>{sale.sriMessage}</Text> : null}
+                  {sale.sriMessage ? <Text style={[styles.pendingSyncMeta, { color: theme.colors.textMuted }]}>{sale.sriMessage}</Text> : null}
                 </View>
               );
             })}
           </ScrollView>
         </View>
       </View>
-      <AppToast />
     </Modal>
   );
 }

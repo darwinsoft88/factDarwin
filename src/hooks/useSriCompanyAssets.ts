@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import { Alert, Platform } from "react-native";
-import { getCompanyAssetsStatus, uploadCompanyCertificate, uploadCompanyLogo } from "../services/backend";
+import { CompanyAssetsStatus, getCompanyAssetsStatus, uploadCompanyCertificate, uploadCompanyLogo } from "../services/backend";
 import { AppData, Issuer, User } from "../types";
 import { appendAudit } from "../utils/audit";
 import { pickWebFile, readWebFileBase64 } from "../utils/files";
@@ -42,6 +42,7 @@ export function useSriCompanyAssets({
   const [pendingCertificateFile, setPendingCertificateFile] = useState<{ fileName: string; base64: string } | null>(null);
   const [uploadingAsset, setUploadingAsset] = useState(false);
   const [checkingAssetStatus, setCheckingAssetStatus] = useState(false);
+  const [assetsStatus, setAssetsStatus] = useState<CompanyAssetsStatus>();
 
   const refreshAssetsStatus = useCallback(async (showAlert = true) => {
     if (showAlert) {
@@ -51,14 +52,15 @@ export function useSriCompanyAssets({
     }
     try {
       const status = await getCompanyAssetsStatus(backendUrl, backendToken);
+      setAssetsStatus(status);
       const logoText = status.logo?.configured ? "Logo configurado" : "Logo pendiente";
       const certText = status.certificate?.configured
-        ? `Certificado cargado${status.certificate.uploadedAt ? ` el ${formatShortDate(status.certificate.uploadedAt)}` : ""}`
+        ? certificateStatusText(status.certificate)
         : status.certificate?.needsUpload
           ? status.certificate.error || "Certificado requiere volver a subirse"
           : "Certificado pendiente";
       setAssetStatus(`${logoText} | ${certText}`);
-      setAssetStatusTone(status.certificate?.needsUpload ? "error" : "info");
+      setAssetStatusTone(status.certificate?.needsUpload || ["expired", "critical", "not_yet_valid"].includes(status.certificate?.expirationStatus || "") ? "error" : status.certificate?.expirationStatus === "valid" ? "success" : "info");
       if (showAlert) Alert.alert("Activos de empresa", `${logoText}\n${certText}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo consultar logo/certificado.";
@@ -108,7 +110,11 @@ export function useSriCompanyAssets({
     try {
       setUploadingAsset(true);
       const file = Platform.OS === "web" ? await pickWebCertificateFile() : await pickNativeCertificateFile();
-      if (!file) return;
+      if (!file) {
+        setAssetStatus("No se selecciono ningun certificado.");
+        setAssetStatusTone("info");
+        return;
+      }
       setPendingCertificateFile({ fileName: file.fileName, base64: file.base64 });
       setCertificatePassword("");
       setCertificateUploadModalVisible(true);
@@ -165,6 +171,7 @@ export function useSriCompanyAssets({
   return {
     assetStatus,
     assetStatusTone,
+    assetsStatus,
     cancelCertificateUpload,
     certificatePassword,
     certificateUploadModalVisible,
@@ -177,6 +184,21 @@ export function useSriCompanyAssets({
     uploadLogoFromWeb,
     uploadingAsset
   };
+}
+
+function certificateStatusText(certificate: {
+  uploadedAt?: string;
+  expiresAt?: string;
+  daysRemaining?: number;
+  expirationStatus?: "valid" | "warning" | "critical" | "expired" | "not_yet_valid";
+}) {
+  const expirationDate = certificate.expiresAt ? formatShortDate(certificate.expiresAt) : "";
+  if (certificate.expirationStatus === "expired") return `FIRMA VENCIDA${expirationDate ? ` el ${expirationDate}` : ""}. Suba una nueva antes de emitir.`;
+  if (certificate.expirationStatus === "not_yet_valid") return "La firma electronica todavia no entra en vigencia.";
+  if (certificate.expirationStatus === "critical") return `Firma electronica por vencer: ${certificate.daysRemaining ?? 0} dia(s)${expirationDate ? `, vence el ${expirationDate}` : ""}. Renuevela cuanto antes.`;
+  if (certificate.expirationStatus === "warning") return `Firma electronica vence en ${certificate.daysRemaining ?? 0} dias${expirationDate ? ` (${expirationDate})` : ""}. Prepare su renovacion.`;
+  if (certificate.expirationStatus === "valid" && expirationDate) return `Firma electronica vigente hasta ${expirationDate} (${certificate.daysRemaining ?? 0} dias).`;
+  return `Certificado cargado${certificate.uploadedAt ? ` el ${formatShortDate(certificate.uploadedAt)}` : ""}`;
 }
 
 async function pickWebLogoFile() {

@@ -5,7 +5,8 @@ import {
   AUTO_BACKUP_DEBOUNCE_MS,
   CONNECTIVITY_SYNC_THROTTLE_MS,
   REMOTE_REFRESH_THROTTLE_MS,
-  WEB_REMOTE_REFRESH_INTERVAL_MS
+  WEB_REMOTE_REFRESH_INTERVAL_MS,
+  WEB_SRI_AUTHORIZATION_QUERY_THROTTLE_MS
 } from "../constants/app";
 import {
   backupAppData,
@@ -24,11 +25,11 @@ import { AppData, PendingSyncItem, PendingSyncPatch, User } from "../types";
 import { autoRetrySriDocuments } from "../utils/autoRetrySriDocuments";
 import { autoInvoiceOfflineTickets } from "../utils/autoInvoiceTickets";
 import { mergeAppDataSnapshots } from "../utils/dataMerge";
-import { showInfo, showSuccess,showError, showWarning } from "../utils/dialogs";
+import { showInfo, showSuccess, showError, showWarning } from "../utils/dialogs";
 import { shortText } from "../utils/format";
 import { applyPendingSyncResult, clearPendingSyncItems, markPendingSyncAttempt, normalizeSyncRequestId, sortPendingSyncFifo } from "../utils/pendingSync";
 import { isSessionTokenExpired } from "../utils/sessionToken";
-import { sriPendingSendSummary } from "../utils/sriRetryPolicy";
+import { isSriAuthorizationQueryDocument, sriPendingSendSummary } from "../utils/sriRetryPolicy";
 import {
   canLoadRemoteSnapshot,
   hasLocalSyncWork,
@@ -40,6 +41,7 @@ import { sanitizeAppData } from "../validation";
 import { getIncrementalDeviceId } from "../services/incrementalDeviceIdentity";
 import { localIncrementalPilotEnabled, runIncrementalCatalogPilot } from "../services/incrementalCatalogSync";
 import { markIncrementalCursorInactive } from "../services/incrementalCursorStorage";
+import { refreshRegisteredDeviceSession } from "../services/deviceSessionCoordinator";
 
 type RefreshReason = "login" | "active" | "manual" | "silent";
 type ConnectivityReason = "network" | "active" | "pending";
@@ -68,6 +70,7 @@ type UseSyncAndBackupParams = {
   setSyncActionLoading: React.Dispatch<React.SetStateAction<boolean>>;
   setSyncCenterVisible: React.Dispatch<React.SetStateAction<boolean>>;
   setSyncState: React.Dispatch<React.SetStateAction<SyncState>>;
+  setNetworkReachable: React.Dispatch<React.SetStateAction<boolean | null>>;
   syncState: SyncState;
   syncStateRef: React.MutableRefObject<SyncState>;
 };
@@ -87,6 +90,7 @@ export function useSyncAndBackup({
   setSyncActionLoading,
   setSyncCenterVisible,
   setSyncState,
+  setNetworkReachable,
   syncStateRef
 }: UseSyncAndBackupParams) {
   const autoBackupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,10 +100,13 @@ export function useSyncAndBackup({
   const lastRemoteRefreshRef = useRef(0);
   const connectivitySyncRunningRef = useRef(false);
   const lastConnectivitySyncRef = useRef(0);
+  const sriAuthorizationQueryRunningRef = useRef(false);
+  const lastSriAuthorizationQueryRef = useRef(0);
   const scheduleAutoBackupRef = useRef<(snapshot: AppData) => void>(() => undefined);
-  const flushAutoBackupRef = useRef<() => Promise<void>>(async () => undefined);
+  const flushAutoBackupRef = useRef<() => Promise<boolean>>(async () => true);
   const refreshFromBackendRef = useRef<(reason?: RefreshReason) => Promise<void>>(async () => undefined);
   const syncAfterConnectivityRestoredRef = useRef<(reason: ConnectivityReason) => Promise<void>>(async () => undefined);
+  const querySentSriAuthorizationsRef = useRef<() => Promise<void>>(async () => undefined);
 
   const ensureBackendToken = useCallback(async (backendUrl: string) => {
     if (backendTokenRef.current) {
@@ -112,6 +119,17 @@ export function useSyncAndBackup({
       backendTokenRef.current = storedSession.token;
       setBackendToken(storedSession.token);
       return storedSession.token;
+    }
+    if (Platform.OS !== "web") {
+      try {
+        const renewed = await refreshRegisteredDeviceSession();
+        backendTokenRef.current = renewed.token;
+        setBackendToken(renewed.token);
+        if (sessionRef.current) await saveSession(sessionRef.current, renewed.token, "", dataRef.current.issuer.ruc);
+        return renewed.token;
+      } catch (error) {
+        if (!password) throw error;
+      }
     }
     if (!password) {
       throw new Error("Para sincronizar debe iniciar sesion una vez con internet. Luego la app seguira trabajando offline con el token guardado.");
@@ -156,11 +174,16 @@ export function useSyncAndBackup({
     setData(persisted);
     setSyncState(
       options.syncState ??
-        (persisted.autoBackupEnabled === false ? "synced" : "pending")
+      (persisted.autoBackupEnabled === false ? "synced" : "pending")
     );
 
     if (!options.skipAutoBackup) {
       scheduleAutoBackupRef.current(persisted);
+    } else if (options.syncState === "synced") {
+      // El servidor acaba de confirmar el parche. Evita que un evento
+      // automÃ¡tico de foco/visibilidad descargue inmediatamente el snapshot
+      // completo; la sincronizaciÃ³n manual continÃºa forzando la revisiÃ³n.
+      lastRemoteRefreshRef.current = Date.now();
     }
 
     return persisted;
@@ -202,13 +225,13 @@ export function useSyncAndBackup({
     return updated;
   }, [dataRef, setData]);
 
-  const runAutoBackupRef = useRef<(snapshot: AppData) => Promise<void>>(async () => undefined);
+  const runAutoBackupRef = useRef<(snapshot: AppData) => Promise<boolean>>(async () => true);
 
   const runAutoBackup = useCallback(async (snapshot: AppData) => {
-    if (snapshot.autoBackupEnabled === false) return;
+    if (snapshot.autoBackupEnabled === false) return true;
     if (autoBackupRunningRef.current) {
       pendingAutoBackupRef.current = snapshot;
-      return;
+      return false;
     }
     autoBackupRunningRef.current = true;
     setSyncState("syncing");
@@ -246,6 +269,7 @@ export function useSyncAndBackup({
       dataRef.current = persisted;
       setData(persisted);
       setSyncState("synced");
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo ejecutar el respaldo automatico.";
       const persisted = await updateStoredData((current) => ({
@@ -255,6 +279,7 @@ export function useSyncAndBackup({
       dataRef.current = persisted;
       setData(persisted);
       setSyncState("error");
+      return false;
     } finally {
       autoBackupRunningRef.current = false;
       const pending = pendingAutoBackupRef.current;
@@ -276,9 +301,9 @@ export function useSyncAndBackup({
     }
 
     const snapshot = pendingAutoBackupRef.current;
-    if (!snapshot) return;
+    if (!snapshot) return true;
     pendingAutoBackupRef.current = null;
-    await runAutoBackup(snapshot);
+    return runAutoBackup(snapshot);
   }, [runAutoBackup]);
 
   const applyRemoteSnapshot = useCallback(async (snapshot: { data: AppData; updatedAt: string }, options?: { notify?: boolean }) => {
@@ -297,148 +322,170 @@ export function useSyncAndBackup({
     }
   }, [dataRef, setData, setSyncState]);
 
- const refreshFromBackend = useCallback(async (reason: RefreshReason = "manual") => {
-  const current = dataRef.current;
-
-  if (
-    !sessionRef.current ||
-    current.autoBackupEnabled === false ||
-    !current.backendUrl
-  ) {
-    return;
-  }
-
-  if (
-    !canLoadRemoteSnapshot(
-      current,
-      Boolean(pendingAutoBackupRef.current),
-      autoBackupRunningRef.current
-    )
-  ) {
-    if (reason === "manual") {
-      showWarning(
-        "Sincronización pendiente",
-        "Primero se debe terminar de subir el cambio local antes de cargar datos del servidor."
-      );
+  const clearResolvedSyncError = useCallback(async () => {
+    if (!dataRef.current.autoBackupLastError) {
+      setSyncState("synced");
+      return dataRef.current;
     }
-    return;
-  }
-
-  if (remoteRefreshRunningRef.current) return;
-
-  const now = Date.now();
-
-  if (
-    reason !== "manual" &&
-    now - lastRemoteRefreshRef.current < REMOTE_REFRESH_THROTTLE_MS
-  ) {
-    return;
-  }
-
-  remoteRefreshRunningRef.current = true;
-  lastRemoteRefreshRef.current = now;
-
-  try {
-    const token = await ensureBackendToken(current.backendUrl);
-
-    if (localIncrementalPilotEnabled() && sessionRef.current?.companyId) {
-      try {
-        const incremental = await runIncrementalCatalogPilot({ data: current, token, companyId: sessionRef.current.companyId });
-        if (incremental.data) {
-          dataRef.current = incremental.data;
-          setData(incremental.data);
-          setSyncState("synced");
-        }
-        if (incremental.status === "applied" || incremental.status === "bootstrapped") {
-          if (reason === "manual") showSuccess("Catálogos actualizados", `${incremental.applied} cambio(s) incremental(es) aplicado(s).`);
-          return;
-        }
-      } catch (incrementalError) {
-        await markIncrementalCursorInactive(sessionRef.current.companyId);
-        // eslint-disable-next-line no-console
-        console.warn(JSON.stringify({ event: "sync_incremental_snapshot_fallback", code: incrementalError instanceof Error ? incrementalError.message : "UNKNOWN" }));
-      }
-    }
-
-    // Primero consultamos únicamente la fecha del snapshot.
-    const metadata = await getRemoteSnapshotMetadata(
-      current.backendUrl,
-      token
-    );
-
-    if (!metadata.updatedAt) {
-      if (reason === "manual") {
-        showInfo(
-          "Sin copia remota",
-          "El servidor todavía no tiene una copia de datos para esta empresa."
-        );
-      }
-      return;
-    }
-
-    const remoteUpdatedAt = new Date(metadata.updatedAt).getTime();
-    const localSyncedAt = current.autoBackupLastAt
-      ? new Date(current.autoBackupLastAt).getTime()
-      : 0;
-
-    if (
-      !Number.isFinite(remoteUpdatedAt) ||
-      remoteUpdatedAt <= localSyncedAt + 1000
-    ) {
-      if (reason === "manual") {
-        showSuccess(
-          "Datos al día",
-          "Este dispositivo ya tiene la última copia del servidor."
-        );
-      }
-      return;
-    }
-
-    // Solo descargamos los 250 KB cuando realmente hubo cambios.
-    const snapshot = await restoreAppData<AppData>(
-      current.backendUrl,
-      token
-    );
-
-    if (!snapshot?.data) return;
-
-    await applyRemoteSnapshot(
-      {
-        data: snapshot.data,
-        updatedAt: snapshot.updatedAt
-      },
-      {
-        notify: reason === "manual"
-      }
-    );
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "No se pudo actualizar desde el servidor.";
-
-    const persisted = await updateStoredData((stored) => ({
-      ...stored,
-      autoBackupLastError: shortText(
-        `Actualización servidor: ${message}`,
-        180
-      )
+    const persisted = await updateStoredData((current) => ({
+      ...current,
+      autoBackupLastError: ""
     }));
-
     dataRef.current = persisted;
     setData(persisted);
-    setSyncState("error");
-  } finally {
-    remoteRefreshRunningRef.current = false;
-  }
-}, [
-  applyRemoteSnapshot,
-  dataRef,
-  ensureBackendToken,
-  sessionRef,
-  setData,
-  setSyncState
-]);
+    setSyncState("synced");
+    return persisted;
+  }, [dataRef, setData, setSyncState]);
+
+  const refreshFromBackend = useCallback(async (reason: RefreshReason = "manual") => {
+    const current = dataRef.current;
+
+    if (
+      !sessionRef.current ||
+      current.autoBackupEnabled === false ||
+      !current.backendUrl
+    ) {
+      return;
+    }
+
+    if (
+      !canLoadRemoteSnapshot(
+        current,
+        Boolean(pendingAutoBackupRef.current),
+        autoBackupRunningRef.current
+      )
+    ) {
+      if (reason === "manual") {
+        showWarning(
+          "Sincronización pendiente",
+          "Primero se debe terminar de subir el cambio local antes de cargar datos del servidor."
+        );
+      }
+      return;
+    }
+
+    if (remoteRefreshRunningRef.current) return;
+
+    const now = Date.now();
+
+    if (
+      reason !== "manual" &&
+      now - lastRemoteRefreshRef.current < REMOTE_REFRESH_THROTTLE_MS
+    ) {
+      return;
+    }
+
+    remoteRefreshRunningRef.current = true;
+    lastRemoteRefreshRef.current = now;
+
+    try {
+      const token = await ensureBackendToken(current.backendUrl);
+
+      if (localIncrementalPilotEnabled() && sessionRef.current?.companyId) {
+        try {
+          const incremental = await runIncrementalCatalogPilot({ data: current, token, companyId: sessionRef.current.companyId });
+          if (incremental.data) {
+            dataRef.current = incremental.data;
+            setData(incremental.data);
+            setSyncState("synced");
+          }
+          if (incremental.status === "applied" || incremental.status === "bootstrapped") {
+            await clearResolvedSyncError();
+            if (reason === "manual") showSuccess("Catálogos actualizados", `${incremental.applied} cambio(s) incremental(es) aplicado(s).`);
+            return;
+          }
+        } catch (incrementalError) {
+          await markIncrementalCursorInactive(sessionRef.current.companyId);
+          // eslint-disable-next-line no-console
+          console.warn(JSON.stringify({ event: "sync_incremental_snapshot_fallback", code: incrementalError instanceof Error ? incrementalError.message : "UNKNOWN" }));
+        }
+      }
+
+      // Primero consultamos únicamente la fecha del snapshot.
+      const metadata = await getRemoteSnapshotMetadata(
+        current.backendUrl,
+        token
+      );
+
+      if (!metadata.updatedAt) {
+        await clearResolvedSyncError();
+        if (reason === "manual") {
+          showInfo(
+            "Sin copia remota",
+            "El servidor todavía no tiene una copia de datos para esta empresa."
+          );
+        }
+        return;
+      }
+
+      const remoteUpdatedAt = new Date(metadata.updatedAt).getTime();
+      const localSyncedAt = current.autoBackupLastAt
+        ? new Date(current.autoBackupLastAt).getTime()
+        : 0;
+
+      if (
+        !Number.isFinite(remoteUpdatedAt) ||
+        remoteUpdatedAt <= localSyncedAt + 1000
+      ) {
+        await clearResolvedSyncError();
+        if (reason === "manual") {
+          showSuccess(
+            "Datos al día",
+            "Este dispositivo ya tiene la última copia del servidor."
+          );
+        }
+        return;
+      }
+
+      // Solo descargamos los 250 KB cuando realmente hubo cambios.
+      const snapshot = await restoreAppData<AppData>(
+        current.backendUrl,
+        token
+      );
+
+      if (!snapshot?.data) {
+        await clearResolvedSyncError();
+        return;
+      }
+
+      await applyRemoteSnapshot(
+        {
+          data: snapshot.data,
+          updatedAt: snapshot.updatedAt
+        },
+        {
+          notify: reason === "manual"
+        }
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "No se pudo actualizar desde el servidor.";
+
+      const persisted = await updateStoredData((stored) => ({
+        ...stored,
+        autoBackupLastError: shortText(
+          `Actualización servidor: ${message}`,
+          180
+        )
+      }));
+
+      dataRef.current = persisted;
+      setData(persisted);
+      setSyncState("error");
+    } finally {
+      remoteRefreshRunningRef.current = false;
+    }
+  }, [
+    applyRemoteSnapshot,
+    clearResolvedSyncError,
+    dataRef,
+    ensureBackendToken,
+    sessionRef,
+    setData,
+    setSyncState
+  ]);
 
   const runManualSync = useCallback(async (refreshReason: RefreshReason = "manual") => {
     setAppMenuVisible(false);
@@ -451,12 +498,13 @@ export function useSyncAndBackup({
       dataRef.current = enabled;
       setData(enabled);
     }
-    await flushAutoBackup();
+    const flushed = await flushAutoBackup();
+    if (!flushed) return;
     const current = dataRef.current;
     if (current.autoBackupEnabled !== false && current.backendUrl && hasLocalSyncWork(current, syncStateRef.current)) {
-      await runAutoBackup(current);
+      const uploaded = await runAutoBackup(current);
+      if (!uploaded) return;
     }
-    if (dataRef.current.autoBackupLastError) return;
     await refreshFromBackend(refreshReason);
   }, [dataRef, flushAutoBackup, refreshFromBackend, runAutoBackup, setAppMenuVisible, setData, syncStateRef]);
 
@@ -516,8 +564,11 @@ export function useSyncAndBackup({
           if (autoRetryResult.expired > 0) {
             showWarning("SRI fuera de fecha", `${autoRetryResult.expired} documento(s) se marcaron como anulados por estar fuera del dia permitido.`);
           }
-          if (autoRetryResult.authorized > 0) {
-            showSuccess("SRI actualizado", `${autoRetryResult.authorized} documento(s) fueron autorizados en reintento automatico.`);
+          if (reason !== "active" && autoRetryResult.authorized > 0) {
+            showSuccess(
+              "SRI actualizado",
+              `${autoRetryResult.authorized} documento(s) fueron autorizados en reintento automatico.`
+            );
           }
         }
       }
@@ -528,6 +579,37 @@ export function useSyncAndBackup({
       connectivitySyncRunningRef.current = false;
     }
   }, [dataRef, ensureBackendToken, flushAutoBackup, persistMutation, refreshFromBackend, runAutoBackup, sessionRef, syncStateRef]);
+
+  const querySentSriAuthorizations = useCallback(async () => {
+    const current = dataRef.current;
+    const activeUser = sessionRef.current;
+    if (!activeUser || !current.backendUrl || current.autoBackupEnabled === false) return;
+    if (!current.sales.some(isSriAuthorizationQueryDocument)) return;
+    const now = Date.now();
+    if (sriAuthorizationQueryRunningRef.current || now - lastSriAuthorizationQueryRef.current < WEB_SRI_AUTHORIZATION_QUERY_THROTTLE_MS) return;
+
+    sriAuthorizationQueryRunningRef.current = true;
+    lastSriAuthorizationQueryRef.current = now;
+    try {
+      const token = await ensureBackendToken(current.backendUrl);
+      const result = await autoRetrySriDocuments({
+        backendToken: token,
+        initialData: dataRef.current,
+        getCurrentData: () => dataRef.current,
+        maxDocuments: 3,
+        persistMutation,
+        user: activeUser,
+        authorizationQueriesOnly: true
+      });
+      if (result.processed > 0) await runAutoBackup(dataRef.current);
+    } finally {
+      sriAuthorizationQueryRunningRef.current = false;
+    }
+  }, [dataRef, ensureBackendToken, persistMutation, runAutoBackup, sessionRef]);
+
+  useEffect(() => {
+    querySentSriAuthorizationsRef.current = querySentSriAuthorizations;
+  }, [querySentSriAuthorizations]);
 
   const openSyncCenter = useCallback(() => {
     setAppMenuVisible(false);
@@ -559,13 +641,14 @@ export function useSyncAndBackup({
     setSyncActionLoading(true);
     try {
       const health = await checkBackendHealth(dataRef.current.backendUrl);
+      await clearResolvedSyncError();
       showSuccess("Servidor OK", `Backend responde: ${health.ok ? "SI" : "NO"}\nServicio: ${health.service || "FactuDarwin"}\nBase: ${health.database?.engine || "desconocida"}`);
     } catch (error) {
       showError("Servidor no disponible", error instanceof Error ? error.message : "No se pudo probar el servidor.");
     } finally {
       setSyncActionLoading(false);
     }
-  }, [dataRef, setSyncActionLoading]);
+  }, [clearResolvedSyncError, dataRef, setSyncActionLoading]);
 
   useEffect(() => {
     scheduleAutoBackupRef.current = scheduleAutoBackup;
@@ -606,7 +689,9 @@ export function useSyncAndBackup({
     if (Platform.OS !== "web" || typeof window === "undefined" || typeof document === "undefined") return undefined;
 
     const refreshIfVisible = () => {
-      if (document.visibilityState === "visible") void refreshFromBackendRef.current("active");
+      if (document.visibilityState !== "visible") return;
+      void refreshFromBackendRef.current("active");
+      void querySentSriAuthorizationsRef.current();
     };
     const timer = window.setInterval(refreshIfVisible, WEB_REMOTE_REFRESH_INTERVAL_MS);
     window.addEventListener("focus", refreshIfVisible);
@@ -653,14 +738,19 @@ export function useSyncAndBackup({
   useEffect(() => {
     if (!ready || !session) return undefined;
     const subscription = Network.addNetworkStateListener((networkState) => {
-      if (isNetworkReachableState(networkState)) {
+      const reachable = isNetworkReachableState(networkState);
+      setNetworkReachable(reachable);
+      if (reachable) {
         void syncAfterConnectivityRestoredRef.current("network");
       }
     });
 
+    void Network.getNetworkStateAsync()
+      .then((networkState) => setNetworkReachable(isNetworkReachableState(networkState)))
+      .catch(() => setNetworkReachable(null));
     void syncAfterConnectivityRestoredRef.current("pending");
     return () => subscription.remove();
-  }, [ready, session, session?.id]);
+  }, [ready, session, session?.id, setNetworkReachable]);
 
   return {
     ensureBackendToken,

@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import { sriPendingSendSummary } from "../utils/sriRetryPolicy";
+import React, { useEffect, useState } from "react";
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet } from "react-native";
 import { AppHeader } from "./AppHeader";
 import { AppTabs } from "./AppTabs";
@@ -27,6 +28,13 @@ import type { PersistMutation } from "../hooks/useSyncAndBackup";
 import type { ControlledSalesHistory } from "../hooks/useControlledSalesHistory";
 import { AppTab } from "../utils/appAccess";
 import { SyncState } from "../utils/support";
+import { useAppTheme } from "../theme/AppTheme";
+import { getCompanyAssetsStatus } from "../services/backend";
+import type { CompanyAssetsStatus } from "../services/backendApi/types";
+import { evaluateOnboarding } from "../onboarding/onboardingEvaluator";
+import { navigationForOnboardingStep } from "../onboarding/onboardingNavigation";
+import type { OnboardingCoachMarkId, OnboardingExperience, OnboardingStepId, OnboardingStepState } from "../onboarding/onboardingTypes";
+import { ContextualHelpBanner } from "./ContextualHelpBanner";
 
 const USE_BOTTOM_NAVIGATION = true;
 
@@ -46,6 +54,7 @@ type AppMainShellProps = {
   session: User;
   syncActionLoading: boolean;
   syncState: SyncState;
+  networkReachable: boolean | null;
   ensureBackendToken: (backendUrl: string) => Promise<string>;
   onOpenLicense: () => void;
   onOpenMenu: () => void;
@@ -57,6 +66,13 @@ type AppMainShellProps = {
   onXml: React.Dispatch<React.SetStateAction<string>>;
   persist: (data: AppData) => Promise<void>;
   persistMutation: PersistMutation;
+  onboardingExperience: OnboardingExperience;
+  activeCoachMark: OnboardingCoachMarkId | null;
+  onSetCenterMinimized: (value: boolean) => void;
+  onSkipOptionalStep: (stepId: OnboardingStepId) => void;
+  onAcknowledgeOnboarding: () => void;
+  onMarkCoachSeen: (coachId: OnboardingCoachMarkId) => void;
+  onSetActiveCoachMark: (coachId: OnboardingCoachMarkId | null) => void;
 };
 
 export function AppMainShell({
@@ -82,17 +98,55 @@ export function AppMainShell({
   session,
   syncActionLoading,
   syncState,
+  networkReachable,
   onOpenSyncCenter,
   onRetryPendingSync,
   ensureBackendToken
+  ,onboardingExperience
+  ,activeCoachMark
+  ,onSetCenterMinimized
+  ,onSkipOptionalStep
+  ,onAcknowledgeOnboarding
+  ,onMarkCoachSeen
+  ,onSetActiveCoachMark
 }: AppMainShellProps) {
+  const { theme } = useAppTheme();
   const [floatingOverlay, setFloatingOverlay] = useState<React.ReactNode>(null);
+  const [bottomNavigationHeight, setBottomNavigationHeight] = useState(70);
+  const [certificateStatus, setCertificateStatus] = useState<CompanyAssetsStatus["certificate"]>();
   const hasSalesOverlay = activeTab === "ventas" && Boolean(floatingOverlay);
   const showCommercialSupport = activeTab !== "ventas";
+  const sriPendingCount = sriPendingSendSummary(data).pendingCount;
+  const onboardingEvaluation = evaluateOnboarding(data, session, certificateStatus);
+  const openOnboardingStep = (step: OnboardingStepState) => {
+    const navigation = navigationForOnboardingStep(step);
+    if (!navigation) return;
+    if (navigation.coachMark && !onboardingExperience.seenCoachMarks.includes(navigation.coachMark)) {
+      onMarkCoachSeen(navigation.coachMark);
+      onSetActiveCoachMark(navigation.coachMark);
+    }
+    if (navigation.tab === "sri" && !onboardingExperience.seenCoachMarks.includes("certificate-upload")) {
+      onMarkCoachSeen("certificate-upload");
+      onSetActiveCoachMark("certificate-upload");
+    }
+    onTabChange(navigation.tab);
+  };
+
+  useEffect(() => {
+    let active = true;
+    if (!backendToken || !data.backendUrl) {
+      setCertificateStatus(undefined);
+      return () => { active = false; };
+    }
+    void getCompanyAssetsStatus(data.backendUrl, backendToken)
+      .then((status) => { if (active) setCertificateStatus(status.certificate); })
+      .catch(() => { if (active) setCertificateStatus(undefined); });
+    return () => { active = false; };
+  }, [backendToken, data.backendUrl]);
 
   return (
     // se usa KeyboardAvoidingView para que el teclado no tape los inputs en iOS, y se usa ScrollView para que la pantalla sea scrollable en Android
-    <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+    <KeyboardAvoidingView style={[styles.keyboardAvoiding, { backgroundColor: theme.colors.background }]} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
       <FloatingOverlayContext.Provider value={{ setOverlay: setFloatingOverlay }}>
         <AppHeader
           backendUrl={data.backendUrl}
@@ -102,7 +156,14 @@ export function AppMainShell({
           license={data.license}
           licenseActive={licenseActive}
           logoUrl={data.issuer.logoUrl}
+          networkReachable={networkReachable}
           onOpenMenu={onOpenMenu}
+          onOpenSyncCenter={onOpenSyncCenter}
+          pendingCount={(data.pendingSync || []).length}
+          sriPendingCount={sriPendingCount}
+          syncState={syncState}
+          hasSyncError={Boolean(data.autoBackupLastError)}
+
         />
 
         <SyncStatusBanner
@@ -127,6 +188,7 @@ export function AppMainShell({
         ) : null}
 
         <ScrollView
+          style={{ backgroundColor: theme.colors.background }}
           contentContainerStyle={[
             styles.content,
             hasSalesOverlay && styles.contentWithCheckout,
@@ -136,7 +198,10 @@ export function AppMainShell({
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         >
-          {activeTab === "dashboard" && <DashboardScreen data={data} user={session} onNavigate={onTabChange} ListItemComponent={ListItem} />}
+          {activeTab === "dashboard" && <DashboardScreen data={data} user={session} availableTabs={availableTabs} certificateStatus={certificateStatus} onNavigate={onTabChange} ListItemComponent={ListItem} onboardingEvaluation={onboardingEvaluation} onboardingExperience={onboardingExperience} onOpenOnboardingStep={openOnboardingStep} onMinimizeOnboarding={() => onSetCenterMinimized(true)} onExpandOnboarding={() => onSetCenterMinimized(false)} onSkipOnboardingStep={(step) => onSkipOptionalStep(step.id)} onAcknowledgeOnboarding={onAcknowledgeOnboarding} />}
+          {activeTab === "productos" && activeCoachMark === "product-create" ? <ContextualHelpBanner title="Crea tu primer producto o servicio" text="Usa el botón Agregar y completa código, nombre y precio. Este paso también funciona sin conexión." onDismiss={() => onSetActiveCoachMark(null)} /> : null}
+          {activeTab === "ventas" && activeCoachMark === "sale-create" ? <ContextualHelpBanner title="Realiza tu primera venta" text="Selecciona un cliente, agrega un producto o servicio y guarda la venta con el flujo habitual." onDismiss={() => onSetActiveCoachMark(null)} /> : null}
+          {activeTab === "sri" && activeCoachMark === "certificate-upload" ? <ContextualHelpBanner title="Prepara la firma electrónica" text="Cuando decidas facturar electrónicamente, carga aquí tu archivo .p12 y valida su contraseña." onDismiss={() => onSetActiveCoachMark(null)} /> : null}
           {(activeTab === "ventas" || activeTab === "documentos") && (
             <SalesScreen
               mode={activeTab === "ventas" ? "sale" : "documents"}
@@ -150,20 +215,28 @@ export function AppMainShell({
               onOpenSale={() => onTabChange("ventas")}
             />
           )}
-          {activeTab === "clientes" && <ClientsScreen data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persist={persist} ListItemComponent={ListItem} />}
-          {activeTab === "productos" && <ProductsScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} BarcodeScannerModalComponent={BarcodeScannerModal} />}
-          {activeTab === "inventario" && <InventoryScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} />}
-          {activeTab === "caja" && <CashClosingScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
+          {activeTab === "clientes" && <ClientsScreen data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persistMutation={persistMutation} ListItemComponent={ListItem} />}
+          {activeTab === "productos" && <ProductsScreen data={data} user={session} backendToken={backendToken} persistMutation={persistMutation} ListItemComponent={ListItem} BarcodeScannerModalComponent={BarcodeScannerModal} />}
+          {activeTab === "inventario" && <InventoryScreen data={data} user={session} backendToken={backendToken} persistMutation={persistMutation} ListItemComponent={ListItem} />}
+          {activeTab === "caja" && <CashClosingScreen data={data} user={session} backendToken={backendToken} persistMutation={persistMutation} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
           {activeTab === "creditos" && <CreditsScreen data={data} user={session} backendToken={backendToken} persistMutation={persistMutation} ListItemComponent={ListItem} />}
           {activeTab === "guias" && <GuidesScreen data={data} user={session} backendToken={backendToken} persist={persist} onXml={onXml} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
-          {activeTab === "usuarios" && session.role === "admin" && <UsersScreen data={data} user={session} backendToken={backendToken} persist={persist} ListItemComponent={ListItem} />}
+          {activeTab === "usuarios" && session.role === "admin" && <UsersScreen data={data} user={session} backendToken={backendToken} persistMutation={persistMutation} ListItemComponent={ListItem} />}
           {activeTab === "reportes" && <ReportsScreen data={data} onReport={onXml} ListItemComponent={ListItem} CalendarDateInputComponent={CalendarDateInput} />}
           {activeTab === "sri" && session.role === "admin" && <SriScreen data={data} user={session} backendToken={backendToken} getBackendToken={ensureBackendToken} persist={persist} onRefreshBackend={() => { void onRefreshBackend(); }} />}
         </ScrollView>
 
         {hasSalesOverlay ? floatingOverlay : null}
 
-        {showCommercialSupport ? <CommercialSupportButton data={data} user={session} bottomInset={keyboardInset} onOpenDiagnostics={onOpenSupport} /> : null}
+        {showCommercialSupport ? (
+          <CommercialSupportButton
+            data={data}
+            user={session}
+            bottomInset={keyboardInset}
+            navigationHeight={bottomNavigationHeight}
+            onOpenDiagnostics={onOpenSupport}
+          />
+        ) : null}
 
         {USE_BOTTOM_NAVIGATION ? (
           <BottomAppTabs
@@ -171,6 +244,7 @@ export function AppMainShell({
             activeTab={activeTab}
             onChange={onTabChange}
             onOpenMore={onOpenMenu}
+            onHeightChange={setBottomNavigationHeight}
           />
         ) : null}
       </FloatingOverlayContext.Provider>

@@ -13,6 +13,8 @@ export type AuthorizationResponse = {
   signedXml?: string;
   reception?: unknown;
   authorization?: unknown;
+  authorizationPending?: boolean;
+  numberOfDocuments?: number;
   error?: string;
 };
 
@@ -161,8 +163,12 @@ export type CompanyAssetsStatus = {
     needsUpload?: boolean;
     uploadedAt?: string;
     fileName?: string;
-    size?: number;
-    error?: string;
+      size?: number;
+      validFrom?: string;
+      expiresAt?: string;
+      daysRemaining?: number;
+      expirationStatus?: "valid" | "warning" | "critical" | "expired" | "not_yet_valid";
+      error?: string;
   };
   error?: string;
 };

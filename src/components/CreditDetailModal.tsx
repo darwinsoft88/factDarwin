@@ -1,6 +1,8 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { Empty } from "./common";
 import { ReportRow } from "./metrics";
 import { PaginationControls } from "./PaginationControls";
@@ -11,7 +13,7 @@ import { creditBalance, creditPaymentScopeText, creditSaleScopeText, isCreditOve
 import { documentNumber } from "../utils/documents";
 import { formatShortDate } from "../utils/format";
 import { paymentLabel } from "../utils/reportFormats";
-import { AppToast } from "./AppToast";
+import { useAppTheme } from "../theme/AppTheme";
 
 type CreditDetailModalProps = {
   data: AppData;
@@ -44,31 +46,38 @@ export function CreditDetailModal({
   onVoidPayment,
   visiblePayments
 }: CreditDetailModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 14 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 14 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+
   return (
     <Modal visible={Boolean(detailSale)} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalCard}>
-          <View style={styles.modalHeader}>
+      <View style={[styles.modalBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
+        <View style={[styles.modalCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <View style={[styles.modalHeader, { borderColor: theme.colors.border }]}>
             <View style={styles.detailHeaderText}>
-              <Text style={styles.modalTitle}>Detalle de cuenta</Text>
-              <Text style={styles.selectedMeta}>{detailSale ? documentNumber(detailSale, data.issuer) : ""}</Text>
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Detalle de cuenta</Text>
+              <Text style={[styles.selectedMeta, { color: theme.colors.textMuted }]}>{detailSale ? documentNumber(detailSale, data.issuer) : ""}</Text>
             </View>
-            <Pressable style={styles.closeButton} onPress={onClose}>
-              <Text style={styles.closeText}>Cerrar</Text>
+            <Pressable style={[styles.closeButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+              <Text style={[styles.closeText, { color: theme.colors.primary }]}>Cerrar</Text>
             </Pressable>
           </View>
           {detailSale ? (
             <ScrollView contentContainerStyle={styles.modalContent}>
-              <View style={styles.detailHeader}>
+              <View style={[styles.detailHeader, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
                 <View style={styles.detailHeaderText}>
-                  <Text style={styles.selectedTitle}>{detailClient?.name || "Cliente"}</Text>
-                  <Text style={styles.selectedMeta}>{detailClient?.identification || ""}{detailClient?.phone ? ` | ${detailClient.phone}` : ""}</Text>
+                  <Text style={[styles.selectedTitle, { color: theme.colors.text }]}>{detailClient?.name || "Cliente"}</Text>
+                  <Text style={[styles.selectedMeta, { color: theme.colors.textMuted }]}>{detailClient?.identification || ""}{detailClient?.phone ? ` | ${detailClient.phone}` : ""}</Text>
                 </View>
-                <Text style={[styles.creditStatus, isCreditOverdue(detailSale) && styles.creditStatusDanger, creditBalance(detailSale) <= 0 && styles.creditStatusPaid]}>
+                <Text style={[styles.creditStatus, { backgroundColor: theme.colors.warningSoft, color: theme.colors.warning }, isCreditOverdue(detailSale) && { backgroundColor: theme.colors.dangerSoft, color: theme.colors.danger }, creditBalance(detailSale) <= 0 && { backgroundColor: theme.colors.successSoft, color: theme.colors.success }]}>
                   {creditBalance(detailSale) <= 0 ? "Pagado" : isCreditOverdue(detailSale) ? "Vencido" : "Pendiente"}
                 </Text>
               </View>
-              <View style={styles.detailGrid}>
+              <View style={[styles.detailGrid, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
                 <ReportRow label="Establecimiento origen" value={creditSaleScopeText(detailSale, data)} />
                 <ReportRow label="Fecha emision" value={formatShortDate(detailSale.createdAt)} />
                 <ReportRow label="Fecha vence" value={detailSale.creditDueDate ? formatShortDate(detailSale.creditDueDate) : "Sin fecha"} />
@@ -76,44 +85,44 @@ export function CreditDetailModal({
                 <ReportRow label="Total abonado" value={`$${money(detailPaidAmount)}`} />
                 <ReportRow label="Saldo pendiente" value={`$${money(creditBalance(detailSale))}`} strong />
               </View>
-              <Pressable style={styles.detailActionButton} onPress={() => onOpenSaleDetail(detailSale)}>
-                <MaterialCommunityIcons name="file-document-outline" size={17} color="#0f766e" />
-                <Text style={styles.detailActionText}>Enviar detalle de factura</Text>
+              <Pressable style={[styles.detailActionButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={() => onOpenSaleDetail(detailSale)}>
+                <MaterialCommunityIcons name="file-document-outline" size={17} color={theme.colors.primary} />
+                <Text style={[styles.detailActionText, { color: theme.colors.primary }]}>Enviar detalle de factura</Text>
               </Pressable>
-              <View style={styles.itemsBox}>
-                <Text style={styles.itemsTitle}>Items de la factura</Text>
+              <View style={[styles.itemsBox, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+                <Text style={[styles.itemsTitle, { color: theme.colors.text }]}>Items de la factura</Text>
                 {detailSale.items.map((item, index) => (
-                  <View key={`${item.productId}-${index}`} style={styles.itemRow}>
+                  <View key={`${item.productId}-${index}`} style={[styles.itemRow, { borderColor: theme.colors.border }]}>
                     <View style={styles.itemTextBox}>
-                      <Text style={styles.itemName} numberOfLines={1}>{item.quantity} x {item.name}</Text>
-                      <Text style={styles.itemMeta} numberOfLines={1}>Cod. {item.code} | P.Unit. ${money(item.unitPrice)} | Desc. ${money(item.discount || 0)}</Text>
+                      <Text style={[styles.itemName, { color: theme.colors.text }]} numberOfLines={1}>{item.quantity} x {item.name}</Text>
+                      <Text style={[styles.itemMeta, { color: theme.colors.textMuted }]} numberOfLines={1}>Cod. {item.code} | P.Unit. ${money(item.unitPrice)} | Desc. ${money(item.discount || 0)}</Text>
                     </View>
-                    <Text style={styles.itemTotal}>${money(calculateLineTotal(item))}</Text>
+                    <Text style={[styles.itemTotal, { color: theme.colors.primary }]}>${money(calculateLineTotal(item))}</Text>
                   </View>
                 ))}
               </View>
-              <View style={styles.itemsBox}>
-                <Text style={styles.itemsTitle}>Abonos registrados</Text>
+              <View style={[styles.itemsBox, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+                <Text style={[styles.itemsTitle, { color: theme.colors.text }]}>Abonos registrados</Text>
                 {detailPayments.length === 0 ? <Empty text="Aun no hay abonos para este documento." /> : null}
                 {visiblePayments.map((payment) => (
-                  <View key={payment.id} style={[styles.paymentRow, isCreditPaymentVoided(payment) && styles.paymentRowVoided]}>
+                  <View key={payment.id} style={[styles.paymentRow, { borderColor: theme.colors.border }, isCreditPaymentVoided(payment) && [styles.paymentRowVoided, { backgroundColor: theme.colors.surfaceMuted }]]}>
                     <Pressable style={styles.itemTextBox} onPress={() => onOpenPaymentReceipt(payment)}>
-                      <Text style={[styles.itemName, isCreditPaymentVoided(payment) && styles.voidedText]}>
+                      <Text style={[styles.itemName, { color: theme.colors.text }, isCreditPaymentVoided(payment) && [styles.voidedText, { color: theme.colors.textMuted }]]}>
                         ${money(payment.amount)} | {paymentLabel(payment.paymentMethod)}
                       </Text>
-                      <Text style={styles.itemMeta}>
+                      <Text style={[styles.itemMeta, { color: theme.colors.textMuted }]}>
                         {formatShortDate(payment.createdAt)} | Cobro: {creditPaymentScopeText(payment, data)}{payment.note ? ` | ${payment.note}` : ""}{isCreditPaymentVoided(payment) ? ` | ANULADO ${payment.voidedAt ? formatShortDate(payment.voidedAt) : ""}` : ""}
                       </Text>
                     </Pressable>
                     <View style={styles.paymentActions}>
-                      <Pressable style={styles.receiptBadge} onPress={() => onOpenPaymentReceipt(payment)}>
-                        <MaterialCommunityIcons name="receipt-text-outline" size={15} color="#0f766e" />
-                        <Text style={styles.receiptBadgeText}>Recibo</Text>
+                      <Pressable style={[styles.receiptBadge, { backgroundColor: theme.colors.primarySoft }]} onPress={() => onOpenPaymentReceipt(payment)}>
+                        <MaterialCommunityIcons name="receipt-text-outline" size={15} color={theme.colors.primary} />
+                        <Text style={[styles.receiptBadgeText, { color: theme.colors.primary }]}>Recibo</Text>
                       </Pressable>
                       {!isCreditPaymentVoided(payment) ? (
-                        <Pressable style={styles.voidBadge} onPress={() => onVoidPayment(payment)}>
-                          <MaterialCommunityIcons name="cancel" size={15} color="#b91c1c" />
-                          <Text style={styles.voidBadgeText}>Anular</Text>
+                        <Pressable style={[styles.voidBadge, { backgroundColor: theme.colors.dangerSoft }]} onPress={() => onVoidPayment(payment)}>
+                          <MaterialCommunityIcons name="cancel" size={15} color={theme.colors.danger} />
+                          <Text style={[styles.voidBadgeText, { color: theme.colors.danger }]}>Anular</Text>
                         </Pressable>
                       ) : null}
                     </View>
@@ -122,16 +131,15 @@ export function CreditDetailModal({
                 <PaginationControls page={page} pageSize={LIST_BATCH_SIZE} totalItems={detailPayments.length} onPageChange={onPageChange} />
               </View>
               {creditBalance(detailSale) > 0 ? (
-                <Pressable style={styles.modalPayButton} onPress={() => onRegisterPayment(detailSale)}>
-                  <MaterialCommunityIcons name="cash-plus" size={18} color="#ffffff" />
-                  <Text style={styles.primaryActionText}>Registrar abono</Text>
+                <Pressable style={[styles.modalPayButton, { backgroundColor: theme.colors.primary }]} onPress={() => onRegisterPayment(detailSale)}>
+                  <MaterialCommunityIcons name="cash-plus" size={18} color={theme.colors.onPrimary} />
+                  <Text style={[styles.primaryActionText, { color: theme.colors.onPrimary }]}>Registrar abono</Text>
                 </Pressable>
               ) : null}
             </ScrollView>
           ) : null}
         </View>
       </View>
-      <AppToast />
     </Modal>
   );
 }

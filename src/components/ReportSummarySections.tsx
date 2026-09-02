@@ -6,6 +6,7 @@ import { useReportsState } from "../hooks/useReportsState";
 import { money } from "../sri";
 import { paymentLabel } from "../utils/reportFormats";
 import { reportItemFilterLabel } from "../utils/reports";
+import { useAppTheme } from "../theme/AppTheme";
 
 type SalesReportSummary = ReturnType<typeof useReportsState>["report"];
 
@@ -47,6 +48,7 @@ export function TaxSummarySection({ report, embedded = false }: { report: SalesR
 }
 
 export function Iva104SummarySection({ report, embedded = false }: { report: SalesReportSummary; embedded?: boolean }) {
+  const { theme } = useAppTheme();
   const content = (
     <>
       <ReportRow label="Ventas tarifa diferente de cero - bruto" value={`$${money(report.iva104.salesVatGross)}`} />
@@ -60,7 +62,7 @@ export function Iva104SummarySection({ report, embedded = false }: { report: Sal
       <ReportRow label="IVA generado neto" value={`$${money(report.iva104.ivaGeneratedNet)}`} />
       <ReportRow label="Retenciones IVA recibidas" value={`$${money(report.iva104.retentionIva)}`} />
       <ReportRow label="IVA estimado a pagar" value={`$${money(report.iva104.estimatedIvaPayable)}`} strong />
-      <Text style={styles.paragraph}>Resumen preparado con ventas, notas de credito y retenciones recibidas. No incluye compras, credito tributario anterior, activos fijos, importaciones, ajustes, intereses ni multas.</Text>
+      <Text style={[styles.paragraph, { color: theme.colors.textMuted }]}>Resumen preparado con ventas, notas de credito y retenciones recibidas. No incluye compras, credito tributario anterior, activos fijos, importaciones, ajustes, intereses ni multas.</Text>
     </>
   );
 

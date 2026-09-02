@@ -4,12 +4,15 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Input, Select } from "./common";
 import { CatalogItemType } from "../types";
 import { sanitizeDecimalInput } from "../utils/numbers";
+import { useAppTheme } from "../theme/AppTheme";
 
 export type ProductFormValues = {
   itemType: CatalogItemType;
   code: string;
   name: string;
   price: string;
+  price2: string;
+  price3: string;
   cost: string;
   stock: string;
   minStock: string;
@@ -20,10 +23,10 @@ type ProductFormProps = {
   form: ProductFormValues;
   onChange: React.Dispatch<React.SetStateAction<ProductFormValues>>;
   onOpenScanner: () => void;
-  onVerifyCode: () => void;
 };
 
-export function ProductForm({ form, onChange, onOpenScanner, onVerifyCode }: ProductFormProps) {
+export function ProductForm({ form, onChange, onOpenScanner }: ProductFormProps) {
+  const { theme } = useAppTheme();
   const isService = form.itemType === "service";
   const selectType = (itemType: CatalogItemType) => {
     onChange({
@@ -37,48 +40,56 @@ export function ProductForm({ form, onChange, onOpenScanner, onVerifyCode }: Pro
 
   return (
     <>
-      <Text style={styles.sectionLabel}>Tipo de item</Text>
+      <Text style={[styles.sectionLabel, { color: theme.colors.text }]}>Tipo de item</Text>
       <View style={styles.typeGrid}>
-        <Pressable style={[styles.typeButton, !isService && styles.typeButtonProduct]} onPress={() => selectType("product")}>
-          <View style={[styles.typeIcon, !isService && styles.typeIconProduct]}>
-            <MaterialCommunityIcons name="package-variant-closed" size={17} color={!isService ? "#047857" : "#64748b"} />
+        <Pressable style={[styles.typeButton, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.surface }, !isService && [styles.typeButtonProduct, { borderColor: theme.colors.success, backgroundColor: theme.colors.successSoft }]]} onPress={() => selectType("product")}>
+          <View style={[styles.typeIcon, { backgroundColor: theme.colors.surfaceMuted }, !isService && [styles.typeIconProduct, { backgroundColor: theme.colors.successSoft }]]}>
+            <MaterialCommunityIcons name="package-variant-closed" size={17} color={!isService ? theme.colors.success : theme.colors.textMuted} />
           </View>
           <View style={styles.typeTextBlock}>
-            <Text style={[styles.typeTitle, !isService && styles.typeTitleActive]}>Producto</Text>
-            <Text style={styles.typeMeta}>Maneja inventario</Text>
+            <Text style={[styles.typeTitle, { color: theme.colors.text }, !isService && [styles.typeTitleActive, { color: theme.colors.success }]]}>Producto</Text>
+            <Text style={[styles.typeMeta, { color: theme.colors.textMuted }]}>Maneja inventario</Text>
           </View>
-          {!isService ? <MaterialCommunityIcons name="check-circle" size={18} color="#0f766e" /> : null}
+          {!isService ? <MaterialCommunityIcons name="check-circle" size={18} color={theme.colors.success} /> : null}
         </Pressable>
-        <Pressable style={[styles.typeButton, isService && styles.typeButtonService]} onPress={() => selectType("service")}>
-          <View style={[styles.typeIcon, isService && styles.typeIconService]}>
-            <MaterialCommunityIcons name="wrench-outline" size={17} color={isService ? "#6d5bd0" : "#64748b"} />
+        <Pressable style={[styles.typeButton, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.surface }, isService && [styles.typeButtonService, { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft }]]} onPress={() => selectType("service")}>
+          <View style={[styles.typeIcon, { backgroundColor: theme.colors.surfaceMuted }, isService && [styles.typeIconService, { backgroundColor: theme.colors.accentSoft }]]}>
+            <MaterialCommunityIcons name="wrench-outline" size={17} color={isService ? theme.colors.accent : theme.colors.textMuted} />
           </View>
           <View style={styles.typeTextBlock}>
-            <Text style={[styles.typeTitle, isService && styles.typeTitleService]}>Servicio</Text>
-            <Text style={styles.typeMeta}>No maneja inventario</Text>
+            <Text style={[styles.typeTitle, { color: theme.colors.text }, isService && [styles.typeTitleService, { color: theme.colors.accent }]]}>Servicio</Text>
+            <Text style={[styles.typeMeta, { color: theme.colors.textMuted }]}>No maneja inventario</Text>
           </View>
-          {isService ? <MaterialCommunityIcons name="check-circle" size={18} color="#6d5bd0" /> : null}
+          {isService ? <MaterialCommunityIcons name="check-circle" size={18} color={theme.colors.accent} /> : null}
         </Pressable>
       </View>
-      <View style={[styles.infoBanner, isService && styles.infoBannerService]}>
-        <MaterialCommunityIcons name={isService ? "shield-check-outline" : "cube-outline"} size={14} color={isService ? "#6d5bd0" : "#047857"} />
-        <Text style={[styles.infoText, isService && styles.infoTextService]}>
+      <View style={[styles.infoBanner, { backgroundColor: theme.colors.successSoft }, isService && [styles.infoBannerService, { backgroundColor: theme.colors.accentSoft }]]}>
+        <MaterialCommunityIcons name={isService ? "shield-check-outline" : "cube-outline"} size={14} color={isService ? theme.colors.accent : theme.colors.success} />
+        <Text style={[styles.infoText, { color: theme.colors.success }, isService && [styles.infoTextService, { color: theme.colors.accent }]]}>
           {isService ? "Los servicios no afectan el inventario ni el stock." : "Los productos afectan el inventario y stock."}
         </Text>
       </View>
 
-      <Input label="Codigo / barras" value={form.code} onChangeText={(code) => onChange({ ...form, code })} autoCapitalize="characters" placeholder={isService ? "Codigo interno del servicio" : "Escanee o ingrese el codigo"} onSubmitEditing={onVerifyCode} />
-      <View style={styles.actionGroup}>
-        <Pressable style={styles.smallButton} onPress={onVerifyCode}>
-          <Text style={styles.smallButtonText}>Verificar codigo</Text>
-        </Pressable>
-        <Pressable style={styles.scanButton} onPress={onOpenScanner}>
-          <Text style={styles.scanButtonText}>Escanear con camara</Text>
-        </Pressable>
-      </View>
-      <Text style={styles.inlineInfo}>{isService ? "Use un codigo interno para buscar rapido el servicio en ventas." : "Puede escanear con lector Bluetooth/USB; el codigo se guarda como codigo principal del producto."}</Text>
+      <Input
+        label="Codigo / barras"
+        value={form.code}
+        onChangeText={(code) => onChange({ ...form, code })}
+        autoCapitalize="characters"
+        placeholder={isService ? "Codigo interno del servicio" : "Escanee o ingrese el codigo"}
+        rightElement={(
+          <Pressable accessibilityRole="button" accessibilityLabel="Escanear codigo con camara" style={[styles.scanButton, { backgroundColor: theme.colors.primary }]} onPress={onOpenScanner}>
+            <MaterialCommunityIcons name="barcode-scan" size={21} color={theme.colors.onPrimary} />
+          </Pressable>
+        )}
+      />
       <Input label={isService ? "Descripcion del servicio" : "Nombre del item"} value={form.name} onChangeText={(name) => onChange({ ...form, name })} placeholder={isService ? "Ej. Servicio de instalacion" : "Ej. Goma 40g"} />
-      <Input label="Precio publico" value={form.price} onChangeText={(price) => onChange({ ...form, price: sanitizeDecimalInput(price) })} keyboardType="decimal-pad" />
+      <Text style={[styles.sectionLabel, { color: theme.colors.text }]}>Precios de venta</Text>
+      <Text style={[styles.priceHelp, { color: theme.colors.textMuted }]}>PVP1 es obligatorio. PVP2 y PVP3 son opcionales para mayoristas u otras tarifas.</Text>
+      <View style={styles.priceGrid}>
+        <View style={styles.priceField}><Input label="PVP1 · Principal" value={form.price} onChangeText={(price) => onChange({ ...form, price: sanitizeDecimalInput(price) })} keyboardType="decimal-pad" /></View>
+        <View style={styles.priceField}><Input label="PVP2 · Opcional" value={form.price2} onChangeText={(price2) => onChange({ ...form, price2: sanitizeDecimalInput(price2) })} keyboardType="decimal-pad" /></View>
+        <View style={styles.priceField}><Input label="PVP3 · Opcional" value={form.price3} onChangeText={(price3) => onChange({ ...form, price3: sanitizeDecimalInput(price3) })} keyboardType="decimal-pad" /></View>
+      </View>
       {!isService ? (
         <>
           <Input label="Costo promedio" value={form.cost} onChangeText={(cost) => onChange({ ...form, cost: sanitizeDecimalInput(cost) })} keyboardType="decimal-pad" />
@@ -92,6 +103,9 @@ export function ProductForm({ form, onChange, onOpenScanner, onVerifyCode }: Pro
 }
 
 const styles = StyleSheet.create({
+  priceHelp: { fontSize: 11, fontWeight: "700", marginTop: -2 },
+  priceGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  priceField: { flex: 1, minWidth: 105 },
   sectionLabel: {
     color: "#334155",
     fontSize: 12,
@@ -178,42 +192,12 @@ const styles = StyleSheet.create({
   infoTextService: {
     color: "#5b4bc4"
   },
-  actionGroup: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    justifyContent: "flex-end",
-    flexShrink: 0
-  },
-  smallButton: {
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#0f766e",
-    backgroundColor: "#e6fffb",
-    paddingHorizontal: 12,
-    paddingVertical: 8
-  },
-  smallButtonText: {
-    color: "#0f5f59",
-    fontWeight: "900"
-  },
   scanButton: {
-    minHeight: 42,
+    width: 42,
+    minHeight: 32,
     borderRadius: 8,
     backgroundColor: "#0f766e",
     alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12
-  },
-  scanButtonText: {
-    color: "#ffffff",
-    fontWeight: "900",
-    textAlign: "center"
-  },
-  inlineInfo: {
-    color: "#475569",
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 18
+    justifyContent: "center"
   }
 });

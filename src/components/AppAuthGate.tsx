@@ -1,12 +1,19 @@
 import React from "react";
+import { Platform } from "react-native";
 import { AuthState } from "../hooks/useAuthState";
 import { normalizedEstablishments } from "../utils/establishments";
 import { AuthScreen } from "./AuthScreen";
+import type { BiometricAccountHint } from "../services/biometricCredentialStorage";
+import { LOCAL_DEVELOPMENT_BACKEND_URL } from "../database";
 
 type AppAuthGateProps = {
   authState: AuthState;
   chooseLoginEstablishment: (id: string) => Promise<void> | void;
   login: (companyId?: string) => Promise<void> | void;
+  biometricAccount: BiometricAccountHint | null;
+  biometricButtonLabel: string;
+  biometricLoading: boolean;
+  loginWithBiometrics: () => Promise<void> | void;
   recoverPassword: () => Promise<void> | void;
   registerTenant: () => Promise<void> | void;
 };
@@ -15,6 +22,10 @@ export function AppAuthGate({
   authState,
   chooseLoginEstablishment,
   login,
+  biometricAccount,
+  biometricButtonLabel,
+  biometricLoading,
+  loginWithBiometrics,
   recoverPassword,
   registerTenant
 }: AppAuthGateProps) {
@@ -32,6 +43,10 @@ export function AppAuthGate({
       showLoginPassword={authState.showLoginPassword}
       setShowLoginPassword={authState.setShowLoginPassword}
       login={login}
+      biometricAccount={biometricAccount}
+      biometricButtonLabel={biometricButtonLabel}
+      biometricLoading={biometricLoading}
+      loginWithBiometrics={loginWithBiometrics}
       loggingIn={authState.loggingIn}
       loginStatus={authState.loginStatus}
       loginErrorModalMessage={authState.loginErrorModalMessage}
@@ -47,7 +62,10 @@ export function AppAuthGate({
       recoverPassword={recoverPassword}
       recoverStatus={authState.recoverStatus}
       recoveringPassword={authState.recoveringPassword}
-      onOpenRegister={() => authState.setAuthMode("register")}
+      onOpenRegister={() => {
+        if (__DEV__ && Platform.OS === "web") authState.setAuthBackendUrl(LOCAL_DEVELOPMENT_BACKEND_URL);
+        authState.setAuthMode("register");
+      }}
       onOpenForgot={() => {
         authState.setRecoveryIdentifier(authState.email);
         authState.setRecoverStatus(null);

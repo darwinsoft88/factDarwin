@@ -4,6 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { paymentOptions } from "../constants/options";
 import { PaymentCondition, PaymentMethod } from "../types";
 import { CalendarDateInput } from "./CalendarDateInput";
+import { AppTheme, useAppTheme } from "../theme/AppTheme";
 
 type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -35,11 +36,12 @@ export function PaymentMethodPicker({
   onPaymentConditionChange,
   onCreditDueDateChange
 }: PaymentMethodPickerProps) {
+  const { theme } = useAppTheme();
   const creditSelected = paymentCondition === "credito";
 
   return (
-    <View style={styles.paymentBox}>
-      <Text style={styles.sectionTitle}>Forma de pago</Text>
+    <View style={[styles.paymentBox, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+      <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>Forma de pago</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.paymentList}>
         {paymentOptions.flatMap((option, index) => {
           const selected = !creditSelected && option.value === value;
@@ -49,33 +51,33 @@ export function PaymentMethodPicker({
               key={option.value}
               accessibilityRole="button"
               accessibilityState={{ selected }}
-              style={[styles.paymentCard, selected && styles.paymentCardSelected]}
+              style={[styles.paymentCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, selected && { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]}
               onPress={() => {
                 onPaymentConditionChange?.("contado");
                 onChange(option.value as PaymentMethod);
               }}
             >
-              <View style={[styles.paymentIconBox, selected && styles.paymentIconBoxSelected]}>
-                <MaterialCommunityIcons name={meta.icon} size={16} color={selected ? "#ffffff" : "#0f766e"} />
+              <View style={[styles.paymentIconBox, { backgroundColor: selected ? theme.colors.primary : theme.colors.primarySoft }]}>
+                <MaterialCommunityIcons name={meta.icon} size={16} color={selected ? theme.colors.onPrimary : theme.colors.primary} />
               </View>
               <View style={styles.paymentTextBox}>
-                <Text style={[styles.paymentTitle, selected && styles.paymentTitleSelected]} numberOfLines={1}>{meta.title}</Text>
-                <Text style={[styles.paymentCodeText, selected && styles.paymentCodeTextSelected]}>{meta.detail}</Text>
+                <Text style={[styles.paymentTitle, { color: selected ? theme.colors.primary : theme.colors.textMuted }]} numberOfLines={1}>{meta.title}</Text>
+                <Text style={[styles.paymentCodeText, { color: selected ? theme.colors.primary : theme.colors.textMuted }]}>{meta.detail}</Text>
               </View>
               {selected ? (
-                <View style={styles.checkDot}>
-                  <MaterialCommunityIcons name="check" size={13} color="#ffffff" />
+                <View style={[styles.checkDot, { backgroundColor: theme.colors.primary }]}>
+                  <MaterialCommunityIcons name="check" size={13} color={theme.colors.onPrimary} />
                 </View>
               ) : null}
             </Pressable>
           );
-          return index === 1 ? [paymentCard, renderCreditCard(creditSelected, onPaymentConditionChange, onChange)] : [paymentCard];
+          return index === 1 ? [paymentCard, renderCreditCard(creditSelected, onPaymentConditionChange, onChange, theme)] : [paymentCard];
         })}
       </ScrollView>
       {creditSelected ? (
         <View style={styles.creditBox}>
           <CalendarDateInput label="Vence el" value={creditDueDate} onChange={onCreditDueDateChange || (() => undefined)} allowClear />
-          <Text style={styles.creditNote}>Cuenta por cobrar | SRI codigo 20.</Text>
+          <Text style={[styles.creditNote, { color: theme.colors.textMuted }]}>Cuenta por cobrar | SRI codigo 20.</Text>
         </View>
       ) : null}
     </View>
@@ -85,29 +87,30 @@ export function PaymentMethodPicker({
 function renderCreditCard(
   creditSelected: boolean,
   onPaymentConditionChange: ((value: PaymentCondition) => void) | undefined,
-  onChange: (value: PaymentMethod) => void
+  onChange: (value: PaymentMethod) => void,
+  theme: AppTheme
 ) {
   return (
     <Pressable
       key="credito"
       accessibilityRole="button"
       accessibilityState={{ selected: creditSelected }}
-      style={[styles.paymentCard, creditSelected && styles.paymentCardSelected]}
+      style={[styles.paymentCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, creditSelected && { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]}
       onPress={() => {
         onPaymentConditionChange?.("credito");
         onChange("20");
       }}
     >
-      <View style={[styles.paymentIconBox, creditSelected && styles.paymentIconBoxSelected]}>
-        <MaterialCommunityIcons name="account-clock-outline" size={16} color={creditSelected ? "#ffffff" : "#0f766e"} />
+      <View style={[styles.paymentIconBox, { backgroundColor: creditSelected ? theme.colors.primary : theme.colors.primarySoft }]}>
+        <MaterialCommunityIcons name="account-clock-outline" size={16} color={creditSelected ? theme.colors.onPrimary : theme.colors.primary} />
       </View>
       <View style={styles.paymentTextBox}>
-        <Text style={[styles.paymentTitle, creditSelected && styles.paymentTitleSelected]} numberOfLines={1}>Credito cliente</Text>
-        <Text style={[styles.paymentCodeText, creditSelected && styles.paymentCodeTextSelected]}>CXC</Text>
+        <Text style={[styles.paymentTitle, { color: creditSelected ? theme.colors.primary : theme.colors.textMuted }]} numberOfLines={1}>Credito cliente</Text>
+        <Text style={[styles.paymentCodeText, { color: creditSelected ? theme.colors.primary : theme.colors.textMuted }]}>CXC</Text>
       </View>
       {creditSelected ? (
-        <View style={styles.checkDot}>
-          <MaterialCommunityIcons name="check" size={13} color="#ffffff" />
+        <View style={[styles.checkDot, { backgroundColor: theme.colors.primary }]}>
+          <MaterialCommunityIcons name="check" size={13} color={theme.colors.onPrimary} />
         </View>
       ) : null}
     </Pressable>

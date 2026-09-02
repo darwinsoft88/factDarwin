@@ -1,45 +1,66 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
-import { CatalogItemType, Product } from "../types";
+import { useKeyboardInset } from "../hooks/useKeyboardInset";
+import { CatalogItemType, Product, SalePriceTier } from "../types";
 import { money } from "../sri";
 import { Empty, Input } from "./common";
 import { PaginationControls } from "./PaginationControls";
-import { catalogItemBadge, catalogItemIcon, isServiceItem } from "../utils/catalogItems";
+import { useAppTheme } from "../theme/AppTheme";
+import { isServiceItem } from "../utils/catalogItems";
+import { SalePriceTierSelector } from "./SalePriceTierSelector";
+import { ProductThumbnail } from "./ProductThumbnail";
 
 const MODAL_PRODUCT_PAGE_SIZE = 10;
 
 type SaleProductPickerProps = {
+  backendUrl: string;
+  backendToken: string;
   search: string;
   selectedProductId: string;
   visibleProducts: Product[];
   filteredProductCount: number;
   canLoadMore: boolean;
   onSearchChange: (value: string) => void;
-  onProductChange: (value: string) => void;
   onSearchSubmit: () => void;
   onOpenScanner: () => void;
   onLoadMore: () => void;
-  onAddProduct: (productId: string) => void;
+  onAddProduct: (productId: string) => boolean;
+  priceTier: SalePriceTier;
+  onPriceTierChange: (tier: SalePriceTier) => void;
 };
 
 export function SaleProductPicker({
+  backendUrl,
+  backendToken,
   search,
   selectedProductId,
   visibleProducts,
   filteredProductCount,
   canLoadMore,
   onSearchChange,
-  onProductChange,
   onSearchSubmit,
   onOpenScanner,
   onLoadMore,
-  onAddProduct
+  onAddProduct,
+  priceTier,
+  onPriceTierChange
 }: SaleProductPickerProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
+  const keyboardInset = useKeyboardInset();
+  const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? MODAL_SAFE_BOTTOM_PADDING : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+  const useFullScreenPicker = windowWidth <= 600;
   const [pickerVisible, setPickerVisible] = React.useState(false);
   const [activeType, setActiveType] = React.useState<CatalogItemType>("product");
   const [page, setPage] = React.useState(1);
+  const [selectedProductIds, setSelectedProductIds] = React.useState<string[]>([]);
   const productMatches = React.useMemo(() => visibleProducts.filter((product) => !isServiceItem(product)), [visibleProducts]);
   const serviceMatches = React.useMemo(() => visibleProducts.filter(isServiceItem), [visibleProducts]);
   const typedProducts = React.useMemo(
@@ -82,12 +103,17 @@ export function SaleProductPicker({
     onLoadMoreRef.current();
   }, [canLoadMore, currentPage, pickerVisible, typedProductCount, visibleProducts.length]);
 
-  const selectProduct = (id: string) => {
-    onProductChange(id);
+  const toggleProduct = (id: string) => {
+    setSelectedProductIds((current) => current.includes(id)
+      ? current.filter((productId) => productId !== id)
+      : [...current, id]);
   };
-  const addProduct = (id: string) => {
-    onAddProduct(id);
-    setPickerVisible(false);
+  const addSelectedProducts = () => {
+    const addedCount = selectedProductIds.reduce((count, id) => onAddProduct(id) ? count + 1 : count, 0);
+    if (addedCount > 0) {
+      setSelectedProductIds([]);
+      setPickerVisible(false);
+    }
   };
   const openPicker = () => {
     if (searchText && serviceMatches.length > 0 && productMatches.length === 0) {
@@ -95,6 +121,7 @@ export function SaleProductPicker({
     } else if (searchText && productMatches.length > 0 && serviceMatches.length === 0) {
       setActiveType("product");
     }
+    setSelectedProductIds([]);
     setPickerVisible(true);
   };
   const changePage = (nextPage: number) => {
@@ -108,79 +135,80 @@ export function SaleProductPicker({
   return (
     <>
       <View style={styles.compactHeader}>
-        <Text style={styles.compactTitle} numberOfLines={1}>Productos/Servicios</Text>
+        <View style={styles.titleRow}>
+          <Text style={[styles.compactTitle, { color: theme.colors.text }]} numberOfLines={1}>Productos/Servicios</Text>
+          <SalePriceTierSelector value={priceTier} onChange={onPriceTierChange} />
+        </View>
         <View style={styles.productActions}>
-          <View style={styles.searchBarButton}>
+          <View style={[styles.searchBarButton, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
             <MaterialCommunityIcons
               name="magnify"
               size={17}
-              color="#64748b"
+              color={theme.colors.textMuted}
             />
             <TextInput
-              style={styles.searchInput}
+              style={[styles.searchInput, { color: theme.colors.text }]}
               value={search}
               onChangeText={onSearchChange}
               placeholder="Buscar producto o servicio"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={theme.colors.textMuted}
               autoCapitalize="characters"
               autoCorrect={false}
               returnKeyType="search"
               onSubmitEditing={onSearchSubmit}
             />
-            <Pressable style={styles.searchSubmitPill} onPress={openPicker}>
-              <Text style={styles.searchSubmitText}>Buscar</Text>
+            <Pressable style={[styles.searchSubmitPill, { backgroundColor: theme.colors.primary }]} onPress={openPicker}>
+              <Text style={[styles.searchSubmitText, { color: theme.colors.onPrimary }]}>Buscar</Text>
             </Pressable>
           </View>
-          <Pressable accessibilityRole="button" accessibilityLabel="Escanear producto con camara" style={styles.cameraButton} onPress={onOpenScanner}>
-            <MaterialCommunityIcons name="barcode-scan" size={21} color="#ffffff" />
+          <Pressable accessibilityRole="button" accessibilityLabel="Escanear producto con camara" style={[styles.cameraButton, { backgroundColor: theme.colors.primary }]} onPress={onOpenScanner}>
+            <MaterialCommunityIcons name="barcode-scan" size={21} color={theme.colors.onPrimary} />
           </Pressable>
         </View>
       </View>
       {searchText ? (
         previewProduct ? (
-          <View style={styles.previewCard}>
-            <View style={styles.previewIcon}>
-              <MaterialCommunityIcons name={catalogItemIcon(previewProduct)} size={14} color={isServiceItem(previewProduct) ? "#6d28d9" : "#047857"} />
-            </View>
+          <View style={[styles.previewCard, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.primarySoft }]}>
+            <ProductThumbnail product={previewProduct} backendUrl={backendUrl} token={backendToken} size={38} />
             <View style={styles.flex}>
-              <Text style={styles.previewTitle} numberOfLines={1}>{previewProduct.code} - {previewProduct.name}</Text>
-              <Text style={styles.previewMeta} numberOfLines={1}>
+              <Text style={[styles.previewTitle, { color: theme.colors.text }]} numberOfLines={1}>{previewProduct.code} - {previewProduct.name}</Text>
+              <Text style={[styles.previewMeta, { color: theme.colors.textMuted }]} numberOfLines={1}>
                 {isServiceItem(previewProduct)
-                  ? `${catalogItemBadge(previewProduct)} | Precio $ ${money(previewProduct.price)} | IVA ${money(previewProduct.ivaRate * 100)}%`
-                  : `${catalogItemBadge(previewProduct)} | Exist. ${previewProduct.stock} | Precio $ ${money(previewProduct.price)} | IVA ${money(previewProduct.ivaRate * 100)}%`}
+                  ? `Precio $ ${money(previewProduct.price)} | IVA ${money(previewProduct.ivaRate * 100)}%`
+                  : `Exist. ${previewProduct.stock} | Precio $ ${money(previewProduct.price)} | IVA ${money(previewProduct.ivaRate * 100)}%`}
               </Text>
             </View>
-            <Pressable accessibilityRole="button" accessibilityLabel={`Agregar ${previewProduct.name} al detalle`} style={styles.previewAddButton} onPress={() => onAddProduct(previewProduct.id)}>
-              <MaterialCommunityIcons name="plus" size={20} color="#047857" />
+            <Pressable accessibilityRole="button" accessibilityLabel={`Agregar ${previewProduct.name} al detalle`} style={[styles.previewAddButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.surface }]} onPress={() => onAddProduct(previewProduct.id)}>
+              <MaterialCommunityIcons name="plus" size={20} color={theme.colors.success} />
             </Pressable>
           </View>
         ) : (
-          <View style={styles.emptyPreview}>
-            <MaterialCommunityIcons name="magnify-close" size={16} color="#92400e" />
-                  <Text style={styles.emptyPreviewText} numberOfLines={1}>Sin coincidencias para {searchText}</Text>
+          <View style={[styles.emptyPreview, { borderColor: theme.colors.warning, backgroundColor: theme.colors.warningSoft }]}>
+            <MaterialCommunityIcons name="magnify-close" size={16} color={theme.colors.warning} />
+                  <Text style={[styles.emptyPreviewText, { color: theme.colors.warning }]} numberOfLines={1}>Sin coincidencias para {searchText}</Text>
           </View>
         )
       ) : null}
       <Modal visible={pickerVisible} transparent animationType="fade" onRequestClose={() => setPickerVisible(false)}>
         <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setPickerVisible(false)}>
-            <Pressable style={styles.modalSheet}>
+          <Pressable style={[styles.modalBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, useFullScreenPicker && styles.fullScreenBackdrop, useFullScreenPicker && Platform.OS !== "web" && { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, androidKeyboardInset) }]} onPress={() => setPickerVisible(false)}>
+            <Pressable style={[styles.modalSheet, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }, useFullScreenPicker && styles.fullScreenSheet]}>
               <View style={styles.modalHeader}>
                 <View style={styles.flex}>
-                  <Text style={styles.modalTitle}>Agregar item</Text>
+                  <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Agregar item</Text>
                 </View>
-                <Pressable style={styles.closeButton} onPress={() => setPickerVisible(false)}>
-                  <Text style={styles.closeButtonText}>Cerrar</Text>
+                <Pressable style={[styles.closeButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.surface }]} onPress={() => setPickerVisible(false)}>
+                  <Text style={[styles.closeButtonText, { color: theme.colors.primary }]}>Cerrar</Text>
                 </Pressable>
               </View>
-              <View style={styles.typeTabs}>
-                <Pressable style={[styles.typeTab, activeType === "product" && styles.typeTabActive]} onPress={() => setActiveType("product")}>
-                  <MaterialCommunityIcons name="package-variant-closed" size={15} color={activeType === "product" ? "#047857" : "#64748b"} />
-                  <Text style={[styles.typeTabText, activeType === "product" && styles.typeTabTextActive]}>Productos</Text>
+              <View style={[styles.typeTabs, { backgroundColor: theme.colors.surfaceMuted }]}>
+                <Pressable style={[styles.typeTab, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, activeType === "product" && { borderColor: theme.colors.success, backgroundColor: theme.colors.successSoft }]} onPress={() => setActiveType("product")}>
+                  <MaterialCommunityIcons name="package-variant-closed" size={15} color={activeType === "product" ? theme.colors.success : theme.colors.textMuted} />
+                  <Text style={[styles.typeTabText, { color: activeType === "product" ? theme.colors.success : theme.colors.textMuted }]}>Productos</Text>
                 </Pressable>
-                <Pressable style={[styles.typeTab, activeType === "service" && styles.typeTabServiceActive]} onPress={() => setActiveType("service")}>
-                  <MaterialCommunityIcons name="wrench-outline" size={15} color={activeType === "service" ? "#6d28d9" : "#64748b"} />
-                  <Text style={[styles.typeTabText, activeType === "service" && styles.typeTabServiceTextActive]}>Servicios</Text>
+                <Pressable style={[styles.typeTab, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, activeType === "service" && { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft }]} onPress={() => setActiveType("service")}>
+                  <MaterialCommunityIcons name="wrench-outline" size={15} color={activeType === "service" ? theme.colors.accent : theme.colors.textMuted} />
+                  <Text style={[styles.typeTabText, { color: activeType === "service" ? theme.colors.accent : theme.colors.textMuted }]}>Servicios</Text>
                 </Pressable>
               </View>
               <Input
@@ -191,30 +219,31 @@ export function SaleProductPicker({
                 autoCapitalize="characters"
                 onSubmitEditing={onSearchSubmit}
                 rightElement={(
-                  <Pressable accessibilityRole="button" accessibilityLabel="Escanear codigo con camara" style={styles.inputCameraButton} onPress={onOpenScanner}>
-                    <MaterialCommunityIcons name="barcode-scan" size={21} color="#ffffff" />
+                  <Pressable accessibilityRole="button" accessibilityLabel="Escanear codigo con camara" style={[styles.inputCameraButton, { backgroundColor: theme.colors.primary }]} onPress={onOpenScanner}>
+                    <MaterialCommunityIcons name="barcode-scan" size={21} color={theme.colors.onPrimary} />
                   </Pressable>
                 )}
               />
               <View style={styles.resultHeader}>
-                <Text style={styles.resultLabel}>{activeType === "service" ? "Servicios encontrados" : "Productos encontrados"}</Text>
-                <Text style={styles.resultCount}>{typedProductCount}/{filteredProductCount} registro(s)</Text>
+                <Text style={[styles.resultLabel, { color: theme.colors.text }]}>{activeType === "service" ? "Servicios encontrados" : "Productos encontrados"}</Text>
+                <Text style={[styles.resultCount, { color: theme.colors.textMuted }]}>{typedProductCount}/{filteredProductCount} registro(s)</Text>
               </View>
-              <ScrollView style={styles.resultsBox} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+              <ScrollView style={[styles.resultsBox, !useFullScreenPicker && styles.boundedResults, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }, useFullScreenPicker && styles.fullScreenResults]} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                 {pageProducts.map((product) => {
-                  const selected = product.id === selectedProductId;
+                  const selected = selectedProductIds.includes(product.id);
                   return (
-                    <Pressable key={product.id} style={[styles.productRow, selected && styles.productRowSelected]} onPress={() => selectProduct(product.id)}>
+                    <Pressable key={product.id} style={[styles.productRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, selected && { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={() => toggleProduct(product.id)}>
+                      <ProductThumbnail product={product} backendUrl={backendUrl} token={backendToken} size={44} />
                       <View style={styles.flex}>
-                        <Text style={[styles.productName, selected && styles.productNameSelected]} numberOfLines={1}>{product.code} - {product.name}</Text>
-                        <Text style={styles.productMeta} numberOfLines={1}>
+                        <Text style={[styles.productName, { color: selected ? theme.colors.primary : theme.colors.text }]} numberOfLines={1}>{product.code} - {product.name}</Text>
+                        <Text style={[styles.productMeta, { color: theme.colors.textMuted }]} numberOfLines={1}>
                           {isServiceItem(product)
-                            ? `${catalogItemBadge(product)} | Precio $ ${money(product.price)} | IVA ${money(product.ivaRate * 100)}%`
-                            : `${catalogItemBadge(product)} | Cant. ${product.stock} | Precio $ ${money(product.price)} | IVA ${money(product.ivaRate * 100)}%`}
+                            ? `Precio $ ${money(product.price)} | IVA ${money(product.ivaRate * 100)}%`
+                            : `Cant. ${product.stock} | Precio $ ${money(product.price)} | IVA ${money(product.ivaRate * 100)}%`}
                         </Text>
                       </View>
-                      <Pressable accessibilityRole="button" accessibilityLabel={`Agregar ${product.name} al detalle`} style={styles.addProductButton} onPress={() => addProduct(product.id)}>
-                        <MaterialCommunityIcons name="plus" size={21} color="#047857" />
+                      <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: selected }} accessibilityLabel={`${selected ? "Quitar" : "Seleccionar"} ${product.name}`} style={[styles.addProductButton, { borderColor: theme.colors.primary, backgroundColor: selected ? theme.colors.primary : theme.colors.surface }]} onPress={() => toggleProduct(product.id)}>
+                        <MaterialCommunityIcons name={selected ? "check" : "plus"} size={21} color={selected ? theme.colors.onPrimary : theme.colors.success} />
                       </Pressable>
                     </Pressable>
                   );
@@ -222,6 +251,12 @@ export function SaleProductPicker({
               </ScrollView>
               {typedProductCount === 0 ? <Empty text={`No hay ${activeType === "service" ? "servicios" : "productos"} con esa busqueda.`} /> : null}
               <PaginationControls page={currentPage} pageSize={MODAL_PRODUCT_PAGE_SIZE} totalItems={typedProductCount} onPageChange={changePage} />
+              {selectedProductIds.length > 0 ? (
+                <Pressable accessibilityRole="button" style={[styles.addSelectedButton, { backgroundColor: theme.colors.primary }]} onPress={addSelectedProducts}>
+                  <MaterialCommunityIcons name="cart-plus" size={19} color={theme.colors.onPrimary} />
+                  <Text style={[styles.addSelectedText, { color: theme.colors.onPrimary }]}>Agregar {selectedProductIds.length} {selectedProductIds.length === 1 ? "item" : "items"}</Text>
+                </Pressable>
+              ) : null}
             </Pressable>
           </Pressable>
         </KeyboardAvoidingView>
@@ -237,11 +272,17 @@ const styles = StyleSheet.create({
   compactHeader: {
     gap: 7
   },
+  titleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+    justifyContent: "space-between"
+  },
   compactTitle: {
     color: "#111827",
     fontSize: 13,
     fontWeight: "900",
-    alignSelf: "flex-start"
+    flexShrink: 0
   },
   productActions: {
     flexDirection: "row",
@@ -377,6 +418,20 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     gap: 10
   },
+  fullScreenBackdrop: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 0
+  },
+  fullScreenSheet: {
+    flex: 1,
+    width: "100%",
+    maxHeight: "100%",
+    borderRadius: 0,
+    borderWidth: 0,
+    paddingTop: 14,
+    paddingBottom: 10
+  },
   modalHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -466,11 +521,18 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   resultsBox: {
-    maxHeight: 260,
     borderWidth: 1,
     borderColor: "#dbe4ee",
     borderRadius: 8,
     backgroundColor: "#ffffff"
+  },
+  boundedResults: {
+    maxHeight: 260
+  },
+  fullScreenResults: {
+    flex: 1,
+    flexGrow: 1,
+    minHeight: 0
   },
   resultsContent: {
     gap: 6,
@@ -514,5 +576,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center"
+  },
+  addSelectedButton: {
+    minHeight: 46,
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingHorizontal: 16
+  },
+  addSelectedText: {
+    fontSize: 14,
+    fontWeight: "900"
   }
 });

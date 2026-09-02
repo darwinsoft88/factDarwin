@@ -1,5 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { CollapsibleSection } from "../components/common";
 import { DeleteEstablishmentModal } from "../components/DeleteEstablishmentModal";
 import { EstablishmentActions } from "../components/EstablishmentActions";
@@ -12,6 +14,7 @@ import { PlanLimitCard } from "../components/PlanLimitCard";
 import { PlanUpgradeModal } from "../components/PlanUpgradeModal";
 import { SriAssetsStatusSections } from "../components/SriAssetsStatusSections";
 import { SriDeveloperToolsSection } from "../components/SriDeveloperToolsSection";
+import { SriEnvironmentExperienceCard } from "../components/SriEnvironmentExperienceCard";
 import { useSriBackupRestore } from "../hooks/useSriBackupRestore";
 import { useSriCompanyAssets } from "../hooks/useSriCompanyAssets";
 import { useSriConnectionTest } from "../hooks/useSriConnectionTest";
@@ -24,14 +27,22 @@ import { getCompanySriEnvironment, updateCompanySriEnvironment } from "../servic
 import { AppData, Issuer, IssuerEstablishment, User } from "../types";
 import { appLicenseStatus, canAccessDeveloperTools, compactLicenseStatusLabel } from "../utils/appAccess";
 import { appendAudit } from "../utils/audit";
-import { showMessage } from "../utils/dialogs";
+import { showError, showMessage, showSuccess, showWarning } from "../utils/dialogs";
 import { activeEstablishment, editableEstablishments, issuerWithEstablishment } from "../utils/establishments";
 import { canUseEmissionScope, maxEmissionPointsForLicense } from "../utils/license";
 import { buildIssuerAfterEstablishmentDeletion, buildNewEstablishmentForm, countDocumentsForEstablishment, selectedEditableEstablishment, validateDeleteEstablishmentConfirmation, validateDeleteEstablishmentRequest, validateNewEstablishmentDraft, validateSelectedEstablishmentPatch } from "../utils/sriEstablishmentEditor";
 import { buildIssuerFromSriForm, validateSriIssuerSave } from "../utils/sriIssuerSave";
-import { syncPatchToBackend } from "../utils/sync";
+import { canActivateRealBilling, changeSriEnvironmentAuthoritatively } from "../utils/sriEnvironmentActivation";
+import { syncPatchToBackend, syncPatchToBackendResult } from "../utils/sync";
 import { buildProductionChecklist } from "../validation";
+import { useAppTheme } from "../theme/AppTheme";
 export function SriScreen({ data, user, backendToken, getBackendToken, persist, onRefreshBackend }: { data: AppData; user: User; backendToken: string; getBackendToken: (backendUrl: string) => Promise<string>; persist: (data: AppData) => Promise<void>; onRefreshBackend: () => void }) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 20 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 20 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveModalMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
   const {
     autoBackupEnabled,
     backendUrl,
@@ -88,6 +99,7 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
     setSequentialText
   });
   const productionChecklist = useMemo(() => buildProductionChecklist({ ...issuer, sequential: Number(sequentialText), remissionSequential: Number(remissionSequentialText), creditNoteSequential: Number(creditNoteSequentialText) }, backendUrl, connectionResult), [backendUrl, connectionResult, creditNoteSequentialText, issuer, remissionSequentialText, sequentialText]);
+  const serverInTestMode = connectionResult.includes("Ambiente backend por defecto: test") && connectionResult.includes("Envio real al SRI: DESACTIVADO");
   const establishments = useMemo(() => editableEstablishments(issuer), [issuer]);
   const selectedEstablishment = selectedEditableEstablishment(issuer, establishments);
   const canManageEstablishments = appLicenseStatus(license).active && maxEmissionPointsForLicense(license) > 1;
@@ -97,6 +109,7 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
   const {
     assetStatus,
     assetStatusTone,
+    assetsStatus,
     cancelCertificateUpload,
     certificatePassword,
     certificateUploadModalVisible,
@@ -121,7 +134,13 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
     persist,
     user
   });
-  const [pendingEnvironmentIssuer, setPendingEnvironmentIssuer] = useState<Issuer | null>(null);
+  const [pendingEnvironment, setPendingEnvironment] = useState<"1" | "2" | null>(null);
+  const [diagnosticOpen, setDiagnosticOpen] = useState(false);
+  const [issuerOpen, setIssuerOpen] = useState(true);
+  const [assetsOpen, setAssetsOpen] = useState(false);
+  const [changingEnvironment, setChangingEnvironment] = useState(false);
+  const [savingIssuer, setSavingIssuer] = useState(false);
+  const savingIssuerRef = useRef(false);
 
   const openPlanUpgradeModal = (message?: string) => {
     setPlanUpgradeMessage(message || `Su plan actual permite ${maxEmissionPoints} punto(s) de emision. Active Pro para manejar sucursales, puntos adicionales y operacion multi punto.`);
@@ -373,103 +392,148 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
       return;
     }
     const { creditNoteSequential, remissionSequential, removedIds, sequential } = validation.value;
-    let canonicalEnvironment;
+    if (savingIssuerRef.current) return;
+    savingIssuerRef.current = true;
+    setSavingIssuer(true);
     try {
-      canonicalEnvironment = await getCompanySriEnvironment(data.backendUrl, backendToken);
+      let canonicalEnvironment = await getCompanySriEnvironment(data.backendUrl, backendToken);
       if (nextIssuer.environment !== data.issuer.environment) {
         canonicalEnvironment = await updateCompanySriEnvironment(data.backendUrl, nextIssuer.environment, canonicalEnvironment.environmentVersion, backendToken);
       }
-    } catch (error) {
-      showMessage("Ambiente SRI no confirmado", error instanceof Error ? error.message : "No fue posible confirmar el ambiente empresarial vigente.");
-      return;
-    }
-    const confirmedIssuer: Issuer = { ...nextIssuer, environment: canonicalEnvironment.environment, environmentVersion: canonicalEnvironment.environmentVersion };
-    const nextData = appendAudit({ ...data, backendUrl, autoBackupEnabled, issuer: confirmedIssuer, license }, user, "SRI_CONFIG_UPDATED", "issuer", issuer.ruc, "Configuracion SRI actualizada", { environment: confirmedIssuer.environment, environmentVersion: confirmedIssuer.environmentVersion, establishment: confirmedIssuer.establishment, emissionPoint: confirmedIssuer.emissionPoint, sequential, remissionSequential, creditNoteSequential, autoBackupEnabled, removedEstablishments: removedIds, establishmentsUpdatedAt: confirmedIssuer.establishmentsUpdatedAt });
-    await persist(nextData);
-    await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, issuer: confirmedIssuer, auditLogs: nextData.auditLogs.slice(0, 1) }, "Configuracion SRI pendiente de sincronizar", nextData, persist);
-    setIssuer(confirmedIssuer);
-    setSequentialText(String(sequential));
-    setRemissionSequentialText(String(remissionSequential));
-    setCreditNoteSequentialText(String(creditNoteSequential));
-    setEstablishmentNameText(activeEstablishment(nextIssuer).name);
-    setEstablishmentCodeText(nextIssuer.establishment);
-    setEmissionPointText(nextIssuer.emissionPoint);
-    if (removedIds.length > 0) {
-      const message = `Establecimiento${removedIds.length > 1 ? "s" : ""} ${removedIds.join(", ")} eliminado${removedIds.length > 1 ? "s" : ""} correctamente.`;
-      setEstablishmentStatus({ tone: "success", message });
-      Alert.alert("Establecimiento eliminado", message);
-      return;
-    }
-    setEstablishmentStatus({ tone: "success", message: `${selectedEstablishment.name} ${nextIssuer.establishment}-${nextIssuer.emissionPoint} guardado correctamente.` });
-    Alert.alert(
-      "Configuracion guardada",
-      confirmedIssuer.environment === "2"
+      const confirmedIssuer: Issuer = { ...nextIssuer, environment: canonicalEnvironment.environment, environmentVersion: canonicalEnvironment.environmentVersion };
+      const nextData = appendAudit({ ...data, backendUrl, autoBackupEnabled, issuer: confirmedIssuer, license }, user, "SRI_CONFIG_UPDATED", "issuer", issuer.ruc, "Configuracion SRI actualizada", { environment: confirmedIssuer.environment, environmentVersion: confirmedIssuer.environmentVersion, establishment: confirmedIssuer.establishment, emissionPoint: confirmedIssuer.emissionPoint, sequential, remissionSequential, creditNoteSequential, autoBackupEnabled, removedEstablishments: removedIds, establishmentsUpdatedAt: confirmedIssuer.establishmentsUpdatedAt });
+      await persist(nextData);
+      const syncResult = await syncPatchToBackendResult(data.backendUrl, backendToken, { baseData: data, issuer: confirmedIssuer, auditLogs: nextData.auditLogs.slice(0, 1) }, "Configuracion SRI pendiente de sincronizar");
+      setIssuer(confirmedIssuer);
+      setSequentialText(String(sequential));
+      setRemissionSequentialText(String(remissionSequential));
+      setCreditNoteSequentialText(String(creditNoteSequential));
+      setEstablishmentNameText(activeEstablishment(confirmedIssuer).name);
+      setEstablishmentCodeText(confirmedIssuer.establishment);
+      setEmissionPointText(confirmedIssuer.emissionPoint);
+
+      const environmentMessage = confirmedIssuer.environment === "2"
         ? "Produccion activada. Los proximos comprobantes se enviaran al ambiente real del SRI."
-        : "Pruebas activadas. Los proximos comprobantes se enviaran al ambiente de pruebas del SRI."
-    );
+        : "Pruebas activadas. Los proximos comprobantes se enviaran al ambiente de pruebas del SRI.";
+      if (syncResult.confirmed && !syncResult.localCleanupPending) {
+        setEstablishmentStatus({ tone: "success", message: environmentMessage });
+        showSuccess("Configuracion guardada", environmentMessage);
+      } else {
+        const pendingMessage = syncResult.confirmed
+          ? `${environmentMessage} La limpieza local quedo pendiente y se completara al sincronizar.`
+          : `${environmentMessage} La configuracion complementaria quedo pendiente de sincronizar.${syncResult.errorMessage ? ` ${syncResult.errorMessage}` : ""}`;
+        setEstablishmentStatus({ tone: "info", message: pendingMessage });
+        showWarning("Configuracion guardada", pendingMessage);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No fue posible guardar la configuracion del emisor.";
+      setEstablishmentStatus({ tone: "error", message });
+      showError("No se pudo guardar el emisor", message);
+    } finally {
+      savingIssuerRef.current = false;
+      setSavingIssuer(false);
+    }
   };
 
-  const handleIssuerTaxChange = (nextIssuer: Issuer) => {
-    if (nextIssuer.environment === issuer.environment) {
-      setIssuer(nextIssuer);
+  const requestEnvironmentChange = (target: "1" | "2", checkedChecklist = productionChecklist) => {
+    if (user.role !== "admin" && !user.supportAccess) {
+      Alert.alert("Acción restringida", "Solo el administrador o soporte técnico puede cambiar la facturación electrónica.");
       return;
     }
-
-    const canChangeSriEnvironment = user.role === "admin" || user.supportAccess;
-    if (!canChangeSriEnvironment) {
-      Alert.alert("Accion restringida", "Solo el administrador o soporte tecnico puede cambiar el ambiente SRI.");
+    if (target === "2" && !canActivateRealBilling(checkedChecklist)) {
+      showWarning("Aún no puedes activar la facturación real", "Completa los requisitos indicados: datos tributarios, firma electrónica y comprobación de conexión.");
       return;
     }
-
-    setPendingEnvironmentIssuer(nextIssuer);
+    setPendingEnvironment(target);
   };
 
-  const confirmIssuerEnvironmentChange = () => {
-    if (!pendingEnvironmentIssuer) return;
-    const environmentLabel = pendingEnvironmentIssuer.environment === "2" ? "PRODUCCION" : "PRUEBAS";
-    setIssuer(pendingEnvironmentIssuer);
-    setPendingEnvironmentIssuer(null);
-    setEstablishmentStatus({
-      tone: "info",
-      message: `Ambiente ${environmentLabel} seleccionado. Presione Guardar emisor para aplicar el cambio.`
-    });
+  const checkConnectionForSummary = async () => {
+    const checked = await testConnection({ showAlert: false });
+    if (!checked.ok) showWarning("No se pudo verificar el servidor", "Revisa tu conexión a internet e inténtalo nuevamente. La facturación real no se activó ni se cambió ninguna configuración.");
+  };
+
+  const confirmIssuerEnvironmentChange = async () => {
+    if (!pendingEnvironment || changingEnvironment) return;
+    const target = pendingEnvironment;
+    setChangingEnvironment(true);
+    try {
+      await changeSriEnvironmentAuthoritatively({
+        data,
+        target,
+        backendToken,
+        commit: async (canonicalData, canonical) => {
+          const summary = target === "2" ? "Facturación real activada" : "Modo de prueba activado";
+          const audited = appendAudit(canonicalData, user, "SRI_ENVIRONMENT_CHANGED", "issuer", data.issuer.ruc, summary, { environment: canonical.environment, environmentVersion: canonical.environmentVersion });
+          await persist(audited);
+          await syncPatchToBackendResult(data.backendUrl, backendToken, { baseData: data, issuer: canonicalData.issuer, auditLogs: audited.auditLogs.slice(0, 1) }, `${summary} pendiente de sincronizar`);
+          setIssuer(canonicalData.issuer);
+        }
+      });
+      const message = target === "2"
+        ? "Facturación real activada. Los próximos comprobantes electrónicos podrán enviarse oficialmente al SRI."
+        : "Modo de prueba activado. Los próximos comprobantes se enviarán al ambiente de pruebas y no tendrán validez tributaria real.";
+      setEstablishmentStatus({ tone: "success", message });
+      showSuccess(target === "2" ? "Facturación real activa" : "Modo de prueba activo", message);
+      setPendingEnvironment(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No fue posible confirmar el cambio con el servidor.";
+      setEstablishmentStatus({ tone: "error", message });
+      showError("No se cambió el ambiente", `${message} La configuración local se conservó sin cambios.`);
+    } finally {
+      setChangingEnvironment(false);
+    }
   };
 
   return (
     <View style={styles.stack}>
-      <CollapsibleSection title="Emisor SRI" defaultOpen>
+      <SriEnvironmentExperienceCard
+        issuer={issuer}
+        checklist={productionChecklist}
+        certificate={assetsStatus?.certificate}
+        changing={changingEnvironment}
+        checking={checkingConnection}
+        serverInTestMode={serverInTestMode}
+        onActivate={() => requestEnvironmentChange("2")}
+        onCheckConnection={() => { void checkConnectionForSummary(); }}
+        onOpenCertificate={() => setAssetsOpen(true)}
+        onOpenIssuer={() => setIssuerOpen(true)}
+      />
+      <CollapsibleSection title="Emisor SRI" open={issuerOpen} onOpenChange={setIssuerOpen}>
         <IssuerIdentityFields issuer={issuer} lookingUpIssuer={lookingUpIssuer} onChange={setIssuer} onLookupRuc={() => { void lookupIssuerRuc(); }} />
-        <IssuerEstablishmentFields
-          issuer={issuer}
-          establishments={establishments}
-          selectedEstablishment={selectedEstablishment}
-          establishmentNameText={establishmentNameText}
-          establishmentCodeText={establishmentCodeText}
-          emissionPointText={emissionPointText}
-          sequentialText={sequentialText}
-          remissionSequentialText={remissionSequentialText}
-          creditNoteSequentialText={creditNoteSequentialText}
-          onSelectEstablishment={selectEstablishment}
-          onEstablishmentNameChange={setEstablishmentNameText}
-          onEstablishmentCodeChange={setEstablishmentCodeText}
-          onEmissionPointChange={setEmissionPointText}
-          onEstablishmentPatch={updateSelectedEstablishment}
-          onSequentialChange={setSequentialText}
-          onRemissionSequentialChange={setRemissionSequentialText}
-          onCreditNoteSequentialChange={setCreditNoteSequentialText}
-        />
-        {!canManageEstablishments ? <PlanLimitCard licenseLabel={compactLicenseStatusLabel(license)} /> : null}
-        <EstablishmentActions
-          canManage={canManageEstablishments}
-          documentCount={selectedEstablishmentDocumentCount}
-          status={establishmentStatus}
-          onAdd={openEstablishmentModal}
-          onDelete={requestDeleteSelectedEstablishment}
-        />
-        <IssuerTaxSettings issuer={issuer} onChange={handleIssuerTaxChange} />
+        <IssuerTaxSettings issuer={issuer} onChange={setIssuer} />
+        <View style={[styles.establishmentCard, { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border }]}>
+          <IssuerEstablishmentFields
+            issuer={issuer}
+            establishments={establishments}
+            selectedEstablishment={selectedEstablishment}
+            establishmentNameText={establishmentNameText}
+            establishmentCodeText={establishmentCodeText}
+            emissionPointText={emissionPointText}
+            sequentialText={sequentialText}
+            remissionSequentialText={remissionSequentialText}
+            creditNoteSequentialText={creditNoteSequentialText}
+            onSelectEstablishment={selectEstablishment}
+            onEstablishmentNameChange={setEstablishmentNameText}
+            onEstablishmentCodeChange={setEstablishmentCodeText}
+            onEmissionPointChange={setEmissionPointText}
+            onEstablishmentPatch={updateSelectedEstablishment}
+            onSequentialChange={setSequentialText}
+            onRemissionSequentialChange={setRemissionSequentialText}
+            onCreditNoteSequentialChange={setCreditNoteSequentialText}
+          />
+          {!canManageEstablishments ? <PlanLimitCard licenseLabel={compactLicenseStatusLabel(license)} /> : null}
+          <EstablishmentActions
+            canManage={canManageEstablishments}
+            documentCount={selectedEstablishmentDocumentCount}
+            status={establishmentStatus}
+            onAdd={openEstablishmentModal}
+            onDelete={requestDeleteSelectedEstablishment}
+          />
+        </View>
         <IssuerServerSettings
           backendUrl={backendUrl}
           autoBackupEnabled={autoBackupEnabled}
+          savingIssuer={savingIssuer}
           checkingConnection={checkingConnection}
           testingEmail={testingEmail}
           connectionResult={connectionResult}
@@ -488,11 +552,17 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
         certificatePassword={certificatePassword}
         checkingAssetStatus={checkingAssetStatus}
         checklist={productionChecklist}
+        changingEnvironment={changingEnvironment}
+        diagnosticOpen={diagnosticOpen}
+        assetsOpen={assetsOpen}
         issuer={issuer}
         onCancelCertificateUpload={cancelCertificateUpload}
         onCertificatePasswordChange={setCertificatePassword}
         onConfirmCertificateUpload={() => { void confirmCertificateUpload(); }}
         onRefreshAssetsStatus={() => { void refreshAssetsStatus(true); }}
+        onReturnToTests={() => requestEnvironmentChange("1")}
+        onDiagnosticOpenChange={setDiagnosticOpen}
+        onAssetsOpenChange={setAssetsOpen}
         onUploadCertificate={uploadCertificateFromWeb}
         onUploadLogo={uploadLogoFromWeb}
         pendingCertificateName={pendingCertificateFile?.fileName || ""}
@@ -535,28 +605,30 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
       <Modal
         animationType="fade"
         transparent
-        visible={Boolean(pendingEnvironmentIssuer)}
-        onRequestClose={() => setPendingEnvironmentIssuer(null)}
+        visible={Boolean(pendingEnvironment)}
+        onRequestClose={() => { if (!changingEnvironment) setPendingEnvironment(null); }}
       >
-        <View style={styles.environmentModalOverlay}>
-          <View style={styles.environmentModalCard}>
-            <Text style={styles.environmentModalTitle}>
-              {pendingEnvironmentIssuer?.environment === "2" ? "Cambiar a PRODUCCION" : "Cambiar a PRUEBAS"}
+        <View style={[styles.environmentModalOverlay, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
+          <View style={[styles.environmentModalCard, { backgroundColor: theme.colors.surface }, Platform.OS !== "web" && { maxHeight: adaptiveModalMaxHeight, flexShrink: 1 }]}>
+            <ScrollView contentContainerStyle={styles.environmentModalContent}>
+            <Text style={[styles.environmentModalTitle, { color: theme.colors.text }]}>
+              {pendingEnvironment === "2" ? "Activar facturación real" : "Volver al modo de prueba"}
             </Text>
-            <Text style={styles.environmentModalText}>
-              {pendingEnvironmentIssuer?.environment === "2"
-                ? "Los proximos comprobantes se enviaran al ambiente real del SRI. Verifique firma, secuenciales y datos del emisor antes de guardar."
-                : "Los proximos comprobantes se enviaran al ambiente de pruebas del SRI. No tendran validez tributaria real."}
+            <Text style={[styles.environmentModalText, { color: theme.colors.textMuted }]}>
+              {pendingEnvironment === "2"
+                ? `Desde este momento los comprobantes electrónicos que emitas podrán enviarse oficialmente al SRI. Empresa: ${issuer.businessName}. RUC: ${issuer.ruc}. Establecimiento ${issuer.establishment}, punto de emisión ${issuer.emissionPoint}.`
+                : "Los próximos comprobantes se enviarán al ambiente de pruebas del SRI y no tendrán validez tributaria real. Los documentos ya emitidos no se modifican."}
             </Text>
-            <Text style={styles.environmentModalHint}>Despues de confirmar, presione Guardar emisor.</Text>
+            <Text style={[styles.environmentModalHint, { backgroundColor: theme.colors.primarySoft, borderColor: theme.colors.borderStrong, color: theme.colors.primary }]}>{pendingEnvironment === "2" ? "Este cambio requiere conexión y confirmación del servidor." : "Acción avanzada: confirma únicamente si necesitas volver al ambiente de pruebas."}</Text>
             <View style={styles.environmentModalActions}>
-              <Pressable style={[styles.environmentModalButton, styles.environmentModalCancel]} onPress={() => setPendingEnvironmentIssuer(null)}>
-                <Text style={styles.environmentModalCancelText}>Cancelar</Text>
+              <Pressable disabled={changingEnvironment} style={[styles.environmentModalButton, styles.environmentModalCancel, { backgroundColor: theme.colors.surface, borderColor: theme.colors.borderStrong }]} onPress={() => setPendingEnvironment(null)}>
+                <Text style={[styles.environmentModalCancelText, { color: theme.colors.text }]}>Cancelar</Text>
               </Pressable>
-              <Pressable style={[styles.environmentModalButton, styles.environmentModalConfirm]} onPress={confirmIssuerEnvironmentChange}>
-                <Text style={styles.environmentModalConfirmText}>Confirmar</Text>
+              <Pressable disabled={changingEnvironment} style={[styles.environmentModalButton, styles.environmentModalConfirm, { backgroundColor: theme.colors.primary }, changingEnvironment && { opacity: 0.55 }]} onPress={() => { void confirmIssuerEnvironmentChange(); }}>
+                <Text style={[styles.environmentModalConfirmText, { color: theme.colors.onPrimary }]}>{changingEnvironment ? "Confirmando..." : pendingEnvironment === "2" ? "Activar facturación real" : "Volver a modo de prueba"}</Text>
               </Pressable>
             </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -568,6 +640,12 @@ const styles = StyleSheet.create({
   stack: {
     gap: 12
   },
+  establishmentCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 12,
+    padding: 14
+  },
   environmentModalOverlay: {
     alignItems: "center",
     backgroundColor: "rgba(15, 23, 42, 0.55)",
@@ -578,10 +656,13 @@ const styles = StyleSheet.create({
   environmentModalCard: {
     backgroundColor: "#ffffff",
     borderRadius: 18,
-    gap: 12,
     maxWidth: 420,
-    padding: 18,
+    overflow: "hidden",
     width: "100%"
+  },
+  environmentModalContent: {
+    gap: 12,
+    padding: 18
   },
   environmentModalTitle: {
     color: "#111827",

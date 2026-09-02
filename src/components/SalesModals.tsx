@@ -192,6 +192,7 @@ export function SalesModals({
       <SaleLineEditor
         visible={editingLineIndex !== null}
         item={editingLineIndex !== null ? items[editingLineIndex] : undefined}
+        product={editingLineIndex !== null ? data.products.find((product) => product.id === items[editingLineIndex]?.productId) : undefined}
         form={lineEditForm}
         onChange={setLineEditForm}
         onSave={saveLineEdit}

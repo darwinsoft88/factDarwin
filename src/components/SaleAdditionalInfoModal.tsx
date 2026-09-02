@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AdditionalInfoField } from "../types";
 import { EntityEditModal } from "./EntityEditModal";
 import { Input } from "./common";
+import { useAppTheme } from "../theme/AppTheme";
 
 type SaleAdditionalInfoModalProps = {
   visible: boolean;
@@ -13,6 +14,7 @@ type SaleAdditionalInfoModalProps = {
 };
 
 export function SaleAdditionalInfoModal({ visible, fields, onChange, onClose }: SaleAdditionalInfoModalProps) {
+  const { theme } = useAppTheme();
   const rows = fields.length ? fields : [emptyField()];
 
   const updateField = (id: string, patch: Partial<AdditionalInfoField>) => {
@@ -35,6 +37,7 @@ export function SaleAdditionalInfoModal({ visible, fields, onChange, onClose }: 
 
   return (
     <EntityEditModal
+      adaptiveViewport
       visible={visible}
       title="Informacion adicional"
       subtitle="Estos campos se imprimen en el RIDE y se envian al SRI."
@@ -43,11 +46,11 @@ export function SaleAdditionalInfoModal({ visible, fields, onChange, onClose }: 
       onConfirm={saveAndClose}
     >
       {rows.map((field, index) => (
-        <View key={field.id} style={styles.rowCard}>
+        <View key={field.id} style={[styles.rowCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
           <View style={styles.rowHeader}>
-            <Text style={styles.rowTitle}>Campo {index + 1}</Text>
-            <Pressable style={styles.deleteButton} onPress={() => removeField(field.id)}>
-              <MaterialCommunityIcons name="trash-can-outline" size={16} color="#991b1b" />
+            <Text style={[styles.rowTitle, { color: theme.colors.text }]}>Campo {index + 1}</Text>
+            <Pressable style={[styles.deleteButton, { backgroundColor: theme.colors.dangerSoft }]} onPress={() => removeField(field.id)}>
+              <MaterialCommunityIcons name="trash-can-outline" size={16} color={theme.colors.danger} />
             </Pressable>
           </View>
           <Input
@@ -66,9 +69,9 @@ export function SaleAdditionalInfoModal({ visible, fields, onChange, onClose }: 
           />
         </View>
       ))}
-      <Pressable style={styles.addButton} onPress={addField}>
-        <MaterialCommunityIcons name="plus-circle-outline" size={18} color="#0f766e" />
-        <Text style={styles.addText}>Agregar otro campo</Text>
+      <Pressable style={[styles.addButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={addField}>
+        <MaterialCommunityIcons name="plus-circle-outline" size={18} color={theme.colors.primary} />
+        <Text style={[styles.addText, { color: theme.colors.primary }]}>Agregar otro campo</Text>
       </Pressable>
     </EntityEditModal>
   );

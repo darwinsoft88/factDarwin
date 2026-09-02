@@ -1,9 +1,11 @@
 import React from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useKeyboardInset } from "../hooks/useKeyboardInset";
+import { useAppTheme } from "../theme/AppTheme";
 import { sanitizeIntegerInput } from "../utils/numbers";
 import { Input, PrimaryButton } from "./common";
-import { AppToast } from "./AppToast";
 export type NewEstablishmentForm = {
   name: string;
   establishment: string;
@@ -23,21 +25,30 @@ type NewEstablishmentModalProps = {
 };
 
 export function NewEstablishmentModal({ visible, form, onChange, onClose, onSave }: NewEstablishmentModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardInset = useKeyboardInset();
+  const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? MODAL_SAFE_BOTTOM_PADDING : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-        <View style={styles.creditModalBackdrop}>
-          <View style={styles.establishmentModal}>
-            <View style={styles.creditModalHeader}>
+        <View style={[styles.creditModalBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }]}>
+          <View style={[styles.establishmentModal, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+            <View style={[styles.creditModalHeader, { borderBottomColor: theme.colors.border }]}>
               <View style={styles.flex}>
-                <Text style={styles.creditModalTitle}>Nuevo establecimiento</Text>
-                <Text style={styles.creditModalMeta}>Disponible para clientes con plan Pro activo.</Text>
+                <Text style={[styles.creditModalTitle, { color: theme.colors.text }]}>Nuevo establecimiento</Text>
+                <Text style={[styles.creditModalMeta, { color: theme.colors.textMuted }]}>Disponible para clientes con plan Pro activo.</Text>
               </View>
-              <Pressable style={styles.smallButton} onPress={onClose}>
-                <Text style={styles.smallButtonText}>Cerrar</Text>
+              <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+                <Text style={[styles.smallButtonText, { color: theme.colors.primaryStrong }]}>Cerrar</Text>
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+            <ScrollView contentContainerStyle={[styles.creditModalContent, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING }]} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
               <Input label="Nombre establecimiento" value={form.name} onChangeText={(name) => onChange({ ...form, name })} />
               <View style={styles.row}>
                 <View style={styles.flex}>
@@ -56,7 +67,6 @@ export function NewEstablishmentModal({ visible, form, onChange, onClose, onSave
           </View>
         </View>
       </KeyboardAvoidingView>
-      <AppToast />
     </Modal>
   );
 }

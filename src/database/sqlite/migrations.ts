@@ -10,6 +10,7 @@ import {
   SQLITE_SCHEMA_V9,
   SQLITE_SCHEMA_V10,
   SQLITE_SCHEMA_V11,
+  SQLITE_SCHEMA_V12,
   SQLITE_SCHEMA_VERSION,
 } from "./schema";
 import type { SQLiteConnection } from "./types";
@@ -67,6 +68,10 @@ export const SQLITE_MIGRATIONS: readonly SQLiteMigration[] = [
   {
     version: 11,
     sql: SQLITE_SCHEMA_V11,
+  },
+  {
+    version: 12,
+    sql: SQLITE_SCHEMA_V12,
   },
 ];
 

@@ -1,6 +1,7 @@
 import * as http from "../backendApi/http";
 import { backupAppData } from "../backendApi/data";
 import { authorizeInvoice } from "../backendApi/sri";
+import { checkBackendHealth } from "../backendApi/health";
 
 function abortablePendingFetch() {
   return jest.fn((_url: string, options?: RequestInit) => new Promise<Response>((_resolve, reject) => {
@@ -58,6 +59,22 @@ describe("timeouts del cliente HTTP", () => {
       expect.any(String),
       "token",
       60000
+    );
+  });
+
+  it("prueba /health sin cache y con timeout acotado", async () => {
+    const response = new Response(JSON.stringify({ ok: true, service: "FactuDarwin" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+    const fetchSpy = jest.spyOn(http, "fetchWithTimeout").mockResolvedValue(response);
+
+    await expect(checkBackendHealth("https://api.example.test")).resolves.toMatchObject({ ok: true });
+    expect(fetchSpy).toHaveBeenCalledWith(
+      "https://api.example.test/health",
+      { cache: "no-store" },
+      12000,
+      expect.any(String)
     );
   });
 

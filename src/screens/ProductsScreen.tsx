@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { ProductEditModal } from "../components/ProductEditModal";
+import type { ProductImageDraft } from "../components/ProductImageField";
 import { ProductFormValues } from "../components/ProductForm";
 import { ProductListItemProps, ProductListSection } from "../components/ProductListSection";
 import { LIST_BATCH_SIZE } from "../constants/app";
+import type { PersistMutation } from "../hooks/useSyncAndBackup";
 import { money } from "../sri";
 import { AppData, CatalogItemType, Product, User } from "../types";
 import { productCost, productMinStock } from "../utils/accounting";
@@ -22,6 +24,7 @@ import { canOverrideLoss, checkProductLoss, confirmLossOverride } from "../utils
 import { parseDecimal } from "../utils/numbers";
 import { paginateItems } from "../utils/pagination";
 import { syncPatchToBackend } from "../utils/sync";
+import { deleteProductImage, uploadProductImage } from "../services/backend";
 import { findDuplicateProductCode, normalizeProductCode } from "../validation";
 
 type BarcodeScannerModalProps = {
@@ -35,22 +38,24 @@ export function ProductsScreen({
   data,
   user,
   backendToken,
-  persist,
+  persistMutation,
   ListItemComponent,
   BarcodeScannerModalComponent
 }: {
   data: AppData;
   user: User;
   backendToken: string;
-  persist: (data: AppData) => Promise<void>;
+  persistMutation: PersistMutation;
   ListItemComponent: React.ComponentType<ProductListItemProps>;
   BarcodeScannerModalComponent: React.ComponentType<BarcodeScannerModalProps>;
 }) {
-  const emptyForm: ProductFormValues = { itemType: "product", code: "", name: "", price: "", cost: "", stock: "", minStock: "5", ivaRate: "0.15" };
+  const emptyForm: ProductFormValues = { itemType: "product", code: "", name: "", price: "", price2: "", price3: "", cost: "", stock: "", minStock: "5", ivaRate: "0.15" };
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState("");
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [savingProduct, setSavingProduct] = useState(false);
+  const [imageDraft, setImageDraft] = useState<ProductImageDraft>(null);
+  const [removeCurrentImage, setRemoveCurrentImage] = useState(false);
   const [productSearch, setProductSearch] = useState("");
   const [productScannerVisible, setProductScannerVisible] = useState(false);
   const [productPage, setProductPage] = useState(1);
@@ -68,27 +73,6 @@ export function ProductsScreen({
     setProductPage(1);
   }, [productSearch]);
 
-  const verifyScannedProductCode = () => {
-    if (!canEdit) {
-      showWarning("Acceso restringido", "Su usuario no tiene permiso para modificar items.");
-      return;
-    }
-
-    const code = normalizeProductCode(form.code);
-    if (!code) {
-      showWarning("Codigo requerido", "Escanee o ingrese el codigo de barras.");
-      return;
-    }
-    const duplicate = findDuplicateProductCode(data.products, code, editingId);
-    setForm({ ...form, code });
-    if (duplicate) {
-      setProductSearch(code);
-      showWarning("Codigo ya registrado", `El codigo ${duplicate.code} ya pertenece a ${duplicate.name}.`);
-      return;
-    }
-    showSuccess("Codigo listo", `Codigo ${code} disponible para guardar.`);
-  };
-
   const save = async (options?: { forceLoss?: boolean }) => {
     if (savingProduct) return;
 
@@ -101,10 +85,12 @@ export function ProductsScreen({
     const isService = itemType === "service";
     const itemName = isService ? "servicio" : "producto";
     const price = parseDecimal(form.price);
+    const price2 = form.price2.trim() ? parseDecimal(form.price2) : undefined;
+    const price3 = form.price3.trim() ? parseDecimal(form.price3) : undefined;
     const cost = isService ? 0 : parseDecimal(form.cost || "0");
     const stock = isService ? 0 : parseDecimal(form.stock || "0");
     const minStock = isService ? 0 : parseDecimal(form.minStock || "5");
-    const productData = { itemType, code: normalizeProductCode(form.code), name: form.name.trim(), price, cost, stock, minStock, ivaRate: Number(form.ivaRate), updatedAt: new Date().toISOString() };
+    const productData = { itemType, code: normalizeProductCode(form.code), name: form.name.trim(), price, price2, price3, cost, stock, minStock, ivaRate: Number(form.ivaRate), updatedAt: new Date().toISOString() };
 
     if (!productData.code || !productData.name || !Number.isFinite(price) || price <= 0) {
       showWarning("Datos incompletos", `Ingrese codigo, nombre y precio del ${itemName}.`);
@@ -145,6 +131,7 @@ export function ProductsScreen({
         : (isService ? "Servicio guardado" : "Producto guardado");
       const successMessage = editingId ? `El ${itemName} se edito con exito.` : `El ${itemName} se guardo con exito.`;
       let synced = false;
+      let savedProduct: Product;
 
       if (editingId) {
         const currentProduct = data.products.find((product) => product.id === editingId);
@@ -153,40 +140,77 @@ export function ProductsScreen({
             ? createInventoryMovement(currentProduct, "ajuste", Math.abs(productData.stock - currentProduct.stock), productData.stock, "Ajuste desde productos", user.id)
             : null;
         const updatedProduct = { ...currentProduct, ...productData, id: editingId } as Product;
+        savedProduct = updatedProduct;
         const nextData = appendAudit({
           ...data,
           products: data.products.map((product) => (product.id === editingId ? updatedProduct : product)),
           inventoryMovements: movement ? [movement, ...(data.inventoryMovements || [])] : data.inventoryMovements
         }, user, "PRODUCT_UPDATED", "product", editingId, `Producto actualizado: ${productData.code} - ${productData.name}`, { stockBefore: currentProduct?.stock, stockAfter: productData.stock });
-        await persist(nextData);
+        await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
         synced = await syncPatchToBackend(data.backendUrl, backendToken, {
           baseData: data,
           products: [updatedProduct],
           inventoryMovements: movement ? [movement] : [],
           auditLogs: nextData.auditLogs.slice(0, 1)
-        }, "Producto pendiente de sincronizar", nextData, persist);
+        }, "Producto pendiente de sincronizar", { persistMutation });
       } else {
         const product: Product = { id: generateId(), ...productData };
+        savedProduct = product;
         const movement = isInventoryProduct(product) && product.stock > 0 ? createInventoryMovement(product, "entrada", product.stock, product.stock, "Stock inicial", user.id, 0) : null;
         const nextData = appendAudit({ ...data, products: [product, ...data.products], inventoryMovements: movement ? [movement, ...(data.inventoryMovements || [])] : data.inventoryMovements }, user, "PRODUCT_CREATED", "product", product.id, `Producto creado: ${product.code} - ${product.name}`, { stock: product.stock });
-        await persist(nextData);
+        await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
         synced = await syncPatchToBackend(data.backendUrl, backendToken, {
           baseData: data,
           products: [product],
           inventoryMovements: movement ? [movement] : [],
           auditLogs: nextData.auditLogs.slice(0, 1)
-        }, "Producto pendiente de sincronizar", nextData, persist);
+        }, "Producto pendiente de sincronizar", { persistMutation });
       }
 
       if (!synced) return;
+      let imageWarning = "";
+      if (imageDraft || (removeCurrentImage && savedProduct.imageVersion)) {
+        try {
+          let productWithImage: Product;
+          if (imageDraft) {
+            const metadata = await uploadProductImage(data.backendUrl, savedProduct.id, imageDraft.base64, backendToken);
+            productWithImage = {
+              ...savedProduct,
+              imageKey: `${savedProduct.id}/versions/${metadata.imageVersion}/image.webp`,
+              imageVersion: metadata.imageVersion,
+              imageUpdatedAt: metadata.imageUpdatedAt,
+              imageMimeType: metadata.imageMimeType,
+              updatedAt: metadata.imageUpdatedAt
+            };
+          } else {
+            await deleteProductImage(data.backendUrl, savedProduct.id, backendToken);
+            productWithImage = { ...savedProduct, updatedAt: new Date().toISOString() };
+            delete productWithImage.imageKey;
+            delete productWithImage.imageVersion;
+            delete productWithImage.imageUpdatedAt;
+            delete productWithImage.imageMimeType;
+          }
+          await persistMutation((current) => ({ ...current, products: current.products.map((item) => item.id === productWithImage.id ? productWithImage : item) }), { skipAutoBackup: true, syncState: "pending" });
+          await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, products: [productWithImage] }, "Imagen pendiente de sincronizar", { persistMutation });
+        } catch (error) {
+          imageWarning = error instanceof Error ? error.message : "No se pudo guardar la imagen.";
+        }
+      }
       setEditingId("");
       setEditModalVisible(false);
       setForm(emptyForm);
-      showSuccess(successTitle, successMessage);
+      setImageDraft(null);
+      setRemoveCurrentImage(false);
+      if (imageWarning) showWarning(`${successTitle}; imagen pendiente`, `${successMessage} ${imageWarning} Puede volver a editarlo para reintentar.`);
+      else showSuccess(successTitle, successMessage);
     } catch (error) {
       showError("Error al guardar", error instanceof Error ? error.message : `No se pudo guardar el ${itemName}.`);
     } finally {
       setSavingProduct(false);
+    }
+    if ((price2 !== undefined && (!Number.isFinite(price2) || price2 <= 0)) || (price3 !== undefined && (!Number.isFinite(price3) || price3 <= 0))) {
+      showWarning("Precio adicional invalido", "PVP2 y PVP3 deben quedar vacios o tener un valor mayor a cero.");
+      return;
     }
   };
 
@@ -197,11 +221,15 @@ export function ProductsScreen({
     }
 
     setEditingId(product.id);
+    setImageDraft(null);
+    setRemoveCurrentImage(false);
     setForm({
       itemType: isServiceItem(product) ? "service" : "product",
       code: product.code,
       name: product.name,
       price: money(product.price),
+      price2: product.price2 ? money(product.price2) : "",
+      price3: product.price3 ? money(product.price3) : "",
       cost: money(productCost(product)),
       stock: String(product.stock),
       minStock: String(productMinStock(product)),
@@ -216,6 +244,8 @@ export function ProductsScreen({
       return;
     }
     setEditingId("");
+    setImageDraft(null);
+    setRemoveCurrentImage(false);
     setForm(emptyForm);
     setEditModalVisible(true);
   };
@@ -224,6 +254,8 @@ export function ProductsScreen({
     setEditingId("");
     setEditModalVisible(false);
     setForm(emptyForm);
+    setImageDraft(null);
+    setRemoveCurrentImage(false);
   };
 
   const editingProductName = data.products.find((product) => product.id === editingId)?.name || "Producto";
@@ -249,12 +281,15 @@ export function ProductsScreen({
             inventoryMovements: Array.from(new Set([...(data.deletedIds?.inventoryMovements || []), ...inventoryMovementIds]))
           }
         }, user, "PRODUCT_DELETED", "product", product.id, `Producto eliminado: ${product.code} - ${product.name}`);
-        await persist(nextData);
-        await syncPatchToBackend(data.backendUrl, backendToken, {
+        await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
+        const deletionSynced = await syncPatchToBackend(data.backendUrl, backendToken, {
           baseData: data,
           deletions: { products: [product.id], inventoryMovements: inventoryMovementIds },
           auditLogs: nextData.auditLogs.slice(0, 1)
-        }, "Producto eliminado pendiente de sincronizar", nextData, persist);
+        }, "Producto eliminado pendiente de sincronizar", { persistMutation });
+        if (deletionSynced && product.imageVersion) {
+          try { await deleteProductImage(data.backendUrl, product.id, backendToken); } catch { /* El producto ya fue eliminado; el asset huerfano puede limpiarse de forma segura despues. */ }
+        }
         showSuccess("Producto eliminado", "El producto se elimino con exito.");
       })();
     });
@@ -276,6 +311,7 @@ export function ProductsScreen({
         setProductPage={setProductPage}
         setProductSearch={setProductSearch}
         visibleProducts={visibleProducts}
+        backendToken={backendToken}
       />
       <BarcodeScannerModalComponent
         visible={productScannerVisible}
@@ -304,8 +340,14 @@ export function ProductsScreen({
           onClose={cancelEdit}
           onOpenScanner={() => setProductScannerVisible(true)}
           onSave={() => { void save(); }}
-          onVerifyCode={verifyScannedProductCode}
           visible={editModalVisible}
+          product={data.products.find((product) => product.id === editingId)}
+          backendUrl={data.backendUrl}
+          backendToken={backendToken}
+          imageDraft={imageDraft}
+          removeCurrentImage={removeCurrentImage}
+          onImageChange={(value) => { setImageDraft(value); setRemoveCurrentImage(false); }}
+          onImageRemove={() => { setImageDraft(null); setRemoveCurrentImage(true); }}
         />
       ) : null}
     </View>

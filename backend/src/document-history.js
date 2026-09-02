@@ -52,7 +52,7 @@ function decodeHistoryCursor(value, context) {
 async function historicalDocumentsPage(repository, options) {
   const startedAt = Date.now();
   const { companyId, config } = options;
-  const filters = normalizeHistoryFilters(options.query || {});
+  const filters = normalizeHistoryFilters(options.query || {}, options.defaultEnvironment || "1");
   const filterHash = hashFilters(filters);
   const limit = parseHistoryLimit(options.query?.limit, config);
   let maximumSequence;
@@ -108,6 +108,7 @@ async function historicalDocumentsPage(repository, options) {
       configVersion: config.configVersion,
       companyId,
       documentScope: filters.documentScope,
+      environment: filters.environment,
       filterHash,
       queryWatermark: String(watermark),
       lastCreatedAt: new Date(last.createdAt).toISOString(),
@@ -145,7 +146,7 @@ async function historicalDocumentsPage(repository, options) {
   return response;
 }
 
-function normalizeHistoryFilters(query) {
+function normalizeHistoryFilters(query, defaultEnvironment = "1") {
   const documentScope = String(query.documentScope || "").trim();
   if (!/^\d{3}-\d{3}$/.test(documentScope)) throw historyError("HISTORICAL_DOCUMENTS_SCOPE_INVALID", 400);
   const dateFrom = normalizeDate(query.dateFrom, "dateFrom");
@@ -155,7 +156,9 @@ function normalizeHistoryFilters(query) {
   if (search && (search.length < 3 || search.length > 80)) throw historyError("HISTORICAL_DOCUMENTS_SEARCH_INVALID", 400);
   if (query.documentType && query.documentType !== "factura") throw historyError("HISTORICAL_DOCUMENTS_TYPE_UNSUPPORTED", 400);
   if (query.status && query.status !== "AUTORIZADA") throw historyError("HISTORICAL_DOCUMENTS_STATUS_UNSUPPORTED", 400);
-  return { documentScope, dateFrom, dateTo, search, documentType: "factura", status: "AUTORIZADA" };
+  const environment = String(query.environment || defaultEnvironment || "").trim();
+  if (!["1", "2"].includes(environment)) throw historyError("HISTORICAL_DOCUMENTS_ENVIRONMENT_INVALID", 400);
+  return { documentScope, environment, dateFrom, dateTo, search, documentType: "factura", status: "AUTORIZADA" };
 }
 
 function normalizeDate(value, field) {
@@ -182,9 +185,12 @@ function parseHistoryLimit(value, config) {
 }
 
 function publicSummary(row) {
+  const environment = String(row.environment || "");
+  if (!["1", "2"].includes(environment)) throw historyError("HISTORICAL_DOCUMENTS_ENVIRONMENT_INVALID", 500);
   return {
     documentId: String(row.documentId),
     documentType: "factura",
+    environment,
     establishment: String(row.establishment),
     emissionPoint: String(row.emissionPoint),
     sequential: String(row.sequence),

@@ -1,4 +1,4 @@
-import { authorizeInvoice } from "../services/backend";
+import { authorizeInvoice, queryInvoiceAuthorization } from "../services/backend";
 import { buildCreditNoteXml, buildInvoiceXml } from "../sri";
 import type { AppDataMutation } from "../database/storage";
 import { AppData, Sale, User } from "../types";
@@ -7,7 +7,7 @@ import { resolveInvoiceStatus } from "./documents";
 import { issuerForSale } from "./establishments";
 import { reverseSaleInventoryOnce, SaleInventoryError } from "./inventory";
 import { isCreditNoteSale, isInvoiceSale, resolveSaleInventoryState, uniquePendingOfficialInvoices } from "./sales";
-import { isDocumentCorrectionIssue, isStaleSriPendingDocument, isTransientSriIssue, shouldAutoRetrySriDocument, staleSriPendingMessage } from "./sriRetryPolicy";
+import { isDocumentCorrectionIssue, isSriAuthorizationQueryDocument, isStaleSriPendingDocument, isTransientSriIssue, shouldAutoRetrySriDocument, staleSriPendingMessage } from "./sriRetryPolicy";
 import { userFriendlyActionError } from "./sriMessages";
 
 type DurableAppDataMutation = (
@@ -22,6 +22,7 @@ type AutoRetrySriDocumentsParams = {
   maxDocuments?: number;
   persistMutation: DurableAppDataMutation;
   user: User;
+  authorizationQueriesOnly?: boolean;
 };
 
 export type AutoRetrySriDocumentsResult = {
@@ -49,6 +50,55 @@ export function pendingAutoRetrySriDocuments(data: AppData, maxDocuments = 3) {
 
   return uniquePendingOfficialInvoices(candidates)
     .slice(0, maxDocuments);
+}
+
+async function persistAuthorizationQueryResult(
+  saleId: string,
+  requestFingerprint: string,
+  sriResult: Awaited<ReturnType<typeof queryInvoiceAuthorization>>,
+  queriedAt: string,
+  persistMutation: DurableAppDataMutation,
+  user: User
+): Promise<RetryTransitionResult> {
+  let transition: RetryTransitionResult = { authorized: false, changed: false, failed: false };
+
+  await persistMutation((current) => {
+    const currentSale = current.sales.find((sale) => sale.id === saleId);
+    if (!currentSale || currentSale.status === "AUTORIZADA" || retryFingerprint(currentSale) !== requestFingerprint || !isSriAuthorizationQueryDocument(currentSale)) return current;
+
+    const authorizationPending = sriResult.authorizationPending === true || sriResult.numberOfDocuments === 0;
+    const nextStatus: Sale["status"] = authorizationPending ? "ENVIADA" : resolveInvoiceStatus(sriResult);
+    const updatedSale: Sale = {
+      ...currentSale,
+      status: nextStatus,
+      accessKey: sriResult.accessKey || currentSale.accessKey,
+      authorizationNumber: sriResult.authorizationNumber || currentSale.authorizationNumber,
+      authorizationDate: sriResult.authorizationDate || currentSale.authorizationDate,
+      sriEnvironment: sriResult.sriEnvironment || currentSale.sriEnvironment,
+      sriMessage: sriResult.sriMessage || currentSale.sriMessage,
+      authorizedXml: sriResult.authorizedXml || currentSale.authorizedXml,
+      signedXml: currentSale.signedXml
+    };
+    const changed = JSON.stringify(updatedSale) !== JSON.stringify(currentSale);
+    transition = {
+      authorized: nextStatus === "AUTORIZADA",
+      changed,
+      failed: !authorizationPending && nextStatus !== "AUTORIZADA"
+    };
+    if (!changed) return current;
+
+    return appendAudit(
+      { ...current, sales: current.sales.map((sale) => sale.id === saleId ? updatedSale : sale) },
+      user,
+      "SRI_AUTHORIZATION_QUERIED",
+      "sale",
+      saleId,
+      `Consulta de autorizacion ${currentSale.sequence}: ${nextStatus}`,
+      { status: nextStatus, accessKey: updatedSale.accessKey, queriedAt }
+    );
+  }, durableMutationOptions);
+
+  return transition;
 }
 
 function retryFingerprint(sale: Sale): string {
@@ -332,24 +382,48 @@ export async function autoRetrySriDocuments({
   getCurrentData,
   maxDocuments = 3,
   persistMutation,
-  user
+  user,
+  authorizationQueriesOnly = false
 }: AutoRetrySriDocumentsParams): Promise<AutoRetrySriDocumentsResult> {
   let attempted = 0;
   let processed = 0;
   let authorized = 0;
   let failed = 0;
 
-  const expiredResult = await persistExpiredSriPendingDocuments(initialData, persistMutation, user);
+  const expiredResult = authorizationQueriesOnly
+    ? { expired: 0, failed: 0, changed: false }
+    : await persistExpiredSriPendingDocuments(initialData, persistMutation, user);
   if (expiredResult.changed) processed += expiredResult.expired;
   failed += expiredResult.failed;
 
-  const candidateIds = pendingAutoRetrySriDocuments(initialData, maxDocuments).map((sale) => sale.id);
+  const candidateIds = (authorizationQueriesOnly
+    ? uniquePendingOfficialInvoices(initialData.sales.filter(isSriAuthorizationQueryDocument))
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .slice(0, maxDocuments)
+    : pendingAutoRetrySriDocuments(initialData, maxDocuments)
+  ).map((sale) => sale.id);
   for (const saleId of candidateIds) {
     const latest = getCurrentData();
     const sale = latest.sales.find((item) => item.id === saleId);
     if (!sale || !shouldAutoRetrySriDocument(sale)) continue;
     const requestFingerprint = retryFingerprint(sale);
     const retryAt = new Date().toISOString();
+    if (isSriAuthorizationQueryDocument(sale)) {
+      attempted += 1;
+      try {
+        const sriResult = await queryInvoiceAuthorization(latest.backendUrl, sale.accessKey, backendToken);
+        const transition = await persistAuthorizationQueryResult(saleId, requestFingerprint, sriResult, retryAt, persistMutation, user);
+        if (!transition.changed) continue;
+        processed += 1;
+        if (transition.authorized) authorized += 1;
+        if (transition.failed) failed += 1;
+      } catch {
+        // Una consulta fallida no cambia el documento ni consume reintentos.
+        failed += 1;
+      }
+      continue;
+    }
+    if (authorizationQueriesOnly) continue;
     if (isInvoiceSale(sale)) {
       const sourceSale = sale.sourceSaleId
         ? latest.sales.find((item) => item.id === sale.sourceSaleId)

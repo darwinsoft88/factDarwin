@@ -3,6 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { PrimaryButton } from "./common";
 
 type IssuerActionButtonsProps = {
+  savingIssuer: boolean;
   checkingConnection: boolean;
   testingEmail: boolean;
   onSave: () => void;
@@ -10,12 +11,12 @@ type IssuerActionButtonsProps = {
   onTestEmail: () => void;
 };
 
-export function IssuerActionButtons({ checkingConnection, testingEmail, onSave, onTestConnection, onTestEmail }: IssuerActionButtonsProps) {
+export function IssuerActionButtons({ savingIssuer, checkingConnection, testingEmail, onSave, onTestConnection, onTestEmail }: IssuerActionButtonsProps) {
   return (
     <>
       <View style={styles.row}>
         <View style={styles.flex}>
-          <PrimaryButton label="Guardar emisor" onPress={onSave} />
+          <PrimaryButton label={savingIssuer ? "Guardando..." : "Guardar emisor"} onPress={savingIssuer ? () => undefined : onSave} />
         </View>
         <View style={styles.flex}>
           <PrimaryButton label={checkingConnection ? "Probando..." : "Probar conexion"} onPress={checkingConnection ? () => undefined : onTestConnection} />

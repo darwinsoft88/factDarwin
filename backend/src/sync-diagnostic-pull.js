@@ -9,7 +9,7 @@ function encodeCursor(data, secret) {
   return `${body}.${signature}`;
 }
 
-function decodeCursor(value, { companyId, config, maximumSeq }) {
+function decodeCursor(value, { companyId, config, maximumSeq, protocolVersion = PROTOCOL_VERSION }) {
   if (typeof value !== "string" || !value || value.length > config.maxCursorLength) throw pullError("SYNC_CURSOR_INVALID", 400);
   const [body, signature, extra] = value.split(".");
   if (!body || !signature || extra) throw pullError("SYNC_CURSOR_INVALID", 400);
@@ -19,7 +19,7 @@ function decodeCursor(value, { companyId, config, maximumSeq }) {
   if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) throw pullError("SYNC_CURSOR_INVALID", 400);
   let cursor;
   try { cursor = JSON.parse(Buffer.from(body, "base64url").toString("utf8")); } catch { throw pullError("SYNC_CURSOR_INVALID", 400); }
-  if (cursor.protocolVersion !== PROTOCOL_VERSION) throw pullError("SYNC_CURSOR_PROTOCOL_UNSUPPORTED", 409, { expectedProtocolVersion: PROTOCOL_VERSION });
+  if (cursor.protocolVersion !== protocolVersion) throw pullError("SYNC_CURSOR_PROTOCOL_UNSUPPORTED", 409, { expectedProtocolVersion: protocolVersion });
   if (cursor.companyId !== companyId) throw pullError("SYNC_CURSOR_COMPANY_MISMATCH", 403);
   if (cursor.configVersion !== config.configVersion) throw pullError("SYNC_CURSOR_INVALID", 409, { reason: "CONFIG_VERSION_MISMATCH" });
   if (!Number.isSafeInteger(cursor.lastChangeSeq) || !Number.isSafeInteger(cursor.watermark) || cursor.lastChangeSeq < 0 || cursor.watermark < cursor.lastChangeSeq) throw pullError("SYNC_CURSOR_INVALID", 400);
@@ -33,6 +33,7 @@ function decodeCursor(value, { companyId, config, maximumSeq }) {
 async function diagnosticPull(repository, options) {
   const startedAt = Date.now();
   const { config, companyId } = options;
+  const protocolVersion = options.protocolVersion === 2 ? 2 : 1;
   if (!options.accessGranted) {
     const access = evaluatePullDiagnosticAccess(config, companyId);
     if (!access.enabled) throw pullError("SYNC_PULL_DISABLED", 404, { reason: access.reason });
@@ -41,8 +42,8 @@ async function diagnosticPull(repository, options) {
   const limit = parseLimit(options.limit, config);
   const maximumSeq = await repository.maximumSequence(companyId, config.queryTimeoutMs);
   let cursor = options.cursor
-    ? decodeCursor(options.cursor, { companyId, config, maximumSeq })
-    : initialCursor(companyId, maximumSeq, config);
+    ? decodeCursor(options.cursor, { companyId, config, maximumSeq, protocolVersion })
+    : initialCursor(companyId, maximumSeq, config, protocolVersion);
   if (options.rollingWatermark && cursor.lastChangeSeq === cursor.watermark && maximumSeq > cursor.watermark) {
     cursor = { ...cursor, watermark: maximumSeq, snapshotRevision: maximumSeq, issuedAt: new Date().toISOString() };
   }
@@ -61,7 +62,7 @@ async function diagnosticPull(repository, options) {
       ? cursor.watermark
       : changes.length ? changes.at(-1).sequence : cursor.lastChangeSeq;
     const nextCursor = encodeCursor({ ...cursor, lastChangeSeq }, config.cursorSecret);
-    result = { ok: true, protocolVersion: PROTOCOL_VERSION, mode: options.mode || "diagnostic", fromCursor, nextCursor, hasMore: rows.length > changes.length, changeCount: changes.length, snapshotRevision: cursor.watermark, changes };
+    result = { ok: true, protocolVersion, mode: options.mode || "diagnostic", fromCursor, nextCursor, hasMore: rows.length > changes.length, changeCount: changes.length, snapshotRevision: cursor.watermark, changes };
     responseBytes = Buffer.byteLength(JSON.stringify(result));
     if (responseBytes <= config.maxResponseBytes) break;
     changes.pop();
@@ -74,8 +75,8 @@ async function diagnosticPull(repository, options) {
   return result;
 }
 
-function initialCursor(companyId, watermark, config) {
-  return { protocolVersion: PROTOCOL_VERSION, companyId, lastChangeSeq: 0, watermark, snapshotRevision: watermark, issuedAt: new Date().toISOString(), configVersion: config.configVersion };
+function initialCursor(companyId, watermark, config, protocolVersion = 1) {
+  return { protocolVersion: protocolVersion === 2 ? 2 : 1, companyId, lastChangeSeq: 0, watermark, snapshotRevision: watermark, issuedAt: new Date().toISOString(), configVersion: config.configVersion };
 }
 
 function publicChange(row) {

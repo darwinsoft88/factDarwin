@@ -1,6 +1,8 @@
 import React from "react";
 import { EntityEditModal } from "./EntityEditModal";
 import { ProductForm, ProductFormValues } from "./ProductForm";
+import { ProductImageDraft, ProductImageField } from "./ProductImageField";
+import type { Product } from "../types";
 
 type ProductEditModalProps = {
   editingId: string;
@@ -11,8 +13,14 @@ type ProductEditModalProps = {
   onClose: () => void;
   onOpenScanner: () => void;
   onSave: () => void;
-  onVerifyCode: () => void;
   visible: boolean;
+  product?: Product;
+  backendUrl: string;
+  backendToken: string;
+  imageDraft: ProductImageDraft;
+  removeCurrentImage: boolean;
+  onImageChange: (value: ProductImageDraft) => void;
+  onImageRemove: () => void;
 };
 
 export function ProductEditModal({
@@ -24,11 +32,11 @@ export function ProductEditModal({
   onClose,
   onOpenScanner,
   onSave,
-  onVerifyCode,
-  visible
+  visible, product, backendUrl, backendToken, imageDraft, removeCurrentImage, onImageChange, onImageRemove
 }: ProductEditModalProps) {
   return (
     <EntityEditModal
+      adaptiveViewport
       visible={visible}
       title={editingId ? "Editar producto" : "Nuevo producto"}
       subtitle={editingId ? editingProductName : "Registre el producto o servicio"}
@@ -37,7 +45,8 @@ export function ProductEditModal({
       confirmLabel={editingId ? "Guardar cambios" : "Guardar producto"}
       confirming={saving}
     >
-      <ProductForm form={form} onChange={onChange} onOpenScanner={onOpenScanner} onVerifyCode={onVerifyCode} />
+      <ProductImageField product={product} backendUrl={backendUrl} token={backendToken} draft={imageDraft} removeCurrent={removeCurrentImage} onChange={onImageChange} onRemove={onImageRemove} />
+      <ProductForm form={form} onChange={onChange} onOpenScanner={onOpenScanner} />
     </EntityEditModal>
   );
 }

@@ -1,4 +1,5 @@
 const store = new Map<string, string>();
+let mockNativeToken = "";
 
 jest.mock("@react-native-async-storage/async-storage", () => ({
   getItem: jest.fn(async (key: string) => store.get(key) ?? null),
@@ -18,7 +19,14 @@ jest.mock("../mainSnapshotStorage", () => ({
   })
 }));
 
-import { initialData, loadData, migrateStoredPendingSyncRequestIds, PRODUCTION_BACKEND_URL, resolveStoredBackendUrl, saveData } from "../storage";
+jest.mock("../../services/nativeSessionTokenStorage", () => ({
+  usesNativeSecureSessionToken: jest.fn(() => true),
+  loadNativeSessionToken: jest.fn(async () => mockNativeToken),
+  saveNativeSessionToken: jest.fn(async (token: string) => { mockNativeToken = token; }),
+  clearNativeSessionToken: jest.fn(async () => { mockNativeToken = ""; })
+}));
+
+import { initialData, loadData, loadSession, migrateStoredPendingSyncRequestIds, PRODUCTION_BACKEND_URL, resolveStoredBackendUrl, saveData, saveSession, updateStoredData } from "../storage";
 import { CreditAdjustment, PendingSyncItem, Sale } from "../../types";
 
 const storageKey = "factura-sri-mobile:v1";
@@ -47,6 +55,7 @@ function adjustment(overrides: Partial<CreditAdjustment> = {}): CreditAdjustment
 describe("storage pending outbox", () => {
   beforeEach(() => {
     store.clear();
+    mockNativeToken = "";
   });
 
   it("replaces private network backend URLs with the public production API", () => {
@@ -111,6 +120,68 @@ describe("storage pending outbox", () => {
     const recovered = await loadData();
 
     expect(recovered.pendingSync).toEqual([]);
+  });
+
+  it("never persists password material inside the active session and cleans legacy sessions", async () => {
+    const user = {
+      id: "user-secure-session",
+      companyId: "company-secure-session",
+      name: "Usuario seguro",
+      email: "secure@example.invalid",
+      role: "admin" as const,
+      password: "plain-never-store",
+      passwordHash: "hash-never-store"
+    };
+    await saveSession(user, "short-lived-access", "legacy-parameter-hash", "1799999999001");
+    expect(store.get("factura-sri-mobile:session:v1")).not.toContain("short-lived-access");
+    expect(mockNativeToken).toBe("short-lived-access");
+    expect(store.get("factura-sri-mobile:session:v1")).not.toContain("plain-never-store");
+    expect(store.get("factura-sri-mobile:session:v1")).not.toContain("hash-never-store");
+    expect(store.get("factura-sri-mobile:session:v1")).not.toContain("legacy-parameter-hash");
+
+    store.set("factura-sri-mobile:session:v1", JSON.stringify({ user, token: "short-lived-access", passwordHash: "legacy-root-hash", savedAt: "2026-08-16T00:00:00.000Z" }));
+    const migrated = await loadSession();
+    expect(migrated?.token).toBe("short-lived-access");
+    expect(migrated?.passwordHash).toBeUndefined();
+    expect(migrated?.user.password).toBeUndefined();
+    expect(migrated?.user.passwordHash).toBeUndefined();
+    expect(store.get("factura-sri-mobile:session:v1")).not.toContain("legacy-root-hash");
+    expect(store.get("factura-sri-mobile:session:v1")).not.toContain("plain-never-store");
+  });
+
+  it("does not persist a regression from AUTORIZADA to a pending SRI state", async () => {
+    const authorized: Sale = {
+      id: "sale-authorized-344",
+      documentType: "factura",
+      clientId: "c-final",
+      userId: "u-admin",
+      createdAt: "2026-08-11T10:00:00.000Z",
+      sequence: "000000344",
+      accessKey: "110820260117237720990011002010000000344123456781",
+      authorizationNumber: "110820260117237720990011002010000000344123456781",
+      authorizationDate: "2026-08-11T10:01:00.000Z",
+      status: "AUTORIZADA",
+      subtotal: 1,
+      tax: 0.15,
+      total: 1.15,
+      paymentMethod: "01",
+      items: [],
+      authorizedXml: "<estado>AUTORIZADO</estado>"
+    };
+    await saveData({ ...initialData, sales: [authorized] });
+
+    const persisted = await updateStoredData((current) => ({
+      ...current,
+      sales: current.sales.map((sale) => sale.id === authorized.id
+        ? { ...sale, status: "PENDIENTE_SRI", sriMessage: "En revision SRI", authorizedXml: "" }
+        : sale)
+    }));
+
+    expect(persisted.sales[0]).toMatchObject({
+      status: "AUTORIZADA",
+      authorizationNumber: authorized.authorizationNumber,
+      authorizedXml: authorized.authorizedXml
+    });
   });
 
   it("migrates a legacy pending immediately and preserves its identity across two restarts", async () => {

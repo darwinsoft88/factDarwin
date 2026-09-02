@@ -4,6 +4,7 @@ import { EntityEditModal } from "../components/EntityEditModal";
 import { InventoryKardexSection, InventoryListItemProps, InventoryMovementSection, InventoryMovementsSection, InventoryStockSection } from "../components/InventorySections";
 import { LIST_BATCH_SIZE } from "../constants/app";
 import { useControlledInventoryMovements } from "../hooks/useControlledInventoryMovements";
+import type { PersistMutation } from "../hooks/useSyncAndBackup";
 import { calculateLineSubtotal } from "../sri";
 import { AppData, InventoryMovementType, User } from "../types";
 import { accountingValue, productCost } from "../utils/accounting";
@@ -20,13 +21,13 @@ export function InventoryScreen({
   data,
   user,
   backendToken,
-  persist,
+  persistMutation,
   ListItemComponent
 }: {
   data: AppData;
   user: User;
   backendToken: string;
-  persist: (data: AppData) => Promise<void>;
+  persistMutation: PersistMutation;
   ListItemComponent: React.ComponentType<InventoryListItemProps>;
 }) {
   const [productId, setProductId] = useState(data.products.find(isInventoryProduct)?.id || "");
@@ -134,13 +135,13 @@ export function InventoryScreen({
         products: data.products.map((product) => (product.id === selectedProduct.id ? updatedProduct : product)),
         inventoryMovements: [movement, ...(data.inventoryMovements || [])]
       }, user, "INVENTORY_MOVEMENT_CREATED", "inventory", movement.id, `${movementTypeLabel(type)} de inventario: ${selectedProduct.code} - ${selectedProduct.name}`, { quantity: movement.quantity, stockBefore: selectedProduct.stock, stockAfter });
-      await persist(nextData);
+      await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
       await syncPatchToBackend(data.backendUrl, backendToken, {
         baseData: data,
         products: [updatedProduct],
         inventoryMovements: [movement],
         auditLogs: nextData.auditLogs.slice(0, 1)
-      }, "Movimiento de inventario pendiente de sincronizar", nextData, persist);
+      }, "Movimiento de inventario pendiente de sincronizar", { persistMutation });
       setQuantity("");
       setReason("");
       setMovementModalVisible(false);
@@ -186,6 +187,7 @@ export function InventoryScreen({
         visibleMovements={visibleMovements}
       />
       <EntityEditModal
+        adaptiveViewport
         visible={movementModalVisible}
         title="Movimiento de inventario"
         subtitle={selectedProduct ? `${selectedProduct.code} - ${selectedProduct.name}` : "Seleccione producto y cantidad"}

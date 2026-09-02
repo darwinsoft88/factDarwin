@@ -131,7 +131,7 @@ describe("PendingSyncRepository", () => {
     }).migrateMirror(operations, {
       snapshotGeneration: "generation-1",
       sourceHash: "pending-hash",
-      schemaVersion: 11,
+      schemaVersion: 12,
       confirmCanonical: async () => true,
     });
     expect(result.equal).toBe(true);
@@ -162,7 +162,7 @@ describe("PendingSyncRepository", () => {
     const receipt = {
       snapshotGeneration: "generation",
       sourceHash: "hash",
-      schemaVersion: 11,
+      schemaVersion: 12,
       confirmCanonical: async () => true,
     };
     await firstRepository.migrateMirror(
@@ -199,7 +199,7 @@ describe("PendingSyncRepository", () => {
     }).migrateMirror([pending("new", "sync_new")], {
       snapshotGeneration: "generation-2",
       sourceHash: "pending-hash",
-      schemaVersion: 11,
+      schemaVersion: 12,
       confirmCanonical: async () => false,
     })).rejects.toThrow("STALE_SNAPSHOT_GENERATION");
     expect(database.operations[0]?.id).toBe("previous");
@@ -229,7 +229,7 @@ describe("PendingSyncRepository", () => {
     ], {
       snapshotGeneration: "generation-3",
       sourceHash: "pending-hash",
-      schemaVersion: 11,
+      schemaVersion: 12,
       confirmCanonical: async () => true,
     })).rejects.toThrow("PENDING_SYNC_DUPLICATE_REQUEST_ID");
     expect(database.operations[0]?.id).toBe("previous");

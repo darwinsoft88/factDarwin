@@ -2,29 +2,41 @@ import React, { useRef } from "react";
 import { useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
 
 type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const { theme } = useAppTheme();
   return (
-    <View style={styles.section}>
-      <Text style={styles.title}>{title}</Text>
+    <View style={[styles.section, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, shadowColor: theme.colors.shadow }]}>
+      <Text style={[styles.title, { color: theme.colors.text }]}>{title}</Text>
       {children}
     </View>
   );
 }
 
-export function CollapsibleSection({ title, children, defaultOpen = false, embedded = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean; embedded?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
+export function CollapsibleSection({ title, children, defaultOpen = false, embedded = false, headerAccessory, open: controlledOpen, onOpenChange }: { title: string; children: React.ReactNode; defaultOpen?: boolean; embedded?: boolean; headerAccessory?: React.ReactNode; open?: boolean; onOpenChange?: (open: boolean) => void }) {
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const open = controlledOpen ?? internalOpen;
+  const { theme } = useAppTheme();
+  const toggle = () => {
+    const next = !open;
+    if (controlledOpen === undefined) setInternalOpen(next);
+    onOpenChange?.(next);
+  };
 
   return (
-    <View style={embedded ? styles.collapsibleEmbedded : styles.section}>
-      <Pressable accessibilityRole="button" accessibilityLabel={`${open ? "Cerrar" : "Abrir"} ${title}`} style={styles.collapsibleHeader} onPress={() => setOpen((value) => !value)}>
-        <Text style={styles.title}>{title}</Text>
-        <View style={styles.collapsibleIcon}>
-          <MaterialCommunityIcons name={open ? "chevron-up" : "chevron-down"} size={20} color="#0f766e" />
-        </View>
-      </Pressable>
+    <View style={[embedded ? styles.collapsibleEmbedded : styles.section, { backgroundColor: embedded ? theme.colors.surfaceMuted : theme.colors.surface, borderColor: theme.colors.border, shadowColor: theme.colors.shadow }]}>
+      <View style={styles.collapsibleHeader}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`${open ? "Cerrar" : "Abrir"} ${title}`} style={styles.collapsibleHeaderToggle} onPress={toggle}>
+          <Text style={[styles.title, { color: theme.colors.text }]}>{title}</Text>
+        </Pressable>
+        {headerAccessory}
+        <Pressable accessibilityRole="button" accessibilityLabel={`${open ? "Cerrar" : "Abrir"} ${title}`} style={[styles.collapsibleIcon, { backgroundColor: theme.colors.primarySoft }]} onPress={toggle}>
+          <MaterialCommunityIcons name={open ? "chevron-up" : "chevron-down"} size={20} color={theme.colors.primary} />
+        </Pressable>
+      </View>
       {open ? children : null}
     </View>
   );
@@ -32,31 +44,34 @@ export function CollapsibleSection({ title, children, defaultOpen = false, embed
 
 export function Input(props: React.ComponentProps<typeof TextInput> & { label: string; rightElement?: React.ReactNode }) {
   const { label, rightElement, style, onChange, onChangeText, ...rest } = props;
+  const { theme } = useAppTheme();
+  const themedInput = { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.borderStrong, color: theme.colors.text };
 
   return (
     <View style={styles.inputGroup}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, { color: theme.colors.textMuted }]}>{label}</Text>
       {rightElement ? (
         <View style={styles.inputShell}>
-          <TextInput style={[styles.input, styles.inputWithRightElement, style]} placeholderTextColor="#7d8796" onChange={onChange} onChangeText={onChangeText} {...rest} />
+          <TextInput style={[styles.input, themedInput, styles.inputWithRightElement, style]} placeholderTextColor={theme.colors.textSubtle} selectionColor={theme.colors.primary} onChange={onChange} onChangeText={onChangeText} {...rest} />
           <View style={styles.inputRightElement}>{rightElement}</View>
         </View>
       ) : (
-        <TextInput style={[styles.input, style]} placeholderTextColor="#7d8796" onChange={onChange} onChangeText={onChangeText} {...rest} />
+        <TextInput style={[styles.input, themedInput, style]} placeholderTextColor={theme.colors.textSubtle} selectionColor={theme.colors.primary} onChange={onChange} onChangeText={onChangeText} {...rest} />
       )}
     </View>
   );
 }
 
 export function Select({ label, value, options, onChange }: { label: string; value: string; options: { label: string; value: string }[]; onChange: (value: string) => void }) {
+  const { theme } = useAppTheme();
   return (
     <View style={styles.inputGroup}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, { color: theme.colors.textMuted }]}>{label}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View style={styles.selectRow}>
           {options.map((option) => (
-            <Pressable key={option.value} style={[styles.choice, value === option.value && styles.choiceActive]} onPress={() => onChange(option.value)}>
-              <Text style={[styles.choiceText, value === option.value && styles.choiceTextActive]}>{option.label}</Text>
+            <Pressable key={option.value} style={[styles.choice, { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.borderStrong }, value === option.value && [styles.choiceActive, { backgroundColor: theme.colors.primarySoft, borderColor: theme.colors.primary }]]} onPress={() => onChange(option.value)}>
+              <Text style={[styles.choiceText, { color: theme.colors.textMuted }, value === option.value && [styles.choiceTextActive, { color: theme.colors.primary }]]}>{option.label}</Text>
             </Pressable>
           ))}
         </View>
@@ -68,6 +83,7 @@ export function Select({ label, value, options, onChange }: { label: string; val
 export function PrimaryButton({ disabled = false, label, onPress, icon }: { disabled?: boolean; label: string; onPress: () => void | Promise<void>; icon?: MaterialIconName }) {
   const pressLockedRef = useRef(false);
   const resolvedIcon = icon || primaryButtonIcon(label);
+  const { theme } = useAppTheme();
 
   const handlePress = () => {
     if (disabled || pressLockedRef.current) return;
@@ -92,24 +108,26 @@ export function PrimaryButton({ disabled = false, label, onPress, icon }: { disa
   };
 
   return (
-    <Pressable style={[styles.primaryButton, disabled && styles.primaryButtonDisabled]} onPress={handlePress} disabled={disabled}>
-      {resolvedIcon ? <MaterialCommunityIcons name={resolvedIcon} size={19} color="#ffffff" /> : null}
-      <Text style={styles.primaryButtonText}>{label}</Text>
+    <Pressable style={[styles.primaryButton, { backgroundColor: theme.colors.primary }, disabled && styles.primaryButtonDisabled]} onPress={handlePress} disabled={disabled}>
+      {resolvedIcon ? <MaterialCommunityIcons name={resolvedIcon} size={19} color={theme.colors.onPrimary} /> : null}
+      <Text style={[styles.primaryButtonText, { color: theme.colors.onPrimary }]}>{label}</Text>
     </Pressable>
   );
 }
 
 export function LoadMoreButton({ label, onPress, icon = "chevron-down" }: { label: string; onPress: () => void; icon?: MaterialIconName }) {
+  const { theme } = useAppTheme();
   return (
-    <Pressable style={styles.smallButton} onPress={onPress}>
-      <MaterialCommunityIcons name={icon} size={17} color="#0f5f59" />
-      <Text style={styles.smallButtonText}>{label}</Text>
+    <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onPress}>
+      <MaterialCommunityIcons name={icon} size={17} color={theme.colors.primaryStrong} />
+      <Text style={[styles.smallButtonText, { color: theme.colors.primaryStrong }]}>{label}</Text>
     </Pressable>
   );
 }
 
 export function Empty({ text }: { text: string }) {
-  return <Text style={styles.hint}>{text}</Text>;
+  const { theme } = useAppTheme();
+  return <Text style={[styles.hint, { color: theme.colors.textMuted }]}>{text}</Text>;
 }
 
 function primaryButtonIcon(label: string): MaterialIconName | undefined {
@@ -162,6 +180,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10
+  },
+  collapsibleHeaderToggle: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 42,
+    justifyContent: "center"
   },
   collapsibleIcon: {
     width: 32,

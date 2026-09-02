@@ -1,13 +1,15 @@
 import React from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { retentionTaxOptions } from "../constants/options";
+import { useKeyboardInset } from "../hooks/useKeyboardInset";
 import { money } from "../sri";
 import { Issuer, RetentionTaxType, Sale } from "../types";
 import { documentNumber } from "../utils/documents";
 import { parseDecimal, sanitizeDecimalInput, sanitizeIntegerInput } from "../utils/numbers";
 import { Input, PrimaryButton, Select } from "./common";
-import { AppToast } from "./AppToast";
+import { useAppTheme } from "../theme/AppTheme";
 type CalendarDateInputProps = {
   label: string;
   value: string;
@@ -66,24 +68,32 @@ export function ReceivedRetentionModal({
   onSave,
   saving
 }: ReceivedRetentionModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardInset = useKeyboardInset();
+  const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? MODAL_SAFE_BOTTOM_PADDING : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
   const baseValue = parseDecimal(base || "0") || 0;
   const percentageValue = parseDecimal(percentage || "0") || 0;
 
   return (
     <Modal visible={Boolean(sale)} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-        <View style={styles.creditModalBackdrop}>
-          <View style={styles.creditModal}>
-            <View style={styles.creditModalHeader}>
+        <View style={[styles.creditModalBackdrop, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }]}>
+          <View style={[styles.creditModal, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+            <View style={[styles.creditModalHeader, { borderBottomColor: theme.colors.border }]}>
               <View style={styles.flex}>
-                <Text style={styles.creditModalTitle}>Retencion recibida</Text>
-                <Text style={styles.creditModalMeta}>{sale ? `Factura ${documentNumber(sale, issuer)} | ${clientName || "Cliente"}` : ""}</Text>
+                <Text style={[styles.creditModalTitle, { color: theme.colors.text }]}>Retencion recibida</Text>
+                <Text style={[styles.creditModalMeta, { color: theme.colors.textMuted }]}>{sale ? `Factura ${documentNumber(sale, issuer)} | ${clientName || "Cliente"}` : ""}</Text>
               </View>
-              <Pressable style={styles.smallButton} onPress={onClose}>
-                <Text style={styles.smallButtonText}>Cerrar</Text>
+              <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+                <Text style={[styles.smallButtonText, { color: theme.colors.primary }]}>Cerrar</Text>
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+            <ScrollView contentContainerStyle={[styles.creditModalContent, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING }]} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
               <Select label="Impuesto retenido" value={taxType} onChange={(value) => onTaxTypeChange(value as RetentionTaxType)} options={retentionTaxOptions} />
               <Input label="No. comprobante recibido" value={documentNumberText} onChangeText={onDocumentNumberChange} placeholder="Ej: 001-001-000000123" />
               <Input label="Autorizacion" value={authorizationNumber} onChangeText={(value) => onAuthorizationNumberChange(sanitizeIntegerInput(value))} placeholder="Opcional" keyboardType="number-pad" />
@@ -98,17 +108,16 @@ export function ReceivedRetentionModal({
               </View>
               <Input label="Valor retenido" value={amount} onChangeText={(value) => onAmountChange(sanitizeDecimalInput(value))} placeholder="Se calcula si lo deja vacio" keyboardType="decimal-pad" />
               <Input label="Notas" value={notes} onChangeText={onNotesChange} placeholder="Opcional" />
-              <View style={styles.creditTotalsBox}>
-                <Text style={styles.totalLine}>Base: ${money(baseValue)}</Text>
-                <Text style={styles.totalLine}>Porcentaje: {money(percentageValue)}%</Text>
-                <Text style={styles.totalStrong}>Valor estimado: ${money(baseValue * (percentageValue / 100))}</Text>
+              <View style={[styles.creditTotalsBox, { backgroundColor: theme.colors.primarySoft }]}>
+                <Text style={[styles.totalLine, { color: theme.colors.textMuted }]}>Base: ${money(baseValue)}</Text>
+                <Text style={[styles.totalLine, { color: theme.colors.textMuted }]}>Porcentaje: {money(percentageValue)}%</Text>
+                <Text style={[styles.totalStrong, { color: theme.colors.text }]}>Valor estimado: ${money(baseValue * (percentageValue / 100))}</Text>
               </View>
               <PrimaryButton disabled={saving} label={saving ? "Guardando..." : "Guardar retencion"} onPress={onSave} />
             </ScrollView>
           </View>
         </View>
       </KeyboardAvoidingView>
-      <AppToast />
     </Modal>
   );
 }

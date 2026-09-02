@@ -4,6 +4,7 @@ import { Animated, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppData } from "../types";
 import { AppTab } from "../utils/appAccess";
 import { buildDashboard } from "../utils/dashboard";
+import { useAppTheme } from "../theme/AppTheme";
 
 type OperationAlertsBannerProps = {
   data: AppData;
@@ -11,6 +12,7 @@ type OperationAlertsBannerProps = {
 };
 
 export function OperationAlertsBanner({ data, onNavigate }: OperationAlertsBannerProps) {
+  const { theme } = useAppTheme();
   const pulse = useRef(new Animated.Value(1)).current;
   const dashboard = useMemo(() => buildDashboard(data), [data]);
 
@@ -66,22 +68,22 @@ export function OperationAlertsBanner({ data, onNavigate }: OperationAlertsBanne
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${alert.title}. ${alert.detail}`}
-      style={[styles.wrap, isDanger ? styles.wrapDanger : styles.wrapWarning]}
+      style={[styles.wrap, { backgroundColor: isDanger ? theme.colors.dangerSoft : theme.colors.warningSoft, borderColor: isDanger ? theme.colors.danger : theme.colors.warning }]}
       onPress={() => onNavigate(alert.tab)}
     >
       <View style={styles.topRow}>
         <View style={styles.titleWrap}>
-          <Animated.View style={[styles.dot, isDanger ? styles.dotDanger : styles.dotWarning, { opacity: isDanger ? pulse : 1 }]} />
-          <MaterialCommunityIcons name={alert.icon} size={15} color={isDanger ? "#991b1b" : "#92400e"} />
-          <Text style={[styles.title, isDanger && styles.titleDanger]} numberOfLines={1}>{alert.title}</Text>
+          <Animated.View style={[styles.dot, { backgroundColor: isDanger ? theme.colors.danger : theme.colors.warning, opacity: isDanger ? pulse : 1 }]} />
+          <MaterialCommunityIcons name={alert.icon} size={15} color={isDanger ? theme.colors.danger : theme.colors.warning} />
+          <Text style={[styles.title, { color: isDanger ? theme.colors.danger : theme.colors.warning }]} numberOfLines={1}>{alert.title}</Text>
         </View>
-        <Text style={[styles.badge, isDanger && styles.badgeDanger]}>{alert.count} alerta{alert.count === 1 ? "" : "s"}</Text>
+        <Text style={[styles.badge, { color: isDanger ? theme.colors.danger : theme.colors.warning, backgroundColor: theme.colors.surfaceElevated }]}>{alert.count} alerta{alert.count === 1 ? "" : "s"}</Text>
       </View>
 
       <View style={styles.bottomRow}>
-        <Text style={[styles.detail, isDanger && styles.detailDanger]} numberOfLines={2}>{alert.detail}</Text>
-        <View style={[styles.actionButton, isDanger ? styles.actionDanger : styles.actionWarning]}>
-          <Text style={[styles.actionText, isDanger && styles.actionTextDanger]}>{alert.action}</Text>
+        <Text style={[styles.detail, { color: isDanger ? theme.colors.danger : theme.colors.warning }]} numberOfLines={2}>{alert.detail}</Text>
+        <View style={[styles.actionButton, { borderColor: isDanger ? theme.colors.danger : theme.colors.warning, backgroundColor: theme.colors.surfaceElevated }]}>
+          <Text style={[styles.actionText, { color: isDanger ? theme.colors.danger : theme.colors.warning }]}>{alert.action}</Text>
         </View>
       </View>
     </Pressable>

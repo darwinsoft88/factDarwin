@@ -10,10 +10,11 @@ type CommercialSupportButtonProps = {
   data: AppData;
   user: User;
   bottomInset: number;
+  navigationHeight: number;
   onOpenDiagnostics: () => void;
 };
 
-export function CommercialSupportButton({ data, user, bottomInset, onOpenDiagnostics }: CommercialSupportButtonProps) {
+export function CommercialSupportButton({ data, user, bottomInset, navigationHeight, onOpenDiagnostics }: CommercialSupportButtonProps) {
   const openWhatsapp = async () => {
     const phone = SUPPORT_WHATSAPP_NUMBER.replace(/\D/g, "");
     if (!phone) {
@@ -39,7 +40,10 @@ export function CommercialSupportButton({ data, user, bottomInset, onOpenDiagnos
     }
   };
 
-  const floatingBottom = Math.max(72, bottomInset + MODAL_SAFE_BOTTOM_PADDING + 12);
+  const floatingBottom = Math.max(
+    navigationHeight + 12,
+    bottomInset > 0 ? bottomInset + MODAL_SAFE_BOTTOM_PADDING : 0
+  );
 
   return (
     <View pointerEvents="box-none" style={[styles.wrapper, { bottom: floatingBottom }]}>

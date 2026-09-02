@@ -4,12 +4,12 @@ const { buildShadowConfig } = require("./sync-shadow-config");
 const { buildPullDiagnosticConfig } = require("./sync-pull-config");
 const { buildIncrementalPilotConfig } = require("./sync-pilot-config");
 const { buildDocumentHistoryConfig } = require("./document-history-config");
+const backendRoot = path.resolve(__dirname, "..");
 
 if (process.env.FACTUDARWIN_SKIP_DOTENV !== "true") {
-  dotenv.config();
+  dotenv.config({ path: path.join(backendRoot, ".env") });
 }
 
-const backendRoot = path.resolve(__dirname, "..");
 const resolveBackendPath = (value) => path.isAbsolute(value) ? value : path.resolve(backendRoot, value);
 const env = process.env.SRI_ENV === "production" ? "production" : "test";
 const nodeEnv = process.env.NODE_ENV === "production" ? "production" : "development";
@@ -17,6 +17,8 @@ const isProduction = nodeEnv === "production" || env === "production";
 const defaultJwtSecret = "CAMBIA_ESTE_SECRETO_JWT_EN_PRODUCCION";
 const jwtSecret = process.env.JWT_SECRET || defaultJwtSecret;
 const assetEncryptionSecret = process.env.ASSET_ENCRYPTION_SECRET || jwtSecret;
+const deviceSessionTokenPepper = process.env.DEVICE_SESSION_TOKEN_PEPPER || jwtSecret;
+const masterAdminKey = process.env.MASTER_ADMIN_KEY || "";
 const defaultCorsOrigins = [
   "https://app.factudarwin.com",
   "https://factudarwin-app.pages.dev",
@@ -52,6 +54,10 @@ const emailBuildLimits = {
   maxTotalAttachmentBytes: boundedPositiveInteger(process.env.EMAIL_MAX_ATTACHMENTS_BYTES, 15 * 1024 * 1024),
   maxHtmlBytes: boundedPositiveInteger(process.env.EMAIL_MAX_HTML_BYTES, 500 * 1024)
 };
+const passkeyOrigins = (process.env.PASSKEY_ORIGINS || "https://app.factudarwin.com,https://factudarwin-app.pages.dev")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
 
 function boundedPositiveInteger(value, maximum) {
   const parsed = Number(value);
@@ -67,6 +73,12 @@ function assertProductionConfig() {
   }
   if (!process.env.ASSET_ENCRYPTION_SECRET || assetEncryptionSecret.length < 32 || /CAMBIA|CHANGE/i.test(assetEncryptionSecret)) {
     errors.push("ASSET_ENCRYPTION_SECRET debe ser un secreto estable de al menos 32 caracteres para cifrar firmas y logos.");
+  }
+  if (!process.env.DEVICE_SESSION_TOKEN_PEPPER || deviceSessionTokenPepper.length < 32 || /CAMBIA|CHANGE/i.test(deviceSessionTokenPepper)) {
+    errors.push("DEVICE_SESSION_TOKEN_PEPPER debe ser un secreto estable e independiente de al menos 32 caracteres.");
+  }
+  if (!process.env.MASTER_ADMIN_KEY || masterAdminKey.length < 32 || /CAMBIA|CHANGE|GENERA/i.test(masterAdminKey)) {
+    errors.push("MASTER_ADMIN_KEY debe ser un secreto real de al menos 32 caracteres.");
   }
   if (process.env.AUTH_REQUIRED === "false") {
     errors.push("AUTH_REQUIRED no puede estar desactivado en produccion.");
@@ -128,6 +140,12 @@ module.exports = {
   incrementalSyncPilot,
   historicalDocumentPagination,
   emailBuildLimits,
+  passkeys: {
+    enabled: process.env.PASSKEY_ENABLED === "true",
+    rpName: process.env.PASSKEY_RP_NAME || "FactuDarwin",
+    rpId: process.env.PASSKEY_RP_ID || "app.factudarwin.com",
+    origins: passkeyOrigins
+  },
   allowedOrigins,
   requireHttps: process.env.REQUIRE_HTTPS === "true" || isProduction,
   sriEnv: env,
@@ -136,8 +154,9 @@ module.exports = {
   authRequired: process.env.AUTH_REQUIRED !== "false",
   jwtSecret,
   assetEncryptionSecret,
+  deviceSessionTokenPepper,
   jwtExpiresInHours: Number(process.env.JWT_EXPIRES_HOURS || 12),
-  masterAdminKey: process.env.MASTER_ADMIN_KEY || "",
+  masterAdminKey,
   supportAdmin,
   resolveAutomaticEmailMode,
   assertProductionConfig,
@@ -163,6 +182,7 @@ module.exports = {
     dir: resolveBackendPath(process.env.PG_BACKUP_DIR || "./backups/postgres"),
     time: process.env.PG_BACKUP_TIME || "23:30",
     retentionDays: Number(process.env.PG_BACKUP_RETENTION_DAYS || 30),
+    minFreeBytes: Number(process.env.PG_BACKUP_MIN_FREE_BYTES || 536870912),
     pgDumpPath: process.env.PG_DUMP_PATH || "pg_dump",
     pgRestorePath: process.env.PG_RESTORE_PATH || "pg_restore",
     psqlPath: process.env.PSQL_PATH || "psql"

@@ -2,6 +2,7 @@ import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { money } from "../sri";
+import { useAppTheme } from "../theme/AppTheme";
 
 type SaleTotalsBoxProps = {
   subtotal: number;
@@ -14,45 +15,46 @@ type SaleTotalsBoxProps = {
 };
 
 export function SaleTotalsBox({ subtotal, discount, tax, total, additionalInfoCount = 0, onOpenAdditionalInfo, showSummary = true }: SaleTotalsBoxProps) {
+  const { theme } = useAppTheme();
   return (
-    <View style={styles.totalBox}>
+    <View style={[styles.totalBox, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
       {showSummary ? (
         <>
           <View style={styles.summaryRows}>
             <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Subtotal</Text>
-              <Text style={styles.totalValue}>${money(subtotal)}</Text>
+              <Text style={[styles.totalLabel, { color: theme.colors.textMuted }]}>Subtotal</Text>
+              <Text style={[styles.totalValue, { color: theme.colors.text }]}>${money(subtotal)}</Text>
             </View>
             <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>Descuento</Text>
-              <Text style={[styles.totalValue, discount > 0 && styles.discountValue]}>${money(discount)}</Text>
+              <Text style={[styles.totalLabel, { color: theme.colors.textMuted }]}>Descuento</Text>
+              <Text style={[styles.totalValue, { color: discount > 0 ? theme.colors.success : theme.colors.text }]}>${money(discount)}</Text>
             </View>
             <View style={styles.totalRow}>
-              <Text style={styles.totalLabel}>IVA</Text>
-              <Text style={styles.totalValue}>${money(tax)}</Text>
+              <Text style={[styles.totalLabel, { color: theme.colors.textMuted }]}>IVA</Text>
+              <Text style={[styles.totalValue, { color: theme.colors.text }]}>${money(tax)}</Text>
             </View>
           </View>
-          <View style={styles.strongRow}>
+          <View style={[styles.strongRow, { borderTopColor: theme.colors.border }]}>
             <View>
-              <Text style={styles.strongLabel}>Total</Text>
-              <Text style={styles.strongMeta}>Valor a emitir</Text>
+              <Text style={[styles.strongLabel, { color: theme.colors.text }]}>Total</Text>
+              <Text style={[styles.strongMeta, { color: theme.colors.textMuted }]}>Valor a emitir</Text>
             </View>
-            <Text style={styles.totalStrong}>${money(total)}</Text>
+            <Text style={[styles.totalStrong, { color: theme.colors.success }]}>${money(total)}</Text>
           </View>
         </>
       ) : null}
       {onOpenAdditionalInfo ? (
-        <Pressable style={[styles.additionalButton, !showSummary && styles.additionalButtonOnly]} onPress={onOpenAdditionalInfo}>
-          <View style={styles.additionalIcon}>
-            <MaterialCommunityIcons name="text-box-plus-outline" size={17} color="#0f766e" />
+        <Pressable style={[styles.additionalButton, { borderTopColor: theme.colors.border }, !showSummary && styles.additionalButtonOnly]} onPress={onOpenAdditionalInfo}>
+          <View style={[styles.additionalIcon, { backgroundColor: theme.colors.primarySoft }]}>
+            <MaterialCommunityIcons name="text-box-plus-outline" size={17} color={theme.colors.primary} />
           </View>
           <View style={styles.additionalTextBlock}>
-            <Text style={styles.additionalTitle}>Informacion adicional</Text>
-            <Text style={styles.additionalMeta} numberOfLines={1}>
+            <Text style={[styles.additionalTitle, { color: theme.colors.text }]}>Informacion adicional</Text>
+            <Text style={[styles.additionalMeta, { color: theme.colors.textMuted }]} numberOfLines={1}>
               {additionalInfoCount > 0 ? `${additionalInfoCount} campo(s) para el RIDE` : "Agregar campos opcionales para el RIDE"}
             </Text>
           </View>
-          <MaterialCommunityIcons name="chevron-right" size={20} color="#64748b" />
+          <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.textMuted} />
         </Pressable>
       ) : null}
     </View>

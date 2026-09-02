@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { initialData } from "../database";
 import { AppData, IssuerEstablishment, User } from "../types";
 import { AppTab, canAccessDeveloperTools, compactLicenseStatusLabel, roleLabel } from "../utils/appAccess";
@@ -10,6 +10,7 @@ import { EstablishmentPickerModal } from "./EstablishmentPickerModal";
 import { LicenseModal } from "./LicenseModal";
 import { OnboardingModal } from "./OnboardingModal";
 import { PasswordChangeModal } from "./PasswordChangeModal";
+import { ProfileModal } from "./ProfileModal";
 import { SupportModal } from "./SupportModal";
 import { SyncCenterModal } from "./SyncCenterModal";
 import { XmlPreviewModal } from "./XmlPreviewModal";
@@ -26,6 +27,7 @@ type SupportDiagnosticsState = {
 
 type AppGlobalModalsProps = {
   appMenuVisible: boolean;
+  activeTab: AppTab;
   authState: AuthState;
   currentEstablishment: IssuerEstablishment;
   data: AppData;
@@ -40,6 +42,10 @@ type AppGlobalModalsProps = {
   syncCenterVisible: boolean;
   syncState: SyncState;
   xmlPreview: string;
+  biometricAvailable: boolean;
+  biometricEnabled: boolean;
+  biometricLoading: boolean;
+  biometricError: string;
   chooseLoginEstablishment: (establishmentId: string) => Promise<void>;
   logout: () => void;
   onOpenAdminSettings: (focus: "configuracion" | "licencia") => void;
@@ -55,10 +61,13 @@ type AppGlobalModalsProps = {
   setTab: React.Dispatch<React.SetStateAction<AppTab>>;
   setXmlPreview: React.Dispatch<React.SetStateAction<string>>;
   submitNewPassword: () => Promise<void>;
+  onToggleBiometric: () => void;
+  onWelcomeComplete: () => void;
 };
 
 export function AppGlobalModals({
   appMenuVisible,
+  activeTab,
   authState,
   chooseLoginEstablishment,
   currentEstablishment,
@@ -87,13 +96,29 @@ export function AppGlobalModals({
   syncCenterVisible,
   syncState,
   xmlPreview
+  ,biometricAvailable
+  ,biometricEnabled
+  ,biometricLoading
+  ,biometricError
+  ,onToggleBiometric
+  ,onWelcomeComplete
 }: AppGlobalModalsProps) {
+  const [profileVisible, setProfileVisible] = useState(false);
+  const closeProfileAnd = (action: () => void) => {
+    setProfileVisible(false);
+    action();
+  };
+
   return (
     <>
       <ModernAppMenuModal
         visible={appMenuVisible}
+        activeTab={activeTab}
         userLabel={session.name || roleLabel(session.role)}
         licenseLabel={compactLicenseStatusLabel(data.license)}
+        establishmentLabel={`${currentEstablishment.name} ${currentEstablishment.establishment}-${currentEstablishment.emissionPoint}`}
+        syncState={syncState}
+        pendingCount={(data.pendingSync || []).length}
         canSwitchEstablishment={switchableEstablishments.length > 1}
         availableTabs={availableTabs}
         onNavigate={setTab}
@@ -106,8 +131,36 @@ export function AppGlobalModals({
           setAppMenuVisible(false);
           setLicenseVisible(true);
         }}
+        onOpenProfile={() => {
+          setAppMenuVisible(false);
+          setProfileVisible(true);
+        }}
         onOpenSupport={supportDiagnostics.open}
         onLogout={logout}
+      />
+
+      <ProfileModal
+        visible={profileVisible}
+        user={session}
+        issuer={data.issuer}
+        establishment={currentEstablishment}
+        license={data.license || initialData.license!}
+        canSwitchEstablishment={switchableEstablishments.length > 1}
+        biometricAvailable={biometricAvailable}
+        biometricEnabled={biometricEnabled}
+        biometricLoading={biometricLoading}
+        biometricError={biometricError}
+        onClose={() => setProfileVisible(false)}
+        onChangePassword={() => closeProfileAnd(() => {
+          authState.setNewPasswordForm({ password: "", confirm: "" });
+          authState.setPasswordChangeStatus(null);
+          authState.setNewPasswordVisible(false);
+          authState.setPasswordChangeVisible(true);
+        })}
+        onSwitchEstablishment={() => closeProfileAnd(() => authState.setEstablishmentSwitcherVisible(true))}
+        onOpenLicense={() => closeProfileAnd(() => setLicenseVisible(true))}
+        onOpenSupport={() => closeProfileAnd(supportDiagnostics.open)}
+        onToggleBiometric={onToggleBiometric}
       />
 
       <LicenseModal
@@ -155,8 +208,8 @@ export function AppGlobalModals({
 
       <OnboardingModal
         visible={onboardingVisible}
-        onConfigure={() => { setOnboardingVisible(false); setTab("sri"); }}
-        onClose={() => setOnboardingVisible(false)}
+        onConfigure={() => { onWelcomeComplete(); setOnboardingVisible(false); setTab("dashboard"); }}
+        onClose={() => { onWelcomeComplete(); setOnboardingVisible(false); setTab("dashboard"); }}
       />
 
       <EstablishmentPickerModal
@@ -183,6 +236,12 @@ export function AppGlobalModals({
         onConfirmChange={(value) => authState.setNewPasswordForm({ ...authState.newPasswordForm, confirm: value })}
         onToggleVisible={() => authState.setNewPasswordVisible((visible) => !visible)}
         onSubmit={() => { void submitNewPassword(); }}
+        required={session.mustChangePassword === true}
+        onClose={() => {
+          authState.setPasswordChangeVisible(false);
+          authState.setPasswordChangeStatus(null);
+          authState.setNewPasswordForm({ password: "", confirm: "" });
+        }}
       />
 
       <XmlPreviewModal value={xmlPreview} onClose={() => setXmlPreview("")} />

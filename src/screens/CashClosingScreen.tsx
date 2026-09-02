@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { Empty, Input, LoadMoreButton, PrimaryButton, Section } from "../components/common";
 import { ReportRow, StatBox } from "../components/metrics";
 import { LIST_BATCH_SIZE } from "../constants/app";
+import type { PersistMutation } from "../hooks/useSyncAndBackup";
 import { AppData, CashClosing, User } from "../types";
 import { appendAudit } from "../utils/audit";
 import { buildCashClosingSummary } from "../utils/cash";
@@ -18,12 +19,14 @@ import {
   showSuccess,
   showWarning,
 } from "../utils/dialogs";
+import { useAppTheme } from "../theme/AppTheme";
 
 
 type CashClosingListItemProps = {
   title: string;
   meta: string;
   badge?: string;
+  accentTone?: "primary" | "success" | "warning" | "danger" | "info";
 };
 
 type CalendarDateInputProps = {
@@ -36,17 +39,18 @@ export function CashClosingScreen({
   data,
   user,
   backendToken,
-  persist,
+  persistMutation,
   ListItemComponent,
   CalendarDateInputComponent
 }: {
   data: AppData;
   user: User;
   backendToken: string;
-  persist: (data: AppData) => Promise<void>;
+  persistMutation: PersistMutation;
   ListItemComponent: React.ComponentType<CashClosingListItemProps>;
   CalendarDateInputComponent: React.ComponentType<CalendarDateInputProps>;
 }) {
+  const { theme } = useAppTheme();
   const [closingDate, setClosingDate] = useState(toInputDate(new Date()));
   const [cashCountedText, setCashCountedText] = useState("");
   const [notes, setNotes] = useState("");
@@ -71,6 +75,7 @@ export function CashClosingScreen({
 
     const closing: CashClosing = {
       id: generateId(),
+      environment: data.issuer.environment,
       establishment: currentEstablishment.establishment,
       emissionPoint: currentEstablishment.emissionPoint,
       establishmentName: currentEstablishment.name,
@@ -90,8 +95,8 @@ export function CashClosingScreen({
     };
 
     const nextData = appendAudit({ ...data, cashClosings: [closing, ...(data.cashClosings || [])] }, user, "CASH_CLOSING_CREATED", "cash_closing", closing.id, `Cierre de caja ${closing.date}: total $${money(closing.total)}, diferencia $${money(closing.difference)}`, { date: closing.date, total: closing.total, difference: closing.difference });
-    await persist(nextData);
-    await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, cashClosings: [closing], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cierre pendiente de sincronizar", nextData, persist);
+    await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
+    await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, cashClosings: [closing], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cierre pendiente de sincronizar", { persistMutation });
     setNotes("");
     showSuccess("Cierre guardado", "El cierre de caja quedo registrado y se sincronizara con la base de datos.");
   };
@@ -99,9 +104,9 @@ export function CashClosingScreen({
   return (
     <View style={styles.stack}>
       <Section title="Cierre de caja">
-        <Text style={styles.inlineInfo}>Establecimiento: {currentEstablishment.name} {currentEstablishment.establishment}-{currentEstablishment.emissionPoint}</Text>
+        <Text style={[styles.inlineInfo, { color: theme.colors.textMuted }]}>Establecimiento: {currentEstablishment.name} {currentEstablishment.establishment}-{currentEstablishment.emissionPoint}</Text>
         <CalendarDateInputComponent label="Fecha de cierre" value={closingDate} onChange={setClosingDate} />
-        {existingClosing ? <Text style={styles.inlineInfo}>Ya existe un cierre para esta fecha. Puede guardar otro si necesita dejar una correccion auditada.</Text> : null}
+        {existingClosing ? <Text style={[styles.inlineInfo, { color: theme.colors.textMuted }]}>Ya existe un cierre para esta fecha. Puede guardar otro si necesita dejar una correccion auditada.</Text> : null}
         <View style={styles.statsGrid}>
           <StatBox label="Documentos" value={String(summary.documentCount)} icon="file-document-outline" />
           <StatBox label="Total vendido" value={`$${money(summary.total)}`} icon="cash-register" />
@@ -119,7 +124,7 @@ export function CashClosingScreen({
       </Section>
 
       <Section title="Dinero recibido en caja">
-        <Text style={styles.sectionNote}>
+        <Text style={[styles.sectionNote, { color: theme.colors.textMuted }]}>
           Incluye ventas de contado y abonos de credito cobrados en esta fecha. No mezcla el saldo que quedo a credito.
         </Text>
         {Object.keys(summary.byPayment).length === 0 ? <Empty text="No hay cobros con valor para esta fecha." /> : null}
@@ -130,7 +135,7 @@ export function CashClosingScreen({
 
       {summary.creditGenerated > 0 || summary.creditCollected > 0 ? (
         <Section title="Credito y cuentas por cobrar">
-          <Text style={styles.sectionNote}>
+          <Text style={[styles.sectionNote, { color: theme.colors.textMuted }]}>
             El credito generado no entra como efectivo en caja; queda pendiente para cobro futuro.
           </Text>
           {summary.creditGenerated > 0 ? <ReportRow label="Credito generado hoy" value={`$${money(summary.creditGenerated)}`} strong /> : null}
@@ -148,6 +153,7 @@ export function CashClosingScreen({
             title={`${formatShortDate(closing.createdAt)} - ${closing.userName}`}
             meta={`Fecha ${closing.date} | Docs ${closing.documentCount} | Total $${money(closing.total)} | Efectivo $${money(closing.cashCounted)} | Dif. $${money(closing.difference)}${closing.notes ? ` | ${closing.notes}` : ""}`}
             badge={closing.difference === 0 ? "CUADRADO" : "DIFERENCIA"}
+            accentTone={closing.difference === 0 ? "success" : closing.difference < 0 ? "danger" : "warning"}
           />
         ))}
         {visibleClosings.length < closings.length ? <LoadMoreButton label="Cargar mas cierres" onPress={() => setVisibleClosingCount((count) => count + LIST_BATCH_SIZE)} /> : null}

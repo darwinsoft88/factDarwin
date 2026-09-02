@@ -1,13 +1,14 @@
 import React from "react";
 import { Alert } from "react-native";
 import { calculateLineTotal, grossToNetUnitPrice, money } from "../sri";
-import { AppData, Client, DocumentType, Product, Sale, SaleItem } from "../types";
+import { AppData, Client, DocumentType, Product, Sale, SaleItem, SalePriceTier } from "../types";
 import { productCost } from "../utils/accounting";
 import { getCatalogItemType, isInventoryProduct } from "../utils/catalogItems";
 import { getAvailableStockForSale } from "../utils/inventory";
 import { canOverrideLoss, checkSaleItemLoss, confirmLossOverride } from "../utils/lossProtection";
 import { parseDecimal } from "../utils/numbers";
 import { formatQuantity } from "../utils/sales";
+import { effectiveProductPriceTier, productPriceForTier } from "../utils/productPrices";
 import { canonicalConsumerFinalClient, isConsumerFinalClient, normalizeProductCode } from "../validation";
 
 type DiscountMode = "amount" | "percent";
@@ -28,6 +29,7 @@ type UseSaleCartActionsParams = {
   sourceProforma?: Sale;
   sourceTicket?: Sale;
   unitGrossPrice: string;
+  salePriceTier: SalePriceTier;
   userRole: AppData["users"][number]["role"];
   setClientId: React.Dispatch<React.SetStateAction<string>>;
   setDiscountMode: React.Dispatch<React.SetStateAction<DiscountMode>>;
@@ -67,12 +69,13 @@ export function useSaleCartActions({
   sourceProforma,
   sourceTicket,
   unitGrossPrice,
+  salePriceTier,
   userRole
 }: UseSaleCartActionsParams) {
   const selectProductForSale = (nextProductId: string) => {
     const nextProduct = data.products.find((item) => item.id === nextProductId);
     setProductId(nextProductId);
-    setUnitGrossPrice(nextProduct ? money(nextProduct.price) : "");
+    setUnitGrossPrice(nextProduct ? money(productPriceForTier(nextProduct, effectiveProductPriceTier(nextProduct, salePriceTier))) : "");
     setGrossDiscount("0");
     setDiscountMode("amount");
     setQuantity("1");
@@ -120,6 +123,7 @@ export function useSaleCartActions({
       name: product.name,
       quantity: qty,
       unitPrice,
+      priceTier: effectiveProductPriceTier(product, salePriceTier),
       cost: productCost(product),
       discount,
       ivaRate: product.ivaRate
@@ -138,7 +142,7 @@ export function useSaleCartActions({
     setQuantity("1");
     setGrossDiscount("0");
     setDiscountMode("amount");
-    setUnitGrossPrice(money(product.price));
+    setUnitGrossPrice(money(productPriceForTier(product, effectiveProductPriceTier(product, salePriceTier))));
     setProductSearch("");
     setIssueNotice(`Agregado: ${product.name} x${formatQuantity(qty)} | Total $${money(calculateLineTotal(nextItem))}. Listo para agregar el siguiente item.`);
     return true;
@@ -153,10 +157,11 @@ export function useSaleCartActions({
     const product = data.products.find((item) => item.id === nextProductId);
     if (!product) {
       Alert.alert("Item no encontrado", "No se encontro el producto o servicio seleccionado.");
-      return;
+      return false;
     }
     setProductId(product.id);
-    addProductToSale(product, 1, product.price, 0, "amount");
+    const tier = effectiveProductPriceTier(product, salePriceTier);
+    return addProductToSale(product, 1, productPriceForTier(product, tier), 0, "amount");
   };
 
   const addScannedCodeToSale = (rawCode: string) => {
@@ -172,7 +177,8 @@ export function useSaleCartActions({
     }
     setProductId(product.id);
     setProductSearch("");
-    return addProductToSale(product, 1, product.price, 0, "amount");
+    const tier = effectiveProductPriceTier(product, salePriceTier);
+    return addProductToSale(product, 1, productPriceForTier(product, tier), 0, "amount");
   };
 
   const addProductSearchSubmit = () => {

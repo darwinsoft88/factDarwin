@@ -6,10 +6,7 @@ const { getTenantCertificate } = require("../tenant-assets");
 
 async function signXmlWithP12(xml, companyId = "") {
   const normalizedXml = ensureComprobanteId(xml);
-  const tenantCertificate = getTenantCertificate(companyId);
-  if (!tenantCertificate) validateCertificateConfig();
-  const p12Buffer = tenantCertificate?.p12Buffer || fs.readFileSync(config.certPath);
-  const password = tenantCertificate?.password || config.certPassword;
+  const { p12Buffer, password } = resolveCertificateCredentials(companyId);
   const xmlBuffer = Buffer.from(normalizedXml, "utf8");
 
   try {
@@ -24,6 +21,33 @@ async function signXmlWithP12(xml, companyId = "") {
     friendly.statusCode = 400;
     throw friendly;
   }
+}
+
+function resolveCertificateCredentials(companyId, tenantCertificateLoader = getTenantCertificate) {
+  const normalizedCompanyId = String(companyId || "").trim();
+  const tenantCertificate = tenantCertificateLoader(normalizedCompanyId);
+
+  if (normalizedCompanyId && !tenantCertificate) {
+    const error = new Error("No se encontro el certificado .p12 de la empresa autenticada. Verifique que el usuario pertenezca a la empresa correcta y que esa empresa tenga una firma configurada.");
+    error.statusCode = 400;
+    error.code = "TENANT_CERTIFICATE_NOT_FOUND";
+    throw error;
+  }
+
+  if (tenantCertificate) {
+    return {
+      p12Buffer: tenantCertificate.p12Buffer,
+      password: tenantCertificate.password,
+      source: "tenant"
+    };
+  }
+
+  validateCertificateConfig();
+  return {
+    p12Buffer: fs.readFileSync(config.certPath),
+    password: config.certPassword,
+    source: "legacy-global"
+  };
 }
 
 function validateCertificateConfig() {
@@ -58,4 +82,4 @@ function ensureComprobanteId(xml) {
   return new XMLSerializer().serializeToString(document);
 }
 
-module.exports = { signXmlWithP12 };
+module.exports = { resolveCertificateCredentials, signXmlWithP12 };

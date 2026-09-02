@@ -24,9 +24,7 @@ export function nextSequence(value: number) {
 }
 
 export function createAccessKey(date: Date, issuer: Issuer, sequence: string, documentCode = RECEIPT_CODE_INVOICE) {
-  const dd = String(date.getDate()).padStart(2, "0");
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const yyyy = date.getFullYear();
+  const { day: dd, month: mm, year: yyyy } = ecuadorDateParts(date);
   const datePart = `${dd}${mm}${yyyy}`;
   const base = [
     datePart,
@@ -271,6 +269,8 @@ export function buildRemissionGuideXml(guide: RemissionGuide, client: Client, is
 export function buildDocumentAdditionalInfo(client: Client | null | undefined, issuer: Issuer) {
   const taxRegimeLegend = issuerTaxRegimeLabel(issuer);
   return [
+    ["RUC Proveedor", "1723772099001"],
+    ["Proveedor de facturacion", "DarwinSoft"],
     client?.email?.trim() ? ["Email", client.email.trim()] : null,
     taxRegimeLegend ? ["Regimen", taxRegimeLegend] : null,
     issuer.specialTaxpayer === "SI" && issuer.specialTaxpayerResolution.trim()
@@ -278,8 +278,7 @@ export function buildDocumentAdditionalInfo(client: Client | null | undefined, i
       : null,
     issuer.retentionAgent === "SI" && issuer.retentionAgentResolution?.trim()
       ? ["Agente de retencion", issuer.retentionAgentResolution.trim()]
-      : null,
-    issuer.accountingRequired ? ["Obligado a llevar contabilidad", issuer.accountingRequired] : null
+      : null
   ] as ([string, string] | null)[];
 }
 
@@ -386,7 +385,19 @@ function ivaCode(rate: number) {
 }
 
 function formatDate(date: Date) {
-  return `${String(date.getDate()).padStart(2, "0")}/${String(date.getMonth() + 1).padStart(2, "0")}/${date.getFullYear()}`;
+  const { day, month, year } = ecuadorDateParts(date);
+  return `${day}/${month}/${year}`;
+}
+
+function ecuadorDateParts(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Guayaquil",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
+  return { day: value("day"), month: value("month"), year: value("year") };
 }
 
 function parseDocumentDate(value: string) {

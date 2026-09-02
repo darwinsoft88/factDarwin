@@ -1,5 +1,8 @@
 import React from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useAppTheme } from "../theme/AppTheme";
 
 type LoginErrorModalProps = {
   message: string;
@@ -7,15 +10,24 @@ type LoginErrorModalProps = {
 };
 
 export function LoginErrorModal({ message, onClose }: LoginErrorModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 24 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 24 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+
   return (
     <Modal visible={Boolean(message)} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.smallNoticeBackdrop}>
-        <View style={styles.smallNoticeModal}>
-          <Text style={styles.smallNoticeTitle}>No se pudo iniciar sesion</Text>
-          <Text style={styles.smallNoticeText}>{message}</Text>
-          <Pressable style={styles.primaryButton} onPress={onClose}>
-            <Text style={styles.primaryButtonText}>Entendido</Text>
+      <View style={[styles.smallNoticeBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
+        <View style={[styles.smallNoticeModal, { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.danger }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <ScrollView contentContainerStyle={styles.smallNoticeContent}>
+          <Text style={[styles.smallNoticeTitle, { color: theme.colors.danger }]}>No se pudo iniciar sesion</Text>
+          <Text style={[styles.smallNoticeText, { color: theme.colors.textMuted }]}>{message}</Text>
+          <Pressable style={[styles.primaryButton, { backgroundColor: theme.colors.primary }]} onPress={onClose}>
+            <Text style={[styles.primaryButtonText, { color: theme.colors.onPrimary }]}>Entendido</Text>
           </Pressable>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -37,6 +49,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e5e7eb",
     backgroundColor: "#ffffff",
+    overflow: "hidden"
+  },
+  smallNoticeContent: {
     padding: 18,
     gap: 12
   },

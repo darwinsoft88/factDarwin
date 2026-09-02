@@ -1,13 +1,15 @@
 import React from "react";
 import { StyleSheet, Text } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
 
 type ConnectionResultTextProps = {
   value: string;
 };
 
 export function ConnectionResultText({ value }: ConnectionResultTextProps) {
+  const { theme } = useAppTheme();
   if (!value) return null;
-  return <Text selectable style={styles.xml}>{value}</Text>;
+  return <Text selectable style={[styles.xml, { color: theme.colors.text, backgroundColor: theme.colors.surfaceMuted }]}>{value}</Text>;
 }
 
 const styles = StyleSheet.create({

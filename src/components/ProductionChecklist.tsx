@@ -1,5 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
 
 export type ProductionChecklistItem = {
   label: string;
@@ -18,29 +19,32 @@ type ProductionChecklistProps = {
 };
 
 function CheckRow({ item, pendingLabel, infoOnly = false }: { item: ProductionChecklistItem; pendingLabel: string; infoOnly?: boolean }) {
-  const pendingStyle = infoOnly ? styles.checkInfo : styles.checkPending;
-  const pendingTextStyle = infoOnly ? styles.checkInfoText : styles.checkPendingText;
+  const { theme } = useAppTheme();
+  const backgroundColor = item.ok ? theme.colors.successSoft : infoOnly ? theme.colors.infoSoft : theme.colors.warningSoft;
+  const borderColor = item.ok ? theme.colors.success : infoOnly ? theme.colors.info : theme.colors.warning;
+  const color = item.ok ? theme.colors.success : infoOnly ? theme.colors.info : theme.colors.warning;
 
   return (
-    <View style={[styles.checkRow, item.ok ? styles.checkOk : pendingStyle]}>
-      <Text style={[styles.checkText, item.ok ? styles.checkOkText : pendingTextStyle]}>{item.ok ? "OK" : pendingLabel} | {item.label}</Text>
+    <View style={[styles.checkRow, { backgroundColor, borderColor }]}>
+      <Text style={[styles.checkText, { color }]}>{item.ok ? "OK" : pendingLabel} | {item.label}</Text>
     </View>
   );
 }
 
 export function ProductionChecklist({ checklist }: ProductionChecklistProps) {
+  const { theme } = useAppTheme();
   return (
     <>
-      <Text style={styles.groupTitle}>Listo para trabajar</Text>
+      <Text style={[styles.groupTitle, { color: theme.colors.primary }]}>Listo para trabajar</Text>
       {checklist.baseChecks.map((item) => (
         <CheckRow key={item.label} item={item} pendingLabel="REVISAR" />
       ))}
-      <Text style={styles.groupTitle}>Conexion y firma</Text>
-      <Text style={styles.paragraph}>Use Probar conexion cuando cambie servidor, certificado o ambiente. No es obligatorio tocarlo cada vez que entra a la app.</Text>
+      <Text style={[styles.groupTitle, { color: theme.colors.primary }]}>Conexion y firma</Text>
+      <Text style={[styles.paragraph, { color: theme.colors.textMuted }]}>Use Probar conexion cuando cambie servidor, certificado o ambiente. No es obligatorio tocarlo cada vez que entra a la app.</Text>
       {checklist.connectionChecks.map((item) => (
         <CheckRow key={item.label} item={item} pendingLabel={item.pendingLabel || "PENDIENTE"} infoOnly />
       ))}
-      <Text style={styles.groupTitle}>Pendiente solo para produccion</Text>
+      <Text style={[styles.groupTitle, { color: theme.colors.primary }]}>Pendiente solo para produccion</Text>
       {checklist.productionChecks.map((item) => (
         <CheckRow key={item.label} item={item} pendingLabel={item.pendingLabel || "SOLO PRODUCCION"} infoOnly />
       ))}
@@ -60,6 +64,7 @@ const styles = StyleSheet.create({
     lineHeight: 20
   },
   checkRow: {
+    borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8

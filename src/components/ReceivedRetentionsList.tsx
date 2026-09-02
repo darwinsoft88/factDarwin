@@ -38,6 +38,7 @@ export function ReceivedRetentionsList({
             title={`${retention.taxType} ${retention.documentNumber}`}
             meta={`${formatShortDate(retention.receivedAt)} | ${client?.name || "Cliente"} | Factura ${sale ? documentNumber(sale, issuer) : ""} | Base $${money(retention.base)} | ${money(retention.percentage)}% | Retenido $${money(retention.amount)}`}
             badge="RETENCION"
+            accentTone={retention.taxType === "IVA" ? "info" : "primary"}
             onOpen={canOpenDetail ? () => onOpenDetail(formatReceivedRetentionDetail(retention, sale, client, issuer)) : undefined}
           />
         );

@@ -5,10 +5,13 @@ import { Empty, Input, Section } from "./common";
 import { PaginationControls } from "./PaginationControls";
 import { LIST_BATCH_SIZE } from "../constants/app";
 import { AppData, Client } from "../types";
+import { useAppTheme } from "../theme/AppTheme";
+import { clientSalePriceTier } from "../utils/productPrices";
 
 export type ClientListItemProps = {
   title: string;
   meta: string;
+  accentTone?: "primary" | "success" | "warning" | "danger" | "info";
   editLabel?: string;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -45,14 +48,15 @@ export function ClientListSection({
   setClientSearch,
   visibleClients
 }: ClientListSectionProps) {
+  const { theme } = useAppTheme();
   return (
     <Section title="">
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Clientes guardados</Text>
+        <Text style={[styles.title, { color: theme.colors.text }]}>Clientes guardados</Text>
         {canEdit && onCreate ? (
-          <Pressable style={styles.addButton} onPress={onCreate}>
-            <MaterialCommunityIcons name="account-plus-outline" size={15} color="#ffffff" />
-            <Text style={styles.addButtonText}>Agregar</Text>
+          <Pressable style={[styles.addButton, { backgroundColor: theme.colors.primary }]} onPress={onCreate}>
+            <MaterialCommunityIcons name="account-plus-outline" size={15} color={theme.colors.onPrimary} />
+            <Text style={[styles.addButtonText, { color: theme.colors.onPrimary }]}>Agregar</Text>
           </Pressable>
         ) : null}
       </View>
@@ -63,7 +67,8 @@ export function ClientListSection({
         <ListItemComponent
           key={client.id}
           title={client.name}
-          meta={`${client.identification} | ${client.email || "sin email"} | ${client.phone || "sin telefono"}`}
+          meta={`${client.identification} | ${client.email || "sin email"} | ${client.phone || "sin telefono"} | ${clientSalePriceTier(client).toUpperCase()}`}
+          accentTone="primary"
           editLabel={canEdit ? "Editar" : undefined}
           onEdit={() => onEdit(client)}
           onDelete={canDelete ? () => onDelete(client) : undefined}

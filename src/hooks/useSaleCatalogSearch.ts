@@ -3,6 +3,7 @@ import { LIST_BATCH_SIZE } from "../constants/app";
 import { searchBackendClients, searchBackendProducts } from "../services/backend";
 import { AppData, Client, Product } from "../types";
 import { canonicalConsumerFinalClient, isConsumerFinalClient } from "../validation";
+import { clientWithLocalSalePricePreference } from "../utils/productPrices";
 
 type RemoteResults<T> = { items: T[]; total: number } | null;
 
@@ -95,6 +96,7 @@ export function useSaleCatalogSearch({
         .then((result) => {
           const normalizedSearch = search.toLowerCase();
           const items = result.items
+            .map((client) => clientWithLocalSalePricePreference(client, clientsForSale.find((local) => local.id === client.id)))
             .map((client) => isConsumerFinalClient(client) ? canonicalConsumerFinalClient(client) : client)
             .filter((client) => client.name.toLowerCase().includes(normalizedSearch) || client.identification.includes(normalizedSearch));
           const total = items.length < result.items.length ? items.length : result.total;
@@ -109,7 +111,7 @@ export function useSaleCatalogSearch({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [backendToken, clientSearch, data.backendUrl, setRemoteClientResults, visibleClientCount]);
+  }, [backendToken, clientSearch, clientsForSale, data.backendUrl, setRemoteClientResults, visibleClientCount]);
 
   useEffect(() => {
     const search = productSearch.trim();

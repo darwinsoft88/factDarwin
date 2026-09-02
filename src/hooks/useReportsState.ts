@@ -12,7 +12,7 @@ export function useReportsState(data: AppData) {
   const currentYear = String(today.getFullYear());
   const establishmentOptions = useMemo(() => normalizedEstablishments(data.issuer), [data.issuer]);
   const [establishmentFilter, setEstablishmentFilter] = useState(activeScopeId(data));
-  const reportData = useMemo(() => establishmentFilter === "all" ? data : scopedReportData(data, establishmentFilter), [data, establishmentFilter]);
+  const reportData = useMemo(() => scopedReportData(data, establishmentFilter), [data, establishmentFilter]);
   const availableYears = useMemo(() => Array.from(new Set([
     currentYear,
     ...reportData.sales.map((sale) => String(new Date(sale.createdAt).getFullYear())),

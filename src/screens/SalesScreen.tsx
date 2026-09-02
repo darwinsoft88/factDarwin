@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { ReceivedRetentionsSection } from "../components/ReceivedRetentionsSection";
 import { SaleFormSection } from "../components/SaleFormSection";
@@ -26,8 +26,10 @@ import { useReceivedRetentionFormState } from "../hooks/useReceivedRetentionForm
 import { money, nextSequence } from "../sri";
 import { activeEstablishment } from "../utils/establishments";
 import { pageContainingFirstAppendedItem } from "../utils/documentHistory";
+import { dataForDocumentEnvironmentView, localDocumentSimulationAvailable } from "../utils/documentEnvironmentSimulation";
 import { nextInternalSequence, nextProformaSequence } from "../utils/sales";
-import { AppData, DocumentType, Sale, User } from "../types";
+import { clientSalePriceTier, effectiveProductPriceTier, productPriceForTier } from "../utils/productPrices";
+import { AppData, DocumentType, Environment, Sale, User } from "../types";
 
 type SalesScreenMode = "sale" | "documents";
 
@@ -52,6 +54,17 @@ export function SalesScreen({
   onOpenSale: () => void;
   mode?: SalesScreenMode;
 }) {
+  const [simulatedDocumentEnvironment, setSimulatedDocumentEnvironment] = useState<Environment | null>(null);
+  const simulationAvailable = mode === "documents" && localDocumentSimulationAvailable(__DEV__);
+  const documentSimulationActive = simulationAvailable && simulatedDocumentEnvironment !== null;
+  const documentViewData = useMemo(
+    () => dataForDocumentEnvironmentView(data, documentSimulationActive ? simulatedDocumentEnvironment : null),
+    [data, documentSimulationActive, simulatedDocumentEnvironment],
+  );
+
+  useEffect(() => {
+    setSimulatedDocumentEnvironment(null);
+  }, [data.issuer.environment, mode]);
   const {
     clientId,
     clientSearch,
@@ -80,6 +93,7 @@ export function SalesScreen({
     sourceProformaId,
     sourceTicketId,
     unitGrossPrice,
+    salePriceTier,
     visibleClientCount,
     visibleProductCount,
     setClientId,
@@ -112,6 +126,7 @@ export function SalesScreen({
     setSourceProformaId,
     setSourceTicketId,
     setUnitGrossPrice,
+    setSalePriceTier,
     setVisibleClientCount,
     setVisibleProductCount
   } = useSaleFormState(data);
@@ -205,6 +220,7 @@ export function SalesScreen({
 
   const {
     adjustSaleLineQuantity,
+    changeLinePriceTier,
     closeLineEditor,
     editingLineIndex,
     lineEditForm,
@@ -237,7 +253,7 @@ export function SalesScreen({
   } = useQuickSaleClientEditor({
     backendToken,
     data,
-    persist,
+    persistMutation,
     selectedClient,
     setClientId,
     setIssueNotice,
@@ -246,18 +262,34 @@ export function SalesScreen({
     user
   });
 
+  const selectedClientPriceTier = clientSalePriceTier(selectedClient);
   useEffect(() => {
-    setUnitGrossPrice(selectedProduct ? money(selectedProduct.price) : "");
+    const preferredTier = selectedClientPriceTier;
+    const effectiveTier = selectedProduct ? effectiveProductPriceTier(selectedProduct, preferredTier) : preferredTier;
+    setSalePriceTier(effectiveTier);
+    setUnitGrossPrice(selectedProduct ? money(productPriceForTier(selectedProduct, effectiveTier)) : "");
     setGrossDiscount("0");
     setDiscountMode("amount");
-  }, [productId, selectedProduct, setDiscountMode, setGrossDiscount, setUnitGrossPrice]);
+  // Cambiar cliente define la lista para productos futuros; nunca modifica lineas existentes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, selectedClientPriceTier]);
+
+  const changeSalePriceTier = (tier: typeof salePriceTier) => {
+    setSalePriceTier(tier);
+    if (selectedProduct) {
+      const effectiveTier = effectiveProductPriceTier(selectedProduct, tier);
+      setUnitGrossPrice(money(productPriceForTier(selectedProduct, effectiveTier)));
+      setIssueNotice(effectiveTier === tier ? `${tier.toUpperCase()} se aplicará a los próximos productos.` : `${tier.toUpperCase()} seleccionado. Este producto no lo tiene configurado y usará PVP1.`);
+    } else {
+      setIssueNotice(`${tier.toUpperCase()} se aplicará a los próximos productos.`);
+    }
+  };
 
   const {
     addProductById,
     addProductSearchSubmit,
     addScannedCodeToSale,
-    selectClientForSale,
-    selectProductForSale
+    selectClientForSale
   } = useSaleCartActions({
     clientsForSale,
     data,
@@ -284,6 +316,7 @@ export function SalesScreen({
     sourceProforma,
     sourceTicket,
     unitGrossPrice,
+    salePriceTier,
     userRole: user.role
   });
   const nextDocumentLabel = saleNextDocumentLabel(data, documentType, editingSale, sourceTicket, sourceProforma);
@@ -305,7 +338,7 @@ export function SalesScreen({
   const historicalDocuments = useHistoricalDocuments({
     active: mode === "documents",
     backendToken,
-    data,
+    data: documentViewData,
     filters: {
       search: invoiceSearch,
       startDate: saleStartDate,
@@ -320,7 +353,7 @@ export function SalesScreen({
     filteredSales,
     invoiceStats
   } = useSalesDocumentList({
-    data,
+    data: documentViewData,
     sales: historicalDocuments.sales,
     historicalClientNames: historicalDocuments.historicalClientNames,
     historicalMatchedIds: historicalDocuments.historicalIds,
@@ -473,10 +506,13 @@ export function SalesScreen({
     <View style={styles.stack}>
       {mode === "sale" ? (
         <SaleFormSection
+          backendUrl={data.backendUrl}
+          backendToken={backendToken}
           addProductById={addProductById}
           addProductSearchSubmit={addProductSearchSubmit}
           additionalInfo={additionalInfo}
           adjustSaleLineQuantity={adjustSaleLineQuantity}
+          changeLinePriceTier={changeLinePriceTier}
           cancelEdit={cancelEdit}
           clientId={clientId}
           clientSearch={clientSearch}
@@ -503,10 +539,11 @@ export function SalesScreen({
           projectedStock={selectedProductProjectedStock}
           saleSummaryTotals={saleSummaryTotals}
           selectClientForSale={selectClientForSale}
-          selectProductForSale={selectProductForSale}
           selectedClient={selectedClient}
           selectedProduct={selectedProduct}
           selectedProductLowStock={selectedProductLowStock}
+          salePriceTier={salePriceTier}
+          onSalePriceTierChange={changeSalePriceTier}
           setClientSearch={setClientSearch}
           setDocumentType={setDocumentType}
           setIssueNotice={setIssueNotice}
@@ -523,6 +560,7 @@ export function SalesScreen({
           sourceTicket={sourceTicket}
           visibleClientsForSale={visibleClientsForSale}
           visibleProductsForSale={visibleProductsForSale}
+          products={data.products}
         />
       ) : (
         <>
@@ -536,7 +574,13 @@ export function SalesScreen({
             createProforma={createProforma}
             createRide={createRide}
             createTicket={createTicket}
-            data={data}
+            data={documentViewData}
+            localEnvironmentSimulationAvailable={simulationAvailable}
+            readOnlySimulation={documentSimulationActive}
+            onToggleEnvironmentSimulation={() => setSimulatedDocumentEnvironment((current) => {
+              const visible = current || data.issuer.environment;
+              return visible === "1" ? "2" : "1";
+            })}
             historySales={historicalDocuments.sales}
             historicalClientNames={historicalDocuments.historicalClientNames}
             historicalIds={historicalDocuments.historicalIds}

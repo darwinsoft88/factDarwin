@@ -1,6 +1,9 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useAppTheme } from "../theme/AppTheme";
 
 type CreditPaymentSuccessModalProps = {
   visible: boolean;
@@ -23,28 +26,37 @@ export function CreditPaymentSuccessModal({
   onOpenReceipt,
   onShareReceipt
 }: CreditPaymentSuccessModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 18 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 18 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.card}>
-          <View style={styles.iconCircle}>
+      <View style={[styles.backdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
+        <View style={[styles.card, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, shadowColor: theme.colors.shadow }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <ScrollView contentContainerStyle={styles.cardContent}>
+          <View style={[styles.iconCircle, { backgroundColor: theme.colors.success }]}>
             <MaterialCommunityIcons name="check-bold" size={30} color="#ffffff" />
           </View>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.message}>{message}</Text>
+          <Text style={[styles.title, { color: theme.colors.text }]}>{title}</Text>
+          <Text style={[styles.message, { color: theme.colors.textMuted }]}>{message}</Text>
           <View style={styles.actions}>
-            <Pressable style={styles.primaryAction} onPress={onOpenReceipt}>
-              <MaterialCommunityIcons name="receipt-text-outline" size={18} color="#ffffff" />
-              <Text style={styles.primaryActionText}>{receiptLabel}</Text>
+            <Pressable style={[styles.primaryAction, { backgroundColor: theme.colors.primary }]} onPress={onOpenReceipt}>
+              <MaterialCommunityIcons name="receipt-text-outline" size={18} color={theme.colors.onPrimary} />
+              <Text style={[styles.primaryActionText, { color: theme.colors.onPrimary }]}>{receiptLabel}</Text>
             </Pressable>
-            <Pressable style={styles.secondaryAction} onPress={onShareReceipt}>
-              <MaterialCommunityIcons name="share-variant-outline" size={18} color="#0f766e" />
-              <Text style={styles.secondaryActionText}>{shareLabel}</Text>
+            <Pressable style={[styles.secondaryAction, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onShareReceipt}>
+              <MaterialCommunityIcons name="share-variant-outline" size={18} color={theme.colors.primary} />
+              <Text style={[styles.secondaryActionText, { color: theme.colors.primary }]}>{shareLabel}</Text>
             </Pressable>
           </View>
           <Pressable style={styles.closeAction} onPress={onClose}>
-            <Text style={styles.closeActionText}>Cerrar</Text>
+            <Text style={[styles.closeActionText, { color: theme.colors.textMuted }]}>Cerrar</Text>
           </Pressable>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -66,14 +78,17 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderWidth: 1,
     borderColor: "#dbe5ef",
-    padding: 18,
-    alignItems: "center",
-    gap: 12,
+    overflow: "hidden",
     shadowColor: "#0f172a",
     shadowOpacity: 0.14,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 5
+  },
+  cardContent: {
+    padding: 18,
+    alignItems: "center",
+    gap: 12
   },
   iconCircle: {
     width: 58,

@@ -5,6 +5,7 @@ import { EntityEditModal } from "../components/EntityEditModal";
 import { Empty, Input, LoadMoreButton, Section, Select } from "../components/common";
 import { LIST_BATCH_SIZE } from "../constants/app";
 import { roleOptions } from "../constants/options";
+import type { PersistMutation } from "../hooks/useSyncAndBackup";
 import { hashPassword } from "../services/security";
 import { AppData, User, UserRole } from "../types";
 import { roleLabel } from "../utils/appAccess";
@@ -12,10 +13,12 @@ import { appendAudit } from "../utils/audit";
 import { confirmAction, showError, showSuccess, showWarning } from "../utils/dialogs";
 import { generateId } from "../utils/id";
 import { syncPatchToBackend } from "../utils/sync";
+import { useAppTheme } from "../theme/AppTheme";
 
 type UsersListItemProps = {
   title: string;
   meta: string;
+  accentTone?: "primary" | "success" | "warning" | "danger" | "info";
   editLabel?: string;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -25,15 +28,16 @@ export function UsersScreen({
   data,
   user: currentUser,
   backendToken,
-  persist,
+  persistMutation,
   ListItemComponent
 }: {
   data: AppData;
   user: User;
   backendToken: string;
-  persist: (data: AppData) => Promise<void>;
+  persistMutation: PersistMutation;
   ListItemComponent: React.ComponentType<UsersListItemProps>;
 }) {
+  const { theme } = useAppTheme();
   const emptyForm = useMemo(() => ({ name: "", email: "", password: "", role: "vendedor" as UserRole }), []);
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState("");
@@ -90,14 +94,14 @@ export function UsersScreen({
           ...data,
           users: data.users.map((user) => user.id === editingId ? finalUser : user)
         }, currentUser, "USER_UPDATED", "user", editingId, `Usuario actualizado: ${form.name.trim()}`);
-        await persist(nextData);
-        synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, users: [finalUser], auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario pendiente de sincronizar", nextData, persist);
+        await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
+        synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, users: [finalUser], auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario pendiente de sincronizar", { persistMutation });
       } else {
         const passwordHash = await hashPassword(form.password);
         const createdUser: User = { id: generateId(), name: form.name.trim(), email, role: form.role, passwordHash };
         const nextData = appendAudit({ ...data, users: [createdUser, ...data.users] }, currentUser, "USER_CREATED", "user", createdUser.id, `Usuario creado: ${createdUser.name}`);
-        await persist(nextData);
-        synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, users: [createdUser], auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario pendiente de sincronizar", nextData, persist);
+        await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
+        synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, users: [createdUser], auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario pendiente de sincronizar", { persistMutation });
       }
 
       if (!synced) return;
@@ -148,6 +152,7 @@ export function UsersScreen({
 
   const renderEditModal = () => (
     <EntityEditModal
+      adaptiveViewport
       visible={editModalVisible}
       title={editingId ? "Editar usuario" : "Nuevo usuario"}
       subtitle={editingId ? editingUserName : "Cree el acceso del colaborador"}
@@ -164,10 +169,10 @@ export function UsersScreen({
     <View style={styles.stack}>
       <Section title="">
         <View style={styles.headerRow}>
-          <Text style={styles.title}>Usuarios guardados</Text>
-          <Pressable style={styles.addButton} onPress={openCreate}>
-            <MaterialCommunityIcons name="account-plus-outline" size={15} color="#ffffff" />
-            <Text style={styles.addButtonText}>Agregar</Text>
+          <Text style={[styles.title, { color: theme.colors.text }]}>Usuarios guardados</Text>
+          <Pressable style={[styles.addButton, { backgroundColor: theme.colors.primary }]} onPress={openCreate}>
+            <MaterialCommunityIcons name="account-plus-outline" size={15} color={theme.colors.onPrimary} />
+            <Text style={[styles.addButtonText, { color: theme.colors.onPrimary }]}>Agregar</Text>
           </Pressable>
         </View>
         <Input label="Buscar usuarios" value={userSearch} onChangeText={setUserSearch} placeholder="Nombre, correo o rol" autoCapitalize="none" />
@@ -178,6 +183,7 @@ export function UsersScreen({
             key={user.id}
             title={user.name}
             meta={`${user.email} | ${roleLabel(user.role)}`}
+            accentTone={user.role === "admin" ? "warning" : user.role === "vendedor" ? "success" : user.role === "cajero" ? "info" : "primary"}
             editLabel="Editar"
             onEdit={() => edit(user)}
             onDelete={user.id === currentUser.id ? undefined : () => confirmAction("Eliminar usuario", `Seguro que desea eliminar a ${user.name}? Esta accion quedara registrada en auditoria.`, () => {
@@ -187,8 +193,8 @@ export function UsersScreen({
                   return;
                 }
                 const nextData = appendAudit({ ...data, users: data.users.filter((item) => item.id !== user.id), deletedIds: { ...(data.deletedIds || {}), users: Array.from(new Set([...(data.deletedIds?.users || []), user.id])) } }, currentUser, "USER_DELETED", "user", user.id, `Usuario eliminado: ${user.name}`);
-                await persist(nextData);
-                await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, deletions: { users: [user.id] }, auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario eliminado pendiente de sincronizar", nextData, persist);
+                await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
+                await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, deletions: { users: [user.id] }, auditLogs: nextData.auditLogs.slice(0, 1) }, "Usuario eliminado pendiente de sincronizar", { persistMutation });
                 showSuccess("Usuario eliminado", "El usuario se elimino con exito.");
               })();
             })}

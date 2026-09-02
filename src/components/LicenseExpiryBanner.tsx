@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { AppLicense } from "../types";
 import { appLicenseStatus } from "../utils/appAccess";
 import { normalizeLicensePlanValue } from "../utils/license";
+import { useAppTheme } from "../theme/AppTheme";
 
 type LicenseExpiryBannerProps = {
   license?: AppLicense;
@@ -12,6 +13,7 @@ type LicenseExpiryBannerProps = {
 };
 
 export function LicenseExpiryBanner({ license, onOpenLicense, visible = true }: LicenseExpiryBannerProps) {
+  const { theme } = useAppTheme();
   const status = appLicenseStatus(license);
   const plan = normalizeLicensePlanValue(license?.plan);
   const isTrial = plan === "trial" || license?.status === "trial";
@@ -27,16 +29,16 @@ export function LicenseExpiryBanner({ license, onOpenLicense, visible = true }: 
     : "Renueva antes del vencimiento y evita cortes en facturacion, sincronizacion y soporte.";
 
   return (
-    <View style={[styles.banner, expired ? styles.bannerExpired : styles.bannerWarning]}>
-      <View style={[styles.iconBox, expired ? styles.iconBoxExpired : styles.iconBoxWarning]}>
-        <MaterialCommunityIcons name={expired ? "shield-alert-outline" : "calendar-clock"} size={22} color={expired ? "#b91c1c" : "#0f766e"} />
+    <View style={[styles.banner, { backgroundColor: expired ? theme.colors.warningSoft : theme.colors.primarySoft, borderColor: theme.colors.borderStrong, shadowColor: theme.colors.shadow }]}>
+      <View style={[styles.iconBox, { backgroundColor: expired ? theme.colors.dangerSoft : theme.colors.successSoft }]}>
+        <MaterialCommunityIcons name={expired ? "shield-alert-outline" : "calendar-clock"} size={22} color={expired ? theme.colors.danger : theme.colors.primary} />
       </View>
       <View style={styles.copy}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.message}>{message}</Text>
+        <Text style={[styles.title, { color: theme.colors.text }]}>{title}</Text>
+        <Text style={[styles.message, { color: theme.colors.textMuted }]}>{message}</Text>
       </View>
-      <Pressable accessibilityRole="button" accessibilityLabel="Ver planes de licencia" style={[styles.button, expired ? styles.buttonExpired : styles.buttonWarning]} onPress={onOpenLicense}>
-        <Text style={styles.buttonText}>Ver planes</Text>
+      <Pressable accessibilityRole="button" accessibilityLabel="Ver planes de licencia" style={[styles.button, { backgroundColor: expired ? theme.colors.danger : theme.colors.primary }]} onPress={onOpenLicense}>
+        <Text style={[styles.buttonText, { color: theme.colors.onPrimary }]}>Ver planes</Text>
       </Pressable>
     </View>
   );
@@ -59,26 +61,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 2
   },
-  bannerWarning: {
-    backgroundColor: "#ecfdf5",
-    borderColor: "#99f6e4"
-  },
-  bannerExpired: {
-    backgroundColor: "#fff7ed",
-    borderColor: "#fed7aa"
-  },
   iconBox: {
     width: 38,
     height: 38,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center"
-  },
-  iconBoxWarning: {
-    backgroundColor: "#ccfbf1"
-  },
-  iconBoxExpired: {
-    backgroundColor: "#fee2e2"
   },
   copy: {
     flex: 1,
@@ -103,14 +91,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  buttonWarning: {
-    backgroundColor: "#0f766e"
-  },
-  buttonExpired: {
-    backgroundColor: "#b91c1c"
-  },
   buttonText: {
-    color: "#ffffff",
     fontSize: 12,
     fontWeight: "900"
   }

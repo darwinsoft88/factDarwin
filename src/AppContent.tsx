@@ -1,5 +1,5 @@
 import { StatusBar as ExpoStatusBar } from "expo-status-bar";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   AppState,
   Linking,
@@ -13,7 +13,7 @@ import {
 import { AppAuthGate } from "./components/AppAuthGate";
 import { AppGlobalModals } from "./components/AppGlobalModals";
 import { AppMainShell } from "./components/AppMainShell";
-import { initialData } from "./database";
+import { initialData, saveSession } from "./database";
 import { SUPPORT_WHATSAPP_NUMBER } from "./constants/branding";
 import { useAppBootstrap } from "./hooks/useAppBootstrap";
 import { useAppRuntimeRefs } from "./hooks/useAppRuntimeRefs";
@@ -32,6 +32,15 @@ import { AppData, User } from "./types";
 import { AppTab, appLicenseStatus } from "./utils/appAccess";
 import { isSessionTokenExpired } from "./utils/sessionToken";
 import { SyncState } from "./utils/support";
+import { useAppTheme } from "./theme/AppTheme";
+import { useBiometricLock } from "./hooks/useBiometricLock";
+import { BiometricLockScreen } from "./components/BiometricLockScreen";
+import { useBiometricLoginAvailability } from "./hooks/useBiometricLoginAvailability";
+import { usePasskeyProfile } from "./hooks/usePasskeyProfile";
+import { refreshRegisteredDeviceSession, shouldInvalidateDeviceCredential } from "./services/deviceSessionCoordinator";
+import { useOnboardingExperience } from "./onboarding/useOnboardingExperience";
+import type { OnboardingCoachMarkId } from "./onboarding/onboardingTypes";
+import { evaluateOnboarding, shouldMinimizeForExistingUser } from "./onboarding/onboardingEvaluator";
 
 
 
@@ -39,11 +48,13 @@ type Tab = AppTab;
 const LICENSE_WARNING_AUTO_HIDE_MS = 12_000;
 
 export function AppContent() {
+  const { theme } = useAppTheme();
   const headerTopPadding = Platform.OS === "android" ? (NativeStatusBar.currentHeight || 0) + 6 : 12;
   const [data, setData] = useState<AppData>(initialData);
   const [session, setSession] = useState<User | null>(null);
   const [backendToken, setBackendToken] = useState("");
   const [syncState, setSyncState] = useState<SyncState>("synced");
+  const [networkReachable, setNetworkReachable] = useState<boolean | null>(null);
   const authState = useAuthState(initialData.backendUrl);
   const [tab, setTab] = useState<Tab>("dashboard");
   const [xmlPreview, setXmlPreview] = useState("");
@@ -53,11 +64,13 @@ export function AppContent() {
   const [syncCenterVisible, setSyncCenterVisible] = useState(false);
   const [syncActionLoading, setSyncActionLoading] = useState(false);
   const [onboardingVisible, setOnboardingVisible] = useState(false);
+  const [activeCoachMark, setActiveCoachMark] = useState<OnboardingCoachMarkId | null>(null);
   const keyboardInset = useKeyboardInset();
   const backendTokenRef = useRef("");
   const dataRef = useRef<AppData>(initialData);
   const sessionRef = useRef<User | null>(null);
   const syncStateRef = useRef<SyncState>("synced");
+  const tokenRenewalRunningRef = useRef(false);
   const supportDiagnostics = useSupportDiagnostics({
     backendTokenRef,
     dataRef,
@@ -66,7 +79,7 @@ export function AppContent() {
     onBeforeOpen: () => setAppMenuVisible(false)
   });
 
-  const { login, registerTenant, recoverPassword, chooseLoginEstablishment, submitNewPassword, logout } = useAuthActions({
+  const { login, loginWithBiometrics, registerTenant, recoverPassword, chooseLoginEstablishment, submitNewPassword, logout } = useAuthActions({
     authState,
     dataRef,
     sessionRef,
@@ -80,6 +93,40 @@ export function AppContent() {
     setTab,
     setOnboardingVisible
   });
+  const biometricLock = useBiometricLock(session ? {
+    companyId: session.companyId || data.issuer.ruc,
+    userId: session.id,
+    backendUrl: data.backendUrl,
+    companyRuc: data.issuer.ruc,
+    establishmentId: data.issuer.activeEstablishmentId || "",
+    token: backendToken,
+    user: session
+  } : null);
+  const passkeyProfile = usePasskeyProfile(session ? {
+    companyId: session.companyId || data.issuer.ruc,
+    userId: session.id,
+    backendUrl: data.backendUrl,
+    companyRuc: data.issuer.ruc,
+    establishmentId: data.issuer.activeEstablishmentId || "",
+    token: backendToken,
+    user: session
+  } : null);
+  const profileSecurity = Platform.OS === "web" ? passkeyProfile : biometricLock;
+  const onboardingCompanyId = session?.companyId || data.issuer.ruc || "";
+  const onboarding = useOnboardingExperience(session?.id || "", onboardingCompanyId);
+  const secureLogout = useCallback(() => logout(), [logout]);
+
+  useEffect(() => {
+    setActiveCoachMark(null);
+  }, [onboardingCompanyId, session?.id]);
+
+  useEffect(() => {
+    if (!session || !onboarding.ready || onboarding.experience.welcomeSeen) return;
+    const evaluation = evaluateOnboarding(data, session);
+    if (!shouldMinimizeForExistingUser(evaluation, onboardingVisible)) return;
+    onboarding.markWelcomeSeen();
+    onboarding.setCenterMinimized(true);
+  }, [data, onboarding, onboardingVisible, session]);
 
   const { ready, recoveryError, retryBootstrap, retrying, status: bootstrapStatus } = useAppBootstrap({
     backendTokenRef,
@@ -92,6 +139,7 @@ export function AppContent() {
     setPasswordChangeVisible: authState.setPasswordChangeVisible,
     setSession
   });
+  const biometricLogin = useBiometricLoginAvailability(ready && !session);
   const sqliteCatalogDiagnostic = useSQLiteBootstrap(
     ready && Boolean(session),
     data,
@@ -121,24 +169,47 @@ export function AppContent() {
   useEffect(() => {
     if (!ready || !session) return undefined;
 
-    const expireSessionIfNeeded = () => {
+    const expireSessionIfNeeded = async () => {
       const token = backendTokenRef.current || backendToken;
-      if (!token || !isSessionTokenExpired(token)) return;
-      logout();
-      authState.setLoginStatus({ tone: "error", message: "Su sesion expiro. Ingrese nuevamente para continuar trabajando." });
+      if (!token || !isSessionTokenExpired(token) || tokenRenewalRunningRef.current) return;
+      if (Platform.OS === "web") {
+        secureLogout();
+        authState.setLoginStatus({ tone: "error", message: "Su sesión expiró. Ingrese nuevamente para continuar trabajando." });
+        return;
+      }
+      tokenRenewalRunningRef.current = true;
+      try {
+        const renewed = await refreshRegisteredDeviceSession();
+        setBackendToken(renewed.token);
+        backendTokenRef.current = renewed.token;
+        if (sessionRef.current) {
+          await saveSession(sessionRef.current, renewed.token, "", dataRef.current.issuer.ruc);
+        }
+      } catch (error) {
+        setBackendToken("");
+        backendTokenRef.current = "";
+        if (shouldInvalidateDeviceCredential(error)) {
+          secureLogout();
+          authState.setLoginStatus({ tone: "error", message: "Este dispositivo ya no tiene una sesión segura válida. Ingrese con su contraseña." });
+        } else {
+          authState.setLoginStatus({ tone: "info", message: "Sin conexión para renovar la sesión. Puede continuar con los datos locales." });
+        }
+      } finally {
+        tokenRenewalRunningRef.current = false;
+      }
     };
 
-    expireSessionIfNeeded();
-    const timer = setInterval(expireSessionIfNeeded, 60_000);
+    void expireSessionIfNeeded();
+    const timer = setInterval(() => { void expireSessionIfNeeded(); }, 60_000);
     const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") expireSessionIfNeeded();
+      if (state === "active") void expireSessionIfNeeded();
     });
 
     return () => {
       clearInterval(timer);
       subscription.remove();
     };
-  }, [authState, backendToken, backendTokenRef, logout, ready, session]);
+  }, [authState, backendToken, backendTokenRef, ready, secureLogout, session]);
 
   useEffect(() => {
     if (ready && !session && data.users.length === 0) {
@@ -184,6 +255,7 @@ export function AppContent() {
     setSyncActionLoading,
     setSyncCenterVisible,
     setSyncState,
+    setNetworkReachable,
     syncState,
     syncStateRef
   });
@@ -224,9 +296,9 @@ export function AppContent() {
 
   if (bootstrapStatus === "recovery-error") {
     return (
-      <SafeAreaView style={styles.center}>
-        <Text style={styles.title}>No se pudieron cargar los datos locales</Text>
-        <Text style={styles.recoveryDescription}>Tus datos originales fueron conservados. No continues facturando hasta recuperarlos.</Text>
+      <SafeAreaView style={[styles.center, { backgroundColor: theme.colors.background }]}>
+        <Text style={[styles.title, { color: theme.colors.text }]}>No se pudieron cargar los datos locales</Text>
+        <Text style={[styles.recoveryDescription, { color: theme.colors.textMuted }]}>Tus datos originales fueron conservados. No continues facturando hasta recuperarlos.</Text>
         <Pressable style={[styles.recoveryPrimaryButton, retrying && styles.recoveryButtonDisabled]} onPress={() => { void retryBootstrap(); }} disabled={retrying}>
           <Text style={styles.recoveryPrimaryText}>{retrying ? "Reintentando..." : "Reintentar"}</Text>
         </Pressable>
@@ -239,8 +311,8 @@ export function AppContent() {
 
   if (!ready) {
     return (
-      <SafeAreaView style={styles.center}>
-        <Text style={styles.title}>Cargando...</Text>
+      <SafeAreaView style={[styles.center, { backgroundColor: theme.colors.background }]}>
+        <Text style={[styles.title, { color: theme.colors.text }]}>Cargando...</Text>
       </SafeAreaView>
     );
   }
@@ -251,15 +323,38 @@ export function AppContent() {
         authState={authState}
         chooseLoginEstablishment={chooseLoginEstablishment}
         login={login}
+        biometricAccount={biometricLogin.hint}
+        biometricButtonLabel={biometricLogin.buttonLabel}
+        biometricLoading={biometricLogin.loading || authState.loggingIn}
+        loginWithBiometrics={loginWithBiometrics}
         recoverPassword={recoverPassword}
         registerTenant={registerTenant}
       />
     );
   }
 
+  if (biometricLock.loading) {
+    return (
+      <SafeAreaView style={[styles.center, { backgroundColor: theme.colors.background }]}>
+        <Text style={[styles.title, { color: theme.colors.text }]}>Protegiendo sesión...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (biometricLock.locked) {
+    return (
+      <BiometricLockScreen
+        authenticating={biometricLock.authenticating}
+        error={biometricLock.error}
+        onUnlock={() => { void biometricLock.unlock(); }}
+        onUsePassword={secureLogout}
+      />
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.screen}>
-      <ExpoStatusBar style="dark" />
+    <SafeAreaView style={[styles.screen, { backgroundColor: theme.colors.background }]}>
+      <ExpoStatusBar style={theme.dark ? "light" : "dark"} />
       <AppMainShell
         activeTab={tab}
         availableTabs={availableTabs}
@@ -275,6 +370,7 @@ export function AppContent() {
         session={session}
         syncActionLoading={syncActionLoading}
         syncState={syncState}
+        networkReachable={networkReachable}
         ensureBackendToken={ensureBackendToken}
         onOpenLicense={() => setLicenseVisible(true)}
         onOpenMenu={() => setAppMenuVisible(true)}
@@ -286,16 +382,24 @@ export function AppContent() {
         onXml={setXmlPreview}
         persist={persist}
         persistMutation={persistMutation}
+        onboardingExperience={onboarding.experience}
+        activeCoachMark={activeCoachMark}
+        onSetCenterMinimized={onboarding.setCenterMinimized}
+        onSkipOptionalStep={onboarding.skipOptionalStep}
+        onAcknowledgeOnboarding={onboarding.acknowledgeCompletion}
+        onMarkCoachSeen={onboarding.markCoachSeen}
+        onSetActiveCoachMark={setActiveCoachMark}
       />
 
       <AppGlobalModals
         appMenuVisible={appMenuVisible}
+        activeTab={tab}
         availableTabs={availableTabs}
         authState={authState}
         chooseLoginEstablishment={chooseLoginEstablishment}
         currentEstablishment={currentEstablishment}
         data={data}
-        logout={logout}
+        logout={secureLogout}
         licenseVisible={licenseVisible}
         onOpenAdminSettings={openAdminSettings}
         onOpenSyncCenter={openSyncCenter}
@@ -318,6 +422,15 @@ export function AppContent() {
         syncCenterVisible={syncCenterVisible}
         syncState={syncState}
         xmlPreview={xmlPreview}
+        biometricAvailable={profileSecurity.available}
+        biometricEnabled={profileSecurity.enabled}
+        biometricLoading={profileSecurity.loading || profileSecurity.authenticating}
+        biometricError={profileSecurity.error}
+        onToggleBiometric={() => {
+          if (profileSecurity.enabled) void profileSecurity.disable();
+          else void profileSecurity.enable();
+        }}
+        onWelcomeComplete={onboarding.markWelcomeSeen}
       />
     </SafeAreaView>
   );

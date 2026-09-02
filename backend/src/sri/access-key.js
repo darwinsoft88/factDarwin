@@ -12,9 +12,7 @@ function nextSequence(value) {
 }
 
 function createAccessKey(date, issuer, sequence, documentType = "factura") {
-  const dd = String(date.getDate()).padStart(2, "0");
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const yyyy = date.getFullYear();
+  const { day: dd, month: mm, year: yyyy } = ecuadorDateParts(date);
   const documentCode = RECEIPT_CODES[documentType] || RECEIPT_CODES.factura;
   const base = [
     `${dd}${mm}${yyyy}`,
@@ -29,6 +27,17 @@ function createAccessKey(date, issuer, sequence, documentType = "factura") {
   ].join("");
 
   return `${base}${mod11(base)}`;
+}
+
+function ecuadorDateParts(date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Guayaquil",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric"
+  }).formatToParts(date);
+  const value = (type) => parts.find((part) => part.type === type)?.value || "";
+  return { day: value("day"), month: value("month"), year: value("year") };
 }
 
 function mod11(value) {

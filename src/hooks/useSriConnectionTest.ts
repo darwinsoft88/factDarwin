@@ -8,7 +8,7 @@ export function useSriConnectionTest({ backendUrl, issuer }: { backendUrl: strin
   const [checkingConnection, setCheckingConnection] = useState(false);
   const [connectionResult, setConnectionResult] = useState("");
 
-  const testConnection = async () => {
+  const testConnection = async ({ showAlert = true }: { showAlert?: boolean } = {}) => {
     setCheckingConnection(true);
     setConnectionResult("");
 
@@ -20,11 +20,14 @@ export function useSriConnectionTest({ backendUrl, issuer }: { backendUrl: strin
       const lines = formatBackendHealth(health, backendUrl, expectedEnv, envMatches);
 
       setConnectionResult(lines);
-      Alert.alert(envMatches ? "Conexion OK" : "Revise ambiente", lines);
+      if (showAlert) Alert.alert(envMatches ? "Conexion OK" : "Revise ambiente", lines);
+      return { ok: true as const, result: lines };
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo probar la conexion.";
-      setConnectionResult(`ERROR DE CONEXION\n${message}`);
-      Alert.alert("Servidor no disponible", message);
+      const result = `ERROR DE CONEXION\n${message}`;
+      setConnectionResult(result);
+      if (showAlert) Alert.alert("Servidor no disponible", message);
+      return { ok: false as const, result, message };
     } finally {
       setCheckingConnection(false);
     }

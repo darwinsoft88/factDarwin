@@ -1,6 +1,7 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Empty, Input, PrimaryButton, Select } from "./common";
 import { PaginationControls } from "./PaginationControls";
 import { LIST_BATCH_SIZE } from "../constants/app";
@@ -12,7 +13,7 @@ import { AppData, Client, PaymentMethod, Sale } from "../types";
 import { creditBalance, creditSaleScopeText } from "../utils/credit";
 import { documentNumber } from "../utils/documents";
 import { formatShortDate } from "../utils/format";
-import { AppToast } from "./AppToast";
+import { useAppTheme } from "../theme/AppTheme";
 
 type CreditBulkPaymentModalProps = {
   bulkClient?: Client;
@@ -61,21 +62,27 @@ export function CreditBulkPaymentModal({
   visible,
   visibleBulkSales
 }: CreditBulkPaymentModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const keyboardInset = useKeyboardInset();
   const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? MODAL_SAFE_BOTTOM_PADDING : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-        <View style={[styles.modalBackdrop, androidKeyboardInset > 0 && styles.modalBackdropWithKeyboard, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_SAFE_BOTTOM_PADDING }]}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
+        <View style={[styles.modalBackdrop, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, androidKeyboardInset > 0 && styles.modalBackdropWithKeyboard, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }]}>
+          <View style={[styles.modalCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+            <View style={[styles.modalHeader, { borderColor: theme.colors.border }]}>
               <View style={styles.headerText}>
-                <Text style={styles.modalTitle}>Cobro multiple</Text>
-                <Text style={styles.selectedMeta}>{bulkClient?.name || "Cliente"}</Text>
+                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Cobro multiple</Text>
+                <Text style={[styles.selectedMeta, { color: theme.colors.textMuted }]}>{bulkClient?.name || "Cliente"}</Text>
               </View>
-              <Pressable style={styles.closeButton} onPress={onClose}>
-                <Text style={styles.closeText}>Cerrar</Text>
+              <Pressable style={[styles.closeButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+                <Text style={[styles.closeText, { color: theme.colors.primary }]}>Cerrar</Text>
               </Pressable>
             </View>
             <ScrollView
@@ -83,9 +90,9 @@ export function CreditBulkPaymentModal({
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             >
-              <View style={styles.selectedBox}>
-                <Text style={styles.selectedTitle}>{bulkSelectedSaleIds.length} factura(s) seleccionada(s)</Text>
-                <Text style={styles.selectedMeta}>Total a cobrar $${money(bulkSelectedTotal)}</Text>
+              <View style={[styles.selectedBox, { borderColor: theme.colors.success, backgroundColor: theme.colors.successSoft }]}>
+                <Text style={[styles.selectedTitle, { color: theme.colors.text }]}>{bulkSelectedSaleIds.length} factura(s) seleccionada(s)</Text>
+                <Text style={[styles.selectedMeta, { color: theme.colors.textMuted }]}>Total a cobrar $${money(bulkSelectedTotal)}</Text>
               </View>
               <Input
                 label="Valor a abonar"
@@ -95,32 +102,32 @@ export function CreditBulkPaymentModal({
                 keyboardType="decimal-pad"
               />
               <View style={styles.bulkActions}>
-                <Pressable style={styles.secondaryAction} onPress={onSelectAll}>
-                  <MaterialCommunityIcons name="checkbox-multiple-marked-outline" size={16} color="#0f766e" />
-                  <Text style={styles.secondaryActionText}>Todas</Text>
+                <Pressable style={[styles.secondaryAction, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.surface }]} onPress={onSelectAll}>
+                  <MaterialCommunityIcons name="checkbox-multiple-marked-outline" size={16} color={theme.colors.primary} />
+                  <Text style={[styles.secondaryActionText, { color: theme.colors.primary }]}>Todas</Text>
                 </Pressable>
-                <Pressable style={styles.secondaryAction} onPress={onSelectNone}>
-                  <MaterialCommunityIcons name="checkbox-blank-off-outline" size={16} color="#0f766e" />
-                  <Text style={styles.secondaryActionText}>Limpiar</Text>
+                <Pressable style={[styles.secondaryAction, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.surface }]} onPress={onSelectNone}>
+                  <MaterialCommunityIcons name="checkbox-blank-off-outline" size={16} color={theme.colors.primary} />
+                  <Text style={[styles.secondaryActionText, { color: theme.colors.primary }]}>Limpiar</Text>
                 </Pressable>
               </View>
-              <View style={styles.itemsBox}>
-                <Text style={styles.itemsTitle}>Facturas pendientes</Text>
+              <View style={[styles.itemsBox, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+                <Text style={[styles.itemsTitle, { color: theme.colors.text }]}>Facturas pendientes</Text>
                 {bulkSales.length === 0 ? <Empty text="Este cliente no tiene facturas pendientes." /> : null}
                 {visibleBulkSales.map((sale) => {
                   const checked = bulkSelectedSaleIds.includes(sale.id);
                   return (
-                    <Pressable key={sale.id} style={[styles.bulkSaleRow, checked && styles.bulkSaleRowActive]} onPress={() => onToggleSale(sale.id)}>
-                      <View style={[styles.checkBox, checked && styles.checkBoxActive]}>
-                        <MaterialCommunityIcons name={checked ? "check" : "plus"} size={15} color={checked ? "#ffffff" : "#0f766e"} />
+                    <Pressable key={sale.id} style={[styles.bulkSaleRow, { borderColor: checked ? theme.colors.success : theme.colors.border, backgroundColor: checked ? theme.colors.successSoft : theme.colors.surfaceMuted }]} onPress={() => onToggleSale(sale.id)}>
+                      <View style={[styles.checkBox, { borderColor: theme.colors.primary, backgroundColor: checked ? theme.colors.primary : theme.colors.primarySoft }]}>
+                        <MaterialCommunityIcons name={checked ? "check" : "plus"} size={15} color={checked ? theme.colors.onPrimary : theme.colors.primary} />
                       </View>
                       <View style={styles.itemTextBox}>
-                        <Text style={styles.itemName}>{documentNumber(sale, data.issuer)}</Text>
-                        <Text style={styles.itemMeta} numberOfLines={2}>
+                        <Text style={[styles.itemName, { color: theme.colors.text }]}>{documentNumber(sale, data.issuer)}</Text>
+                        <Text style={[styles.itemMeta, { color: theme.colors.textMuted }]} numberOfLines={2}>
                           {(sale.creditDueDate ? `Vence ${formatShortDate(sale.creditDueDate)}` : `Emitida ${formatShortDate(sale.createdAt)}`)} | {creditSaleScopeText(sale, data)}
                         </Text>
                       </View>
-                      <Text style={styles.itemTotal}>${money(creditBalance(sale))}</Text>
+                      <Text style={[styles.itemTotal, { color: theme.colors.primary }]}>${money(creditBalance(sale))}</Text>
                     </Pressable>
                   );
                 })}
@@ -143,7 +150,6 @@ export function CreditBulkPaymentModal({
           </View>
         </View>
       </KeyboardAvoidingView>
-      <AppToast />
     </Modal>
   );
 }

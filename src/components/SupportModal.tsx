@@ -1,7 +1,9 @@
 import React from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useAppTheme } from "../theme/AppTheme";
 import { AppLegalFooter } from "./AppLegalFooter";
-import { AppToast } from "./AppToast";
 
 type SupportModalProps = {
   visible: boolean;
@@ -14,42 +16,48 @@ type SupportModalProps = {
 };
 
 export function SupportModal({ visible, loading, diagnosticText, showTechnicalDetails = false, onClose, onRefresh, onShare }: SupportModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 12 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 12 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.creditModalBackdrop}>
-        <View style={styles.diagnosticModal}>
-          <View style={styles.creditModalHeader}>
+      <View style={[styles.creditModalBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
+        <View style={[styles.diagnosticModal, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <View style={[styles.creditModalHeader, { borderBottomColor: theme.colors.border }]}>
             <View style={styles.flex}>
-              <Text style={styles.creditModalTitle}>Soporte</Text>
-              <Text style={styles.creditModalMeta}>Diagnostico para revisar conexion, licencia y sincronizacion.</Text>
+              <Text style={[styles.creditModalTitle, { color: theme.colors.text }]}>Soporte</Text>
+              <Text style={[styles.creditModalMeta, { color: theme.colors.textMuted }]}>Diagnostico para revisar conexion, licencia y sincronizacion.</Text>
             </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
+            <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+              <Text style={[styles.smallButtonText, { color: theme.colors.primaryStrong }]}>Cerrar</Text>
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.creditModalContent}>
             <View style={styles.buttonRow}>
-              <Pressable style={[styles.primaryButton, loading && styles.disabledButton]} onPress={onRefresh} disabled={loading}>
-                <Text style={styles.primaryButtonText}>{loading ? "Revisando..." : "Actualizar diagnostico"}</Text>
+              <Pressable style={[styles.primaryButton, { backgroundColor: loading ? theme.colors.textSubtle : theme.colors.primary }]} onPress={onRefresh} disabled={loading}>
+                <Text style={[styles.primaryButtonText, { color: theme.colors.onPrimary }]}>{loading ? "Revisando..." : "Actualizar diagnostico"}</Text>
               </Pressable>
-              <Pressable style={styles.secondaryActionButton} onPress={onShare}>
-                <Text style={styles.secondaryActionText}>Compartir</Text>
+              <Pressable style={[styles.secondaryActionButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onShare}>
+                <Text style={[styles.secondaryActionText, { color: theme.colors.primaryStrong }]}>Compartir</Text>
               </Pressable>
             </View>
-            {loading ? <Text style={styles.inlineInfo}>Revisando conexion y sincronizacion...</Text> : null}
+            {loading ? <Text style={[styles.inlineInfo, { color: theme.colors.textMuted }]}>Revisando conexion y sincronizacion...</Text> : null}
             {showTechnicalDetails ? (
-              <Text selectable style={styles.diagnosticText}>{diagnosticText}</Text>
+              <Text selectable style={[styles.diagnosticText, { color: theme.colors.text, backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border }]}>{diagnosticText}</Text>
             ) : (
-              <View style={styles.customerSupportCard}>
-                <Text style={styles.customerSupportTitle}>Diagnostico listo para soporte</Text>
-                <Text style={styles.customerSupportText}>Use Compartir para enviar la informacion tecnica a DarwinSoft. En esta pantalla no se muestran datos internos para evitar cambios accidentales.</Text>
+              <View style={[styles.customerSupportCard, { borderColor: theme.colors.success, backgroundColor: theme.colors.successSoft }]}>
+                <Text style={[styles.customerSupportTitle, { color: theme.colors.success }]}>Diagnostico listo para soporte</Text>
+                <Text style={[styles.customerSupportText, { color: theme.colors.textMuted }]}>Use Compartir para enviar la informacion tecnica a DarwinSoft. En esta pantalla no se muestran datos internos para evitar cambios accidentales.</Text>
               </View>
             )}
             <AppLegalFooter compact />
           </ScrollView>
         </View>
       </View>
-      <AppToast />
     </Modal>
   );
 }

@@ -1,8 +1,10 @@
 import React from "react";
+import { StyleSheet, Text } from "react-native";
 import { Issuer } from "../types";
 import { Input, Select } from "./common";
 import { sanitizeIntegerInput } from "../utils/numbers";
 import { normalizeTaxRegime } from "../utils/taxRegime";
+import { useAppTheme } from "../theme/AppTheme";
 
 type IssuerTaxSettingsProps = {
   issuer: Issuer;
@@ -14,9 +16,10 @@ function normalizeResolutionInput(value: string): string {
 }
 
 export function IssuerTaxSettings({ issuer, onChange }: IssuerTaxSettingsProps) {
+  const { theme } = useAppTheme();
   return (
     <>
-      <Select label="Ambiente" value={issuer.environment} onChange={(environment) => onChange({ ...issuer, environment: environment as "1" | "2" })} options={[{ label: "Pruebas", value: "1" }, { label: "Produccion", value: "2" }]} />
+      <Text style={[styles.groupTitle, { color: theme.colors.primary }]}>Información tributaria</Text>
       <Select
         label="Regimen tributario"
         value={normalizeTaxRegime(issuer.taxRegime)}
@@ -82,3 +85,7 @@ export function IssuerTaxSettings({ issuer, onChange }: IssuerTaxSettingsProps) 
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  groupTitle: { fontSize: 14, fontWeight: "900", textTransform: "uppercase" }
+});

@@ -7,6 +7,7 @@ import { IssuerActionButtons } from "./IssuerActionButtons";
 type IssuerServerSettingsProps = {
   backendUrl: string;
   autoBackupEnabled: boolean;
+  savingIssuer: boolean;
   checkingConnection: boolean;
   testingEmail: boolean;
   connectionResult: string;
@@ -21,6 +22,7 @@ type IssuerServerSettingsProps = {
 export function IssuerServerSettings({
   backendUrl,
   autoBackupEnabled,
+  savingIssuer,
   checkingConnection,
   testingEmail,
   connectionResult,
@@ -40,6 +42,7 @@ export function IssuerServerSettings({
         </>
       ) : null}
       <IssuerActionButtons
+        savingIssuer={savingIssuer}
         checkingConnection={checkingConnection}
         testingEmail={testingEmail}
         onSave={onSave}

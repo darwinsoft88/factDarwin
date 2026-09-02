@@ -369,9 +369,10 @@ function applySnapshotPatch(currentData, patch = {}) {
     };
   }
 
-  for (const field of ["users", "sales", "guides", "receivedRetentions", "cashClosings", "creditAdjustments"]) {
+  for (const field of ["users", "guides", "receivedRetentions", "cashClosings", "creditAdjustments"]) {
     data[field] = mergeById(data[field] || [], patch[field] || []);
   }
+  data.sales = mergeSalesPreservingAuthorizedState(data.sales || [], patch.sales || []);
 
   data.creditPayments = mergeCreditPayments(
     data.creditPayments || [],
@@ -442,6 +443,7 @@ function mergeDeletedIds(current = {}, incoming = {}, deletions = {}) {
     products: mergeIdLists(current.products, incoming.products, deletions.products),
     users: mergeIdLists(current.users, incoming.users, deletions.users),
     sales: mergeIdLists(current.sales, incoming.sales, deletions.sales),
+    guides: mergeIdLists(current.guides, incoming.guides, deletions.guides),
     inventoryMovements: mergeIdLists(current.inventoryMovements, incoming.inventoryMovements, deletions.inventoryMovements)
   };
 }
@@ -456,7 +458,7 @@ function mergeIdLists(...lists) {
 
 function applyDeletedIdFilters(data) {
   const deleted = data.deletedIds || {};
-  for (const field of ["clients", "products", "users", "sales", "inventoryMovements"]) {
+  for (const field of ["clients", "products", "users", "sales", "guides", "inventoryMovements"]) {
     if (!Array.isArray(data[field])) continue;
     const ids = new Set(deleted[field] || []);
     data[field] = data[field].filter((item) => !ids.has(item?.id));
@@ -739,6 +741,25 @@ function mergeById(currentItems, incomingItems) {
   });
   incomingItems.forEach((item) => {
     if (item?.id) byId.set(item.id, item);
+  });
+  return Array.from(byId.values());
+}
+
+function mergeSalesPreservingAuthorizedState(currentItems, incomingItems) {
+  const byId = new Map();
+  currentItems.forEach((item) => {
+    if (item?.id) byId.set(item.id, item);
+  });
+  incomingItems.forEach((incoming) => {
+    if (!incoming?.id) return;
+    const current = byId.get(incoming.id);
+    if (incoming.status === "AUTORIZADA") {
+      byId.set(incoming.id, incoming);
+      return;
+    }
+    if (current?.status === "AUTORIZADA" && incoming.status !== "AUTORIZADA") return;
+    if (["ANULADA", "CONVERTIDA"].includes(current?.status) && !["AUTORIZADA", "ANULADA", "CONVERTIDA"].includes(incoming.status)) return;
+    byId.set(incoming.id, incoming);
   });
   return Array.from(byId.values());
 }

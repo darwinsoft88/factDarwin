@@ -9,6 +9,7 @@ const {
   authenticateSupportUser,
   changeCompanyUserPassword,
   createCompanyAccount,
+  createTenantSubscriptionPayment,
   exportTenantSnapshot,
   findDocumentByAccessKey,
   getAudit,
@@ -16,11 +17,17 @@ const {
   getIncrementalPilotBootstrap,
   getSnapshot,
   getSnapshotMetadata,
+  getTenantSubscriptionPayment,
   listGuidesHistory,
   listDocumentHistoryPage,
   listDiagnosticSyncChanges,
   listSalesHistory,
   listTenantAccounts,
+  listTenantAccountsPage,
+  listTenantSubscriptionPayments,
+  markTenantSubscriptionPaymentLicenseApplied,
+  markTenantSubscriptionPaymentLicenseReversed,
+  permanentlyDeleteEmptyTenant,
   isIncrementalPilotDeviceTrusted,
   mergeSnapshotPatch,
   maximumSyncChangeSequence,
@@ -31,26 +38,52 @@ const {
   saveSnapshot,
   searchClients,
   searchProducts,
-  updateCompanySriEnvironment
+  setTenantLifecycleStatus,
+  updateCompanySriEnvironment,
+  updateTenantSubscriptionPaymentStatus
 } = db;
 const { authenticateUser, hashPassword, requireAuth, signToken } = require("./auth");
+const { createDeviceSessionService } = require("./device-session-service");
 const { sendInvoiceEmail, sendPasswordResetEmail, sendTestEmail } = require("./email");
-const { licenseStatus, normalizeLicense, requireActiveLicense } = require("./license");
+const { licenseStatus, normalizeLicense, requireActiveLicense, requireLicenseFeatures } = require("./license");
+const { normalizePaymentRenewal, normalizePaymentRenewalReversal } = require("./saas-payment-policy");
+const { preserveAuthoritativeLicense, removeClientLicensePatch } = require("./license-authority");
 const { renderMasterPanel } = require("./master-panel");
+const { createMasterKeyMiddleware } = require("./master-auth");
+const { registerMasterPaymentRoutes } = require("./master-payment-routes");
+const { createMasterPaymentService } = require("./master-payment-service");
+const { createMasterLicenseService } = require("./master-license-service");
+const { registerMasterLicenseRoutes } = require("./master-license-routes");
+const { createMasterTenantService } = require("./master-tenant-service");
+const { registerMasterTenantRoutes } = require("./master-tenant-routes");
+const { createMasterTenantBackupService } = require("./master-tenant-backup-service");
+const { registerMasterTenantBackupRoutes } = require("./master-tenant-backup-routes");
+const { createMasterTenantLifecycleService } = require("./master-tenant-lifecycle-service");
+const { registerMasterTenantLifecycleRoutes } = require("./master-tenant-lifecycle-routes");
 const { getBackupStatus, runPostgresBackup, startBackupScheduler, stopBackupScheduler } = require("./postgres-backup");
 const { lookupIdentification } = require("./datos-service");
 const { createAccessKey, nextSequence } = require("./sri/access-key");
-const { authorizeInvoice, signInvoice } = require("./sri/invoices");
-const { getTenantAssetStatus, getTenantLogo, saveTenantCertificate, saveTenantLogo } = require("./tenant-assets");
+const { authorizeInvoice, queryInvoiceAuthorization, signInvoice } = require("./sri/invoices");
+const { getTenantAssetStatus, getTenantLogo, getTenantProductImage, removeTenantAssets, removeTenantProductImage, saveTenantCertificate, saveTenantLogo, saveTenantProductImage } = require("./tenant-assets");
+const { tenantDeletionAssessment } = require("./tenant-lifecycle-policy");
 const { cleanupTechnicalLogs, errorLogger, listTechnicalLogs, logTechnical, requestLogger } = require("./technical-logs");
 const { hashSyncPayload, resolveSyncRequestId, stripSyncTransportFields } = require("./db-utils");
 const { createDocumentEmailWorker } = require("./document-email-worker");
 const { createDocumentEmailQueueRepository } = require("./document-email-queue");
+const { buildDocumentEmail, buildDocumentRide } = require("./document-email-builder");
+const { buildManualEmailOperation, buildManualRideOperation } = require("./document-email-operations");
+const { deterministicMessageId, sendDocumentEmail } = require("./document-email-sender");
 const { createCorsOptions } = require("./cors-policy");
 const { diagnosticPull, encodeCursor, initialCursor } = require("./sync-diagnostic-pull");
 const { evaluateIncrementalPilotAccess } = require("./sync-pilot-config");
 const { evaluateDocumentHistoryAccess } = require("./document-history-config");
 const { historicalDocumentsPage } = require("./document-history");
+const {
+  authenticationOptions: createPasskeyAuthenticationOptions,
+  registrationOptions: createPasskeyRegistrationOptions,
+  verifyAuthentication: verifyPasskeyAuthentication,
+  verifyRegistration: verifyPasskeyRegistration
+} = require("./webauthn-service");
 
 const app = express();
 let documentEmailWorker = null;
@@ -61,6 +94,21 @@ const sriAuthorizationCache = new Map();
 const SRI_AUTHORIZATION_CACHE_TTL_MS = 10 * 60 * 1000;
 const diagnosticPullRate = new Map();
 const historicalDocumentsRate = new Map();
+const passkeyRate = new Map();
+const deviceSessionRate = new Map();
+const loginRate = new Map();
+const requireMasterKey = createMasterKeyMiddleware({ getKey: () => config.masterAdminKey });
+const deviceSessionService = db.registerDeviceSession && db.rotateDeviceSession && db.revokeDeviceSession
+  ? createDeviceSessionService({
+    repository: {
+      register: db.registerDeviceSession,
+      rotate: db.rotateDeviceSession,
+      revoke: db.revokeDeviceSession
+    },
+    signToken,
+    pepper: config.deviceSessionTokenPepper
+  })
+  : null;
 
 config.assertProductionConfig();
 
@@ -98,6 +146,10 @@ app.use("/api", (_req, res, next) => {
 
 const requireSalesLicense = requireActiveLicense(getSnapshot, "sales");
 const requireSriLicense = requireActiveLicense(getSnapshot, "sri");
+const requireClientsLicense = requireActiveLicense(getSnapshot, "clients");
+const requireProductsLicense = requireActiveLicense(getSnapshot, "products");
+const requireGuidesLicense = requireActiveLicense(getSnapshot, "guides");
+const requireSyncModuleAccess = requireLicenseFeatures(getSnapshot, (req) => syncPatchFeatures(req.body || {}));
 
 app.get("/health", async (_req, res, next) => {
   try {
@@ -130,137 +182,37 @@ app.get("/health", async (_req, res, next) => {
 });
 
 app.get("/master", (_req, res) => {
+  res.set({
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY"
+  });
   res.type("html").send(renderMasterPanel());
 });
 
-app.get("/api/master/license", requireMasterKey, async (_req, res, next) => {
-  try {
-    const snapshot = await getSnapshot();
-    res.json({
-      ok: true,
-      license: licenseStatus(snapshot?.data || {}),
-      summary: snapshot?.summary || null,
-      updatedAt: snapshot?.updatedAt || ""
-    });
-  } catch (error) {
-    next(error);
-  }
+const masterLicenseService = createMasterLicenseService({ getSnapshot, saveSnapshot, normalizeLicense, licenseStatus, logTechnical });
+registerMasterLicenseRoutes(app, { requireMasterKey, service: masterLicenseService });
+const masterTenantService = createMasterTenantService({ listTenantAccounts, listTenantAccountsPage, licenseStatus });
+registerMasterTenantRoutes(app, { requireMasterKey, service: masterTenantService });
+
+const masterPaymentService = createMasterPaymentService({
+  listPayments: listTenantSubscriptionPayments,
+  createPayment: createTenantSubscriptionPayment,
+  updatePaymentStatus: updateTenantSubscriptionPaymentStatus,
+  getPayment: getTenantSubscriptionPayment,
+  markLicenseApplied: markTenantSubscriptionPaymentLicenseApplied,
+  markLicenseReversed: markTenantSubscriptionPaymentLicenseReversed,
+  licenseService: masterLicenseService,
+  normalizePaymentRenewal,
+  normalizePaymentRenewalReversal,
+  logTechnical
 });
+registerMasterPaymentRoutes(app, { requireMasterKey, service: masterPaymentService });
 
-app.put("/api/master/license", requireMasterKey, async (req, res, next) => {
-  try {
-    const snapshot = await getSnapshot();
-    if (!snapshot?.data) {
-      res.status(409).json({ error: "Primero suba una copia desde la app para crear la base inicial del cliente." });
-      return;
-    }
-
-    const license = normalizeLicense(req.body?.license);
-    const result = await saveSnapshot({ ...snapshot.data, license });
-    logTechnical("info", "master_license_updated", { license: licenseStatus({ license }), summary: result.summary });
-    res.json({ ok: true, license: licenseStatus({ license }), updatedAt: result.updatedAt, summary: result.summary });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/master/tenants", requireMasterKey, async (_req, res, next) => {
-  try {
-    if (!listTenantAccounts) {
-      res.json({ ok: true, tenants: [] });
-      return;
-    }
-    const tenants = await listTenantAccounts();
-    res.json({
-      ok: true,
-      tenants: tenants.map((tenant) => ({
-        ...tenant,
-        license: licenseStatus({ license: tenant.license })
-      }))
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/master/tenants/:companyId", requireMasterKey, async (req, res, next) => {
-  try {
-    const snapshot = await getSnapshot(req.params.companyId);
-    if (!snapshot?.data) {
-      res.status(404).json({ error: "Empresa no encontrada." });
-      return;
-    }
-    res.json({
-      ok: true,
-      companyId: req.params.companyId,
-      license: licenseStatus(snapshot.data),
-      summary: snapshot.summary || null,
-      updatedAt: snapshot.updatedAt || ""
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get("/api/master/tenants/:companyId/export", requireMasterKey, async (req, res, next) => {
-  try {
-    if (!exportTenantSnapshot) {
-      res.status(501).json({ error: "Exportacion por empresa solo disponible en PostgreSQL." });
-      return;
-    }
-    const backup = await exportTenantSnapshot(req.params.companyId);
-    logTechnical("info", "tenant_exported", { companyId: req.params.companyId, summary: backup.snapshot?.summary || null });
-    res.setHeader("Content-Disposition", `attachment; filename="${tenantBackupFilename(backup)}"`);
-    res.json({ ok: true, backup });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/master/tenants/:companyId/restore", requireMasterKey, async (req, res, next) => {
-  try {
-    if (!restoreTenantSnapshot) {
-      res.status(501).json({ error: "Restauracion por empresa solo disponible en PostgreSQL." });
-      return;
-    }
-    const backup = req.body?.backup;
-    const confirmRuc = String(req.body?.confirmRuc || "").trim();
-    if (!backup || typeof backup !== "object") {
-      res.status(400).json({ error: "Debe enviar el backup JSON de la empresa." });
-      return;
-    }
-    if (!confirmRuc) {
-      res.status(400).json({ error: "Debe confirmar el RUC antes de restaurar." });
-      return;
-    }
-    const preBackup = await runPostgresBackup("pre-tenant-restore");
-    const restore = await restoreTenantSnapshot(req.params.companyId, backup, { expectedRuc: confirmRuc, userId: req.user?.sub || req.user?.id || null });
-    logTechnical("warn", "tenant_restored", { companyId: req.params.companyId, summary: restore.summary, preBackup });
-    res.json({ ok: true, restore, preBackup });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.put("/api/master/tenants/:companyId/license", requireMasterKey, async (req, res, next) => {
-  try {
-    const snapshot = await getSnapshot(req.params.companyId);
-    if (!snapshot?.data) {
-      res.status(404).json({ error: "Empresa no encontrada." });
-      return;
-    }
-
-    const license = normalizeLicense(req.body?.license);
-    const result = await saveSnapshot({ ...snapshot.data, license }, req.params.companyId, {
-      origin: "admin_operation",
-      userId: req.user?.sub || req.user?.id || null
-    });
-    logTechnical("info", "tenant_license_updated", { companyId: req.params.companyId, license: licenseStatus({ license }), summary: result.summary });
-    res.json({ ok: true, companyId: req.params.companyId, license: licenseStatus({ license }), updatedAt: result.updatedAt, summary: result.summary });
-  } catch (error) {
-    next(error);
-  }
-});
+const masterTenantBackupService = createMasterTenantBackupService({ exportTenantSnapshot, restoreTenantSnapshot, runPostgresBackup, logTechnical });
+registerMasterTenantBackupRoutes(app, { requireMasterKey, service: masterTenantBackupService });
 
 app.post("/api/auth/register", async (req, res, next) => {
   try {
@@ -304,7 +256,7 @@ app.post("/api/auth/register", async (req, res, next) => {
     next(error);
   }
 });
-app.post("/api/auth/login", async (req, res, next) => {
+app.post("/api/auth/login", requireLoginRateLimit, async (req, res, next) => {
   try {
     const {
       email,
@@ -367,6 +319,176 @@ app.post("/api/auth/login", async (req, res, next) => {
 
     logTechnical("info", "auth_success", { user: { id: user.id, email: user.email, role: user.role } });
     res.json({ ok: true, token: signToken(user), user, license: licenseStatus(snapshot?.data || {}) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/auth/passkeys/capabilities", (req, res) => {
+  const origin = String(req.get("Origin") || "");
+  const originAllowed = !origin || config.passkeys.origins.includes(origin);
+  res.json({
+    ok: true,
+    enabled: Boolean(config.passkeys.enabled && originAllowed && db.createWebauthnChallenge),
+    rpId: config.passkeys.enabled ? config.passkeys.rpId : ""
+  });
+});
+
+const masterTenantLifecycleService = createMasterTenantLifecycleService({
+  listTenantAccounts,
+  setTenantLifecycleStatus,
+  permanentlyDeleteEmptyTenant,
+  getTenantAssetStatus,
+  removeTenantAssets,
+  tenantDeletionAssessment,
+  runPostgresBackup,
+  logTechnical
+});
+registerMasterTenantLifecycleRoutes(app, { requireMasterKey, service: masterTenantLifecycleService });
+
+app.post("/api/auth/device-sessions/register", requireDeviceSessionRateLimit, requireAuth(["admin", "vendedor", "cajero", "contador"]), requireRecentAuthentication, async (req, res, next) => {
+  try {
+    if (!deviceSessionService) throw deviceSessionUnavailable();
+    const user = { ...req.user, id: req.user.sub || req.user.id || "" };
+    const result = await deviceSessionService.register({
+      user,
+      device: {
+        deviceId: String(req.body?.deviceId || "").trim(),
+        deviceLabel: String(req.body?.deviceLabel || "").trim(),
+        platform: String(req.body?.platform || "").trim().toLowerCase(),
+        appVersion: String(req.body?.appVersion || "").trim()
+      }
+    });
+    logTechnical("info", "device_session_registered", {
+      companyId: user.companyId,
+      userId: user.id,
+      sessionId: result.sessionId,
+      platform: String(req.body?.platform || "").trim().toLowerCase()
+    });
+    res.status(201).json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/device-sessions/refresh", requireDeviceSessionRateLimit, async (req, res, next) => {
+  try {
+    if (!deviceSessionService) throw deviceSessionUnavailable();
+    const result = await deviceSessionService.refresh({
+      refreshToken: String(req.body?.refreshToken || ""),
+      requestId: String(req.body?.requestId || ""),
+      deviceId: String(req.body?.deviceId || "").trim()
+    });
+    logTechnical("info", "device_session_refreshed", {
+      companyId: result.user.companyId,
+      userId: result.user.id,
+      sessionId: result.sessionId,
+      idempotentReplay: result.idempotentReplay
+    });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    if (["REFRESH_REPLAY", "DEVICE_SESSION_REVOKED", "ACCOUNT_DISABLED", "TENANT_MISMATCH"].includes(error.code)) {
+      logTechnical("warn", "device_session_rejected", { code: error.code });
+    }
+    next(error);
+  }
+});
+
+app.post("/api/auth/device-sessions/:sessionId/revoke", requireDeviceSessionRateLimit, requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+  try {
+    if (!deviceSessionService) throw deviceSessionUnavailable();
+    const userId = req.user.sub || req.user.id || "";
+    const result = await deviceSessionService.revoke({
+      sessionId: String(req.params.sessionId || ""),
+      companyId: String(req.user.companyId || ""),
+      userId: String(userId),
+      reason: "user_revoked"
+    });
+    logTechnical("info", "device_session_revoked", {
+      companyId: req.user.companyId,
+      userId,
+      sessionId: String(req.params.sessionId || "")
+    });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/passkeys/authentication/options", requirePasskeyRateLimit, async (_req, res, next) => {
+  try {
+    const result = await createPasskeyAuthenticationOptions({ config: config.passkeys, db });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/passkeys/authentication/verify", requirePasskeyRateLimit, async (req, res, next) => {
+  try {
+    const user = await verifyPasskeyAuthentication({
+      config: config.passkeys,
+      db,
+      challengeId: String(req.body?.challengeId || ""),
+      response: req.body?.response
+    });
+    const snapshot = await getSnapshot(user.companyId);
+    logTechnical("info", "passkey_auth_success", { companyId: user.companyId, user: { id: user.id, email: user.email } });
+    res.json({ ok: true, token: signToken(user), user, license: licenseStatus(snapshot?.data || {}) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/auth/passkeys/status", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+  try {
+    if (!config.passkeys.enabled || !db.listUserPasskeys) {
+      res.json({ ok: true, enabled: false, count: 0 });
+      return;
+    }
+    const passkeys = await db.listUserPasskeys(req.user.companyId || "", req.user.sub || req.user.id || "");
+    res.json({ ok: true, enabled: passkeys.length > 0, count: passkeys.length });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/passkeys/registration/options", requirePasskeyRateLimit, requireAuth(["admin", "vendedor", "cajero", "contador"]), requireRecentAuthentication, async (req, res, next) => {
+  try {
+    const user = { ...req.user, id: req.user.sub || req.user.id || "" };
+    const result = await createPasskeyRegistrationOptions({ config: config.passkeys, db, user });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/passkeys/registration/verify", requirePasskeyRateLimit, requireAuth(["admin", "vendedor", "cajero", "contador"]), requireRecentAuthentication, async (req, res, next) => {
+  try {
+    const user = { ...req.user, id: req.user.sub || req.user.id || "" };
+    await verifyPasskeyRegistration({
+      config: config.passkeys,
+      db,
+      user,
+      challengeId: String(req.body?.challengeId || ""),
+      response: req.body?.response
+    });
+    logTechnical("info", "passkey_registered", { companyId: user.companyId, user: { id: user.id, email: user.email } });
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/auth/passkeys", requireAuth(["admin", "vendedor", "cajero", "contador"]), requireRecentAuthentication, async (req, res, next) => {
+  try {
+    if (!db.deleteUserPasskeys) {
+      res.status(503).json({ error: "Passkeys no estan disponibles en este backend." });
+      return;
+    }
+    const removed = await db.deleteUserPasskeys(req.user.companyId || "", req.user.sub || req.user.id || "");
+    logTechnical("info", "passkeys_revoked", { companyId: req.user.companyId || "", user: { id: req.user.sub || req.user.id || "" }, removed });
+    res.json({ ok: true, removed });
   } catch (error) {
     next(error);
   }
@@ -564,7 +686,38 @@ app.post("/api/guias/autorizar", requireAuth(["admin", "vendedor"]), requireSriL
 
 app.post("/api/email/invoice", requireAuth(["admin", "vendedor", "cajero"]), requireSalesLicense, async (req, res, next) => {
   try {
-    const { to, subject, html, xml, pdfBase64, documentType, documentNumber } = req.body || {};
+    const { to, subject, html, xml, pdfBase64, documentType, documentNumber, documentId, requestId } = req.body || {};
+    if (documentId) {
+      const companyId = req.user?.companyId || "";
+      const snapshot = await getSnapshot(companyId);
+      if (!snapshot?.data) {
+        res.status(404).json({ error: "No se encontro la informacion de la empresa." });
+        return;
+      }
+      const operation = buildManualEmailOperation(companyId, snapshot.data, {
+        documentId,
+        documentType,
+        recipientEmail: to,
+        requestId
+      });
+      const built = await buildDocumentEmail(operation);
+      const result = await sendDocumentEmail({
+        operation,
+        built,
+        messageId: deterministicMessageId(operation)
+      });
+      logTechnical("info", "email_invoice_sent", {
+        companyId,
+        documentType: operation.documentType,
+        documentId: operation.documentId,
+        origin: operation.origin,
+        messageId: result.messageId,
+        accepted: result.accepted,
+        rejected: result.rejected
+      });
+      res.json({ ok: true, ...result });
+      return;
+    }
     if (!to || !subject || !html) {
       res.status(400).json({ error: "Debe enviar to, subject y html." });
       return;
@@ -711,7 +864,7 @@ app.get("/api/history/sales", requireAuth(["admin", "vendedor", "cajero", "conta
   }
 });
 
-app.get("/api/history/guides", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+app.get("/api/history/guides", requireAuth(["admin", "vendedor", "cajero", "contador"]), requireGuidesLicense, async (req, res, next) => {
   try {
     if (!listGuidesHistory) {
       res.status(501).json({ error: "El motor de base de datos no soporta historial paginado." });
@@ -724,7 +877,7 @@ app.get("/api/history/guides", requireAuth(["admin", "vendedor", "cajero", "cont
   }
 });
 
-app.get("/api/catalog/clients", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+app.get("/api/catalog/clients", requireAuth(["admin", "vendedor", "cajero", "contador"]), requireClientsLicense, async (req, res, next) => {
   try {
     if (!searchClients) {
       res.status(501).json({ error: "El motor de base de datos no soporta busqueda paginada de clientes." });
@@ -737,7 +890,7 @@ app.get("/api/catalog/clients", requireAuth(["admin", "vendedor", "cajero", "con
   }
 });
 
-app.get("/api/catalog/products", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
+app.get("/api/catalog/products", requireAuth(["admin", "vendedor", "cajero", "contador"]), requireProductsLicense, async (req, res, next) => {
   try {
     if (!searchProducts) {
       res.status(501).json({ error: "El motor de base de datos no soporta busqueda paginada de productos." });
@@ -758,7 +911,9 @@ app.post("/api/data", requireAuth(["admin", "vendedor", "cajero", "contador"]), 
       return;
     }
 
-    res.json(await saveSnapshot(data, req.user?.companyId, {
+    const currentSnapshot = await getSnapshot(req.user?.companyId);
+    const authoritativeData = preserveAuthoritativeLicense(data, currentSnapshot?.data);
+    res.json(await saveSnapshot(authoritativeData, req.user?.companyId, {
       origin: "legacy_snapshot",
       userId: req.user?.sub || req.user?.id || null
     }));
@@ -767,7 +922,7 @@ app.post("/api/data", requireAuth(["admin", "vendedor", "cajero", "contador"]), 
   }
 });
 
-app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async (req, res, next) => {
+app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), requireSyncModuleAccess, async (req, res, next) => {
   try {
     if (!mergeSnapshotPatch) {
       res.status(500).json({ error: "El motor de base de datos no soporta sincronizacion incremental." });
@@ -777,7 +932,14 @@ app.post("/api/sync/merge", requireAuth(["admin", "vendedor", "cajero"]), async 
     const rawPatch = req.body || {};
     const bodyPresent = Object.prototype.hasOwnProperty.call(rawPatch, "requestId");
     const requestId = resolveSyncRequestId(req.get("Idempotency-Key"), rawPatch.requestId, bodyPresent);
-    const patch = stripSyncTransportFields(rawPatch);
+    const clientPatch = removeClientLicensePatch(stripSyncTransportFields(rawPatch));
+    const patch = clientPatch.patch;
+    if (clientPatch.attempted) {
+      logTechnical("warn", "client_license_update_ignored", {
+        companyId: req.user?.companyId || "",
+        userId: req.user?.id || ""
+      });
+    }
     const hasChanges = ["sales", "products", "inventoryMovements", "auditLogs", "guides", "cashClosings", "creditPayments", "creditAdjustments", "clients", "users", "receivedRetentions"].some((field) => Array.isArray(patch[field]) && patch[field].length > 0);
     const hasDeletions = Object.values(patch.deletions || {}).some((ids) => Array.isArray(ids) && ids.length > 0);
     if (!hasChanges && !hasDeletions && !patch.issuer && !patch.license) {
@@ -874,6 +1036,127 @@ app.get("/api/support/logs", requireAuth(["admin"]), async (req, res, next) => {
   }
 });
 
+app.post("/api/products/:productId/image", requireAuth(["admin", "vendedor"]), requireProductsLicense, async (req, res, next) => {
+  try {
+    const companyId = req.user?.companyId || "";
+    if (!companyId) return res.status(400).json({ error: "Esta funcion requiere una empresa SaaS." });
+    const snapshot = await getSnapshot(companyId);
+    const productId = String(req.params.productId || "");
+    if (!snapshot?.data?.products?.some((product) => product.id === productId)) return res.status(404).json({ error: "Producto no encontrado en esta empresa." });
+    const result = await saveTenantProductImage(companyId, productId, req.body || {});
+    logTechnical("info", "tenant_product_image_uploaded", { companyId, productId, size: result.size, thumbnailSize: result.thumbnailSize });
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/products/:productId/image", requireAuth(["admin", "vendedor", "cajero", "contador"]), requireProductsLicense, async (req, res, next) => {
+  try {
+    const companyId = req.user?.companyId || "";
+    if (!companyId) return res.status(400).json({ error: "Esta funcion requiere una empresa SaaS." });
+    const productId = String(req.params.productId || "");
+    const image = getTenantProductImage(companyId, productId, String(req.query.variant || "image"), String(req.query.v || ""));
+    if (!image) return res.status(404).send("Imagen no configurada.");
+    res.set("Cache-Control", "private, max-age=31536000, immutable");
+    if (String(req.query.encoding || "") === "base64") {
+      return res.json({ ok: true, mimeType: image.mimeType, base64: image.buffer().toString("base64") });
+    }
+    res.type(image.mimeType).sendFile(image.filePath);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/products/:productId/image", requireAuth(["admin", "vendedor"]), requireProductsLicense, async (req, res, next) => {
+  try {
+    const companyId = req.user?.companyId || "";
+    if (!companyId) return res.status(400).json({ error: "Esta funcion requiere una empresa SaaS." });
+    const snapshot = await getSnapshot(companyId);
+    const productId = String(req.params.productId || "");
+    if (!snapshot?.data?.products?.some((product) => product.id === productId)) return res.status(404).json({ error: "Producto no encontrado en esta empresa." });
+    res.json(removeTenantProductImage(companyId, productId));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/facturas/consultar-autorizacion", requireAuth(["admin", "vendedor", "cajero", "contador"]), requireSriLicense, async (req, res, next) => {
+  try {
+    const accessKey = String(req.body?.accessKey || "").trim();
+    if (!/^\d{49}$/.test(accessKey)) {
+      res.status(400).json({ error: "La clave de acceso debe contener exactamente 49 digitos." });
+      return;
+    }
+
+    const companyId = req.user?.companyId || "";
+    const storedDocument = await findDocumentByAccessKey(companyId, accessKey);
+    if (!storedDocument || storedDocument.type !== "sale" || !storedDocument.payload) {
+      res.status(404).json({ error: "No existe un comprobante de esta empresa con la clave indicada." });
+      return;
+    }
+    const document = storedDocument.payload;
+    if (document.status === "AUTORIZADA") {
+      res.json({
+        ok: true,
+        sent: true,
+        status: "AUTORIZADO",
+        accessKey,
+        authorizationStatus: "AUTORIZADO",
+        authorizationNumber: document.authorizationNumber || accessKey,
+        authorizationDate: document.authorizationDate,
+        sriEnvironment: document.sriEnvironment,
+        sriMessage: document.sriMessage,
+        authorizedXml: document.authorizedXml
+      });
+      return;
+    }
+    if (!["ENVIADA", "ENVIADA_SRI"].includes(document.status)) {
+      res.status(409).json({ error: "El comprobante aun no consta como enviado a recepcion SRI." });
+      return;
+    }
+
+    const canonical = await getCompanySriEnvironment?.(companyId);
+    const keyEnvironment = accessKey[23];
+    if (!canonical || canonical.environment !== keyEnvironment) {
+      res.status(409).json({ error: "El ambiente de la clave no coincide con el ambiente SRI vigente de la empresa." });
+      return;
+    }
+    const sriEnv = keyEnvironment === "2" ? "production" : "test";
+    const result = await queryInvoiceAuthorization(accessKey, sriEnv);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/documents/ride", requireAuth(["admin", "vendedor", "cajero"]), requireSalesLicense, async (req, res, next) => {
+  try {
+    const companyId = req.user?.companyId || "";
+    const snapshot = await getSnapshot(companyId);
+    if (!snapshot?.data) {
+      res.status(404).json({ error: "No se encontro la informacion de la empresa." });
+      return;
+    }
+    const operation = buildManualRideOperation(companyId, snapshot.data, req.body || {});
+    const ride = await buildDocumentRide(operation);
+    logTechnical("info", "document_ride_generated", {
+      companyId,
+      documentType: operation.documentType,
+      documentId: operation.documentId,
+      size: ride.size
+    });
+    res.json({
+      ok: true,
+      filename: ride.filename,
+      mimeType: ride.contentType,
+      pdfBase64: ride.content.toString("base64")
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/documents/history", requireAuth(["admin", "vendedor", "cajero", "contador"]), async (req, res, next) => {
   const companyId = String(req.user?.companyId || "");
   try {
@@ -896,11 +1179,13 @@ app.get("/api/documents/history", requireAuth(["admin", "vendedor", "cajero", "c
       "HISTORICAL_DOCUMENTS_RATE_LIMITED"
     );
     logTechnical("info", "historical_documents_page_requested", { companyId, result: "started" });
+    const snapshot = await getSnapshot(companyId);
     const result = await historicalDocumentsPage({
       maximumSequence: maximumDocumentHistorySequence,
       listPage: listDocumentHistoryPage
     }, {
       companyId,
+      defaultEnvironment: String(snapshot?.data?.issuer?.environment || "1"),
       config: config.historicalDocumentPagination,
       query: req.query || {}
     });
@@ -959,7 +1244,7 @@ app.get("/api/sync/capabilities", requireAuth(["admin", "vendedor", "cajero", "c
   try {
     const access = await incrementalPilotAccessForRequest(req);
     logTechnical("info", "sync_incremental_pilot_capability", { companyId: req.user?.companyId || "", result: access.reason, platform: access.platform });
-    res.json({ ok: true, syncProtocolVersion: 1, incrementalSyncEnabled: access.enabled, modules: access.modules, snapshotFallbackAvailable: true, configVersion: config.incrementalSyncPilot.configVersion || null, reason: access.reason });
+    res.json({ ok: true, syncProtocolVersion: access.protocolVersion, incrementalSyncEnabled: access.enabled, modules: access.modules, snapshotFallbackAvailable: true, configVersion: config.incrementalSyncPilot.configVersion || null, reason: access.reason });
   } catch (error) { next(error); }
 });
 
@@ -970,10 +1255,11 @@ app.get("/api/sync/bootstrap", requireAuth(["admin", "vendedor", "cajero", "cont
     if (!access.enabled || !getIncrementalPilotBootstrap) {
       res.status(404).json({ ok: false, error: { code: "SYNC_PULL_DISABLED", reason: access.reason } }); return;
     }
-    const bootstrap = await getIncrementalPilotBootstrap(req.user.companyId);
+    const entityTypes = [access.modules.clients ? "client" : null, access.modules.products ? "product" : null, access.modules.guides ? "remission_guide" : null].filter(Boolean);
+    const bootstrap = await getIncrementalPilotBootstrap(req.user.companyId, entityTypes);
     if (!bootstrap) { res.status(404).json({ ok: false, error: { code: "SYNC_SNAPSHOT_NOT_FOUND" } }); return; }
-    const cursorData = { ...initialCursor(req.user.companyId, bootstrap.watermark, config.incrementalSyncPilot), lastChangeSeq: bootstrap.watermark };
-    res.json({ ok: true, protocolVersion: 1, mode: "pilot", snapshot: { data: bootstrap.data, updatedAt: bootstrap.updatedAt }, snapshotRevision: bootstrap.watermark, cursor: encodeCursor(cursorData, config.incrementalSyncPilot.cursorSecret), versions: bootstrap.versions, modules: access.modules });
+    const cursorData = { ...initialCursor(req.user.companyId, bootstrap.watermark, config.incrementalSyncPilot, access.protocolVersion), lastChangeSeq: bootstrap.watermark };
+    res.json({ ok: true, protocolVersion: access.protocolVersion, mode: "pilot", snapshot: { data: bootstrap.data, updatedAt: bootstrap.updatedAt }, snapshotRevision: bootstrap.watermark, cursor: encodeCursor(cursorData, config.incrementalSyncPilot.cursorSecret), versions: bootstrap.versions, modules: access.modules });
   } catch (error) { next(error); }
 });
 
@@ -983,11 +1269,11 @@ app.get("/api/sync/pull", requireAuth(["admin", "vendedor", "cajero", "contador"
     const access = await incrementalPilotAccessForRequest(req);
     if (!access.enabled) { res.status(404).json({ ok: false, error: { code: "SYNC_PULL_DISABLED", reason: access.reason } }); return; }
     if (!req.query.cursor) { res.status(409).json({ ok: false, error: { code: "SYNC_BOOTSTRAP_REQUIRED" }, requiresFullSnapshot: true }); return; }
-    const entityTypes = [access.modules.clients ? "client" : null, access.modules.products ? "product" : null].filter(Boolean);
+    const entityTypes = [access.modules.clients ? "client" : null, access.modules.products ? "product" : null, access.modules.guides ? "remission_guide" : null].filter(Boolean);
     const result = await diagnosticPull({ maximumSequence: maximumSyncChangeSequence, listChanges: listDiagnosticSyncChanges }, {
       config: config.incrementalSyncPilot, companyId: req.user.companyId, cursor: req.query.cursor,
       limit: req.query.limit, accessGranted: true, mode: "pilot", entityTypes,
-      rollingWatermark: true, advanceToWatermarkWhenExhausted: true
+      rollingWatermark: true, advanceToWatermarkWhenExhausted: true, protocolVersion: access.protocolVersion
     });
     res.json({ ...result, modules: access.modules });
   } catch (error) {
@@ -1051,10 +1337,14 @@ app.use((error, req, res, _next) => {
   console.error(error);
   const statusCode = error.statusCode || 500;
   const payload = {
-    error: publicErrorMessage(error, statusCode)
+    error: publicErrorMessage(error, statusCode),
+    ...(error.code ? { code: error.code } : {})
   };
   if (Array.isArray(error.companyOptions)) {
     payload.companyOptions = error.companyOptions;
+  }
+  if (error.assessment && typeof error.assessment === "object") {
+    payload.assessment = error.assessment;
   }
   res.status(statusCode).json(payload);
 });
@@ -1075,12 +1365,6 @@ function publicErrorMessage(error, statusCode) {
   }
 
   return "Error interno del backend. Revise los logs tecnicos para soporte.";
-}
-
-function tenantBackupFilename(backup = {}) {
-  const ruc = String(backup.company?.ruc || backup.company?.id || "empresa").replace(/[^a-zA-Z0-9_-]/g, "");
-  const date = new Date().toISOString().slice(0, 10);
-  return `factudarwin-${ruc || "empresa"}-${date}.json`;
 }
 
 async function authorizeSriDocumentOnce(companyId = "", xml = "", runAuthorization) {
@@ -1206,7 +1490,7 @@ function validateRegistration(company, admin) {
   const email = String(admin?.email || "").trim().toLowerCase();
   const password = String(admin?.password || "");
   const name = String(admin?.name || "").trim();
-  if (!isValidEcuadorRuc(ruc)) errors.push("Ingrese un RUC ecuatoriano valido de 13 digitos para la empresa.");
+  if (!/^\d{13}$/.test(ruc) || !ruc.endsWith("001")) errors.push("Ingrese un RUC de 13 digitos terminado en 001 para la empresa.");
   if (businessName.length < 3) errors.push("Ingrese el nombre de la empresa.");
   if (name.length < 2) errors.push("Ingrese el nombre del administrador.");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push("Ingrese un correo valido.");
@@ -1249,19 +1533,6 @@ function validateMod11(value, coefficients, verifierIndex) {
   const remainder = total % 11;
   const verifier = remainder === 0 ? 0 : 11 - remainder;
   return verifier === Number(value[verifierIndex]);
-}
-
-function requireMasterKey(req, res, next) {
-  const key = config.masterAdminKey;
-  if (!key) {
-    res.status(503).json({ error: "Panel maestro inactivo. Configure MASTER_ADMIN_KEY en backend/.env." });
-    return;
-  }
-  if (req.headers["x-master-key"] !== key) {
-    res.status(401).json({ error: "Clave maestra invalida." });
-    return;
-  }
-  next();
 }
 
 function generateTemporaryPassword() {
@@ -1320,6 +1591,28 @@ function shutdown(signal) {
     process.exitCode = 1;
   });
   return shutdownPromise;
+}
+
+function syncPatchFeatures(patch = {}) {
+  const featureByCollection = {
+    sales: "sales",
+    products: "products",
+    inventoryMovements: "inventory",
+    guides: "guides",
+    cashClosings: "cash",
+    creditPayments: "credits",
+    creditAdjustments: "credits",
+    clients: "clients",
+    users: "users",
+    receivedRetentions: "documents"
+  };
+  const features = [];
+  for (const [collection, feature] of Object.entries(featureByCollection)) {
+    if (Array.isArray(patch[collection]) && patch[collection].length > 0) features.push(feature);
+    if (Array.isArray(patch.deletions?.[collection]) && patch.deletions[collection].length > 0) features.push(feature);
+  }
+  if (patch.issuer) features.push("sri");
+  return features;
 }
 
 function enforceDiagnosticPullRateLimit(key, limit) {
@@ -1390,6 +1683,59 @@ function enforceRateLimit(store, key, limit, code) {
     throw error;
   }
   current.count += 1;
+}
+
+function requirePasskeyRateLimit(req, _res, next) {
+  try {
+    const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+    const key = forwarded || req.socket?.remoteAddress || "unknown";
+    enforceRateLimit(passkeyRate, key, 20, "PASSKEY_RATE_LIMITED");
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+function requireDeviceSessionRateLimit(req, _res, next) {
+  try {
+    const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+    const key = forwarded || req.socket?.remoteAddress || "unknown";
+    enforceRateLimit(deviceSessionRate, key, 30, "DEVICE_SESSION_RATE_LIMITED");
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+function requireLoginRateLimit(req, _res, next) {
+  try {
+    const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+    const ip = forwarded || req.socket?.remoteAddress || "unknown";
+    const identifier = String(req.body?.identifier || req.body?.email || "").trim().toLowerCase();
+    enforceRateLimit(loginRate, `${ip}:${identifier}`, 15, "LOGIN_RATE_LIMITED");
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
+function deviceSessionUnavailable() {
+  const error = new Error("DEVICE_SESSIONS_UNAVAILABLE");
+  error.code = "DEVICE_SESSIONS_UNAVAILABLE";
+  error.statusCode = 503;
+  return error;
+}
+
+function requireRecentAuthentication(req, _res, next) {
+  const issuedAt = Number(req.user?.iat || 0);
+  const ageSeconds = Math.floor(Date.now() / 1000) - issuedAt;
+  if (!issuedAt || ageSeconds < 0 || ageSeconds > 15 * 60) {
+    const error = new Error("Por seguridad, cierre sesion e ingrese nuevamente antes de cambiar Face ID.");
+    error.statusCode = 401;
+    next(error);
+    return;
+  }
+  next();
 }
 
 function historyMetricForError(code) {

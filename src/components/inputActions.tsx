@@ -1,16 +1,19 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
 
 export function InlineInputButton({ label, onPress }: { label: string; onPress: () => void }) {
+  const { theme } = useAppTheme();
   return (
-    <Pressable style={styles.inlineInputButton} onPress={onPress}>
-      <Text style={styles.inlineInputButtonText}>{label}</Text>
+    <Pressable style={[styles.inlineInputButton, { backgroundColor: theme.colors.primary }]} onPress={onPress}>
+      <Text style={[styles.inlineInputButtonText, { color: theme.colors.onPrimary }]}>{label}</Text>
     </Pressable>
   );
 }
 
 export function PasswordVisibilityButton({ visible, onPress }: { visible: boolean; onPress: () => void }) {
+  const { theme } = useAppTheme();
   return (
     <Pressable
       accessibilityRole="button"
@@ -18,12 +21,13 @@ export function PasswordVisibilityButton({ visible, onPress }: { visible: boolea
       accessibilityState={{ selected: visible }}
       style={({ pressed }) => [
         styles.passwordVisibilityButton,
-        visible && styles.passwordVisibilityButtonActive,
+        { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border },
+        visible && { backgroundColor: theme.colors.primarySoft, borderColor: theme.colors.primary },
         pressed && styles.passwordVisibilityButtonPressed
       ]}
       onPress={onPress}
     >
-      <MaterialCommunityIcons name={visible ? "eye-off-outline" : "eye-outline"} size={19} color={visible ? "#0b5f19" : "#475569"} />
+      <MaterialCommunityIcons name={visible ? "eye-off-outline" : "eye-outline"} size={19} color={visible ? theme.colors.primary : theme.colors.textMuted} />
     </Pressable>
   );
 }

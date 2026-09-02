@@ -40,6 +40,26 @@ describe("sriRetryPolicy", () => {
     expect(shouldAutoRetrySriDocument(stale, nextDay)).toBe(false);
   });
 
+  it("una factura ENVIADA de un dia anterior sigue consultable y no se anula por antiguedad", () => {
+    const nextDay = new Date("2026-06-02T10:00:00.000Z");
+    const sent = sale({ status: "ENVIADA" });
+    expect(isStaleSriPendingDocument(sent, nextDay)).toBe(false);
+    expect(shouldAutoRetrySriDocument(sent, nextDay)).toBe(true);
+  });
+
+  it("no vuelve a habilitar un documento que ya agoto los tres intentos diarios", () => {
+    const exhausted = sale({
+      status: "PENDIENTE_SRI",
+      retryHistory: [
+        "2026-06-01T08:00:00.000Z",
+        "2026-06-01T08:05:00.000Z",
+        "2026-06-01T08:10:00.000Z"
+      ]
+    });
+
+    expect(shouldAutoRetrySriDocument(exhausted, sameDay)).toBe(false);
+  });
+
   it("clasifica fallas de conexion SRI como pendiente, no como error de documento", () => {
     expect(statusForAuthorizationFailure("No se pudo conectar con el servicio del SRI. Detalle: fetch failed. Codigo: ECONNRESET.")).toBe("PENDIENTE_SRI");
     expect(statusForAuthorizationFailure("Cedula invalida en comprador")).toBe("ERROR_SRI");

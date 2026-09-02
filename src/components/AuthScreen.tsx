@@ -13,6 +13,9 @@ import { APP_BRAND } from "../constants/app";
 import { AUTH_KEYBOARD_BOTTOM_PADDING, KEYBOARD_AVOIDING_BEHAVIOR } from "../constants/layout";
 import { PRODUCTION_BACKEND_URL } from "../database";
 import { sanitizeIntegerInput } from "../utils/numbers";
+import { useAppTheme } from "../theme/AppTheme";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import type { BiometricAccountHint } from "../services/biometricCredentialStorage";
 
 export type AuthScreenProps = {
   authMode: "login" | "register" | "forgot";
@@ -27,6 +30,10 @@ export type AuthScreenProps = {
   showLoginPassword: boolean;
   setShowLoginPassword: (value: boolean) => void;
   login: (companyId?: string) => Promise<void> | void;
+  biometricAccount: BiometricAccountHint | null;
+  biometricButtonLabel: string;
+  biometricLoading: boolean;
+  loginWithBiometrics: () => Promise<void> | void;
   loggingIn: boolean;
   loginStatus: { tone: "info" | "error" | "success"; message: string } | null;
   loginErrorModalMessage: string;
@@ -81,6 +88,10 @@ export function AuthScreen({
   showLoginPassword,
   setShowLoginPassword,
   login,
+  biometricAccount,
+  biometricButtonLabel,
+  biometricLoading,
+  loginWithBiometrics,
   loggingIn,
   loginStatus,
   loginErrorModalMessage,
@@ -105,20 +116,21 @@ export function AuthScreen({
   chooseLoginEstablishment,
   onCancelEstablishmentSelection
 }: AuthScreenProps) {
+  const { theme } = useAppTheme();
   const [serverSettingsVisible, setServerSettingsVisible] = useState(false);
   const uniqueCompanyOptions = useMemo(() => dedupeCompanyOptions(companyOptions), [companyOptions]);
   const isRucLogin = /^\d{13}$/.test(email.trim());
   const serverUrlInput = __DEV__ ? (
     <View style={styles.serverUrlBlock}>
       <Pressable style={styles.serverUrlToggle} onPress={() => setServerSettingsVisible((visible) => !visible)}>
-        <Text style={styles.serverUrlResetText}>{serverSettingsVisible ? "Ocultar servidor de pruebas" : "Servidor de pruebas"}</Text>
+        <Text style={[styles.serverUrlResetText, { color: theme.colors.primary }]}>{serverSettingsVisible ? "Ocultar servidor de pruebas" : "Servidor de pruebas"}</Text>
       </Pressable>
       {serverSettingsVisible ? (
         <>
           <Input label="URL del servidor" value={authBackendUrl} onChangeText={setAuthBackendUrl} autoCapitalize="none" autoCorrect={false} autoComplete="url" keyboardType="url" textContentType="URL" />
           {authBackendUrl.trim() !== PRODUCTION_BACKEND_URL ? (
             <Pressable style={styles.serverUrlReset} onPress={() => setAuthBackendUrl(PRODUCTION_BACKEND_URL)}>
-              <Text style={styles.serverUrlResetText}>Usar servidor oficial</Text>
+              <Text style={[styles.serverUrlResetText, { color: theme.colors.primary }]}>Usar servidor oficial</Text>
             </Pressable>
           ) : null}
         </>
@@ -128,14 +140,14 @@ export function AuthScreen({
 
   return (
     <LinearGradient
-      colors={["#eef8f7", "#f7f9fc", "#eef4ff"]}
+      colors={[theme.colors.background, theme.colors.surfaceMuted, theme.colors.background]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.screen}
     >
-      <ExpoStatusBar style="dark" />
-      <View style={styles.backgroundCircleTop} />
-      <View style={styles.backgroundCircleBottom} />
+      <ExpoStatusBar style={theme.dark ? "light" : "dark"} />
+      <View style={[styles.backgroundCircleTop, { backgroundColor: theme.colors.primarySoft }]} />
+      <View style={[styles.backgroundCircleBottom, { backgroundColor: theme.colors.infoSoft }]} />
       <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
         <ScrollView
           contentContainerStyle={[
@@ -149,16 +161,16 @@ export function AuthScreen({
           <View style={styles.loginHeader}>
 
             <View style={styles.loginBrandRow}>
-              <View style={styles.loginBrandMark}>
-                <Text style={styles.loginBrandMarkText}>FD</Text>
+              <View style={[styles.loginBrandMark, { backgroundColor: theme.colors.primary }]}>
+                <Text style={[styles.loginBrandMarkText, { color: theme.colors.onPrimary }]}>FD</Text>
               </View>
 
-              <Text style={styles.loginBrand}>
+              <Text style={[styles.loginBrand, { color: theme.colors.text }]}>
                 {APP_BRAND}
               </Text>
             </View>
 
-            <Text style={styles.loginSlogan}>
+            <Text style={[styles.loginSlogan, { color: theme.colors.textMuted }]}>
               Facturación inteligente para tu negocio.
             </Text>
 
@@ -166,8 +178,8 @@ export function AuthScreen({
 
           {authMode === "login" ? (
             <>
-              <View style={styles.authCard}>
-                <Text style={styles.authTitle}>INICIAR SESION</Text>
+              <View style={[styles.authCard, { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border, shadowColor: theme.colors.shadow }]}>
+                <Text style={[styles.authTitle, { color: theme.colors.text }]}>INICIAR SESION</Text>
                 {serverUrlInput}
                 <Input label="Empresa (RUC o correo)" value={email} onChangeText={(value) => {
                   setEmail(value);
@@ -206,66 +218,90 @@ export function AuthScreen({
                   onPress={() => login()}
                   disabled={loggingIn}
                 />
-                {loginStatus ? <Text style={[styles.authFeedback, loginStatus.tone === "error" && styles.authFeedbackError, loginStatus.tone === "success" && styles.authFeedbackSuccess]}>{loginStatus.message}</Text> : null}
+                {biometricAccount ? (
+                  <>
+                    <View style={styles.biometricDividerRow}>
+                      <View style={[styles.biometricDivider, { backgroundColor: theme.colors.border }]} />
+                      <Text style={[styles.biometricDividerText, { color: theme.colors.textMuted }]}>o</Text>
+                      <View style={[styles.biometricDivider, { backgroundColor: theme.colors.border }]} />
+                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={biometricButtonLabel}
+                      style={[styles.biometricButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.surfaceElevated }, biometricLoading && styles.disabledButton]}
+                      disabled={biometricLoading}
+                      onPress={loginWithBiometrics}
+                    >
+                      <MaterialCommunityIcons name="face-recognition" size={22} color={theme.colors.primary} />
+                      <Text style={[styles.biometricButtonText, { color: theme.colors.primary }]}>
+                        {biometricLoading ? "Confirmando..." : biometricButtonLabel}
+                      </Text>
+                    </Pressable>
+                    <Text style={[styles.biometricAccountText, { color: theme.colors.textMuted }]} numberOfLines={1}>
+                      {biometricAccount.email}
+                    </Text>
+                  </>
+                ) : null}
+                {loginStatus ? <Text style={[styles.authFeedback, { color: loginStatus.tone === "error" ? theme.colors.danger : loginStatus.tone === "success" ? theme.colors.success : theme.colors.info }]}>{loginStatus.message}</Text> : null}
                 {uniqueCompanyOptions.length > 0 ? (
                   <View style={styles.companyChoiceList}>
                     {uniqueCompanyOptions.map((company) => (
                       <Pressable
                         key={company.id}
-                        style={[styles.companyChoice, loggingIn && styles.disabledButton]}
+                        style={[styles.companyChoice, { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border }, loggingIn && styles.disabledButton]}
                         onPress={() => login(company.id)}
                         disabled={loggingIn}
                       >
-                        <Text style={styles.companyChoiceTitle}>{company.tradeName || company.businessName || "Empresa"}</Text>
-                        <Text style={styles.companyChoiceMeta}>RUC {company.ruc} | {company.role || "usuario"}</Text>
+                        <Text style={[styles.companyChoiceTitle, { color: theme.colors.text }]}>{company.tradeName || company.businessName || "Empresa"}</Text>
+                        <Text style={[styles.companyChoiceMeta, { color: theme.colors.textMuted }]}>RUC {company.ruc} | {company.role || "usuario"}</Text>
                       </Pressable>
                     ))}
                   </View>
                 ) : null}
               </View>
               <Pressable style={styles.authLinkButton} onPress={onOpenRegister}>
-                <Text style={styles.authLinkText}>No tienes cuenta? Registrate</Text>
+                <Text style={[styles.authLinkText, { color: theme.colors.primary }]}>No tienes cuenta? Registrate</Text>
               </Pressable>
               <Pressable style={styles.authLinkButton} onPress={onOpenForgot}>
-                <Text style={styles.authMutedLink}>Olvide contrasena</Text>
+                <Text style={[styles.authMutedLink, { color: theme.colors.textMuted }]}>Olvide contrasena</Text>
               </Pressable>
             </>
           ) : authMode === "register" ? (
             <>
-              <View style={styles.authCard}>
-                <Text style={styles.authTitle}>CREAR CUENTA</Text>
-                <Text style={styles.authSubtitle}>Registre su propia empresa con RUC activo en el SRI</Text>
+              <View style={[styles.authCard, { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border, shadowColor: theme.colors.shadow }]}>
+                <Text style={[styles.authTitle, { color: theme.colors.text }]}>CREAR CUENTA</Text>
+                <Text style={[styles.authSubtitle, { color: theme.colors.textMuted }]}>Registre su empresa con un RUC de 13 digitos terminado en 001</Text>
                 {serverUrlInput}
-                <Input label="RUC" value={registerForm.ruc} onChangeText={(ruc) => setRegisterForm({ ...registerForm, ruc: sanitizeIntegerInput(ruc).slice(0, 13) })} keyboardType="number-pad" />
-                <Input label="Razon social o nombre del negocio" value={registerForm.businessName} onChangeText={(businessName) => setRegisterForm({ ...registerForm, businessName })} placeholder="Ej. Comercial Andina" />
-                <Input label="Nombre comercial (opcional)" value={registerForm.tradeName} onChangeText={(tradeName) => setRegisterForm({ ...registerForm, tradeName })} placeholder="Ej. Market Andina" />
-                <Input label="Nombre de quien administrara la cuenta" value={registerForm.adminName} onChangeText={(adminName) => setRegisterForm({ ...registerForm, adminName })} placeholder="Ej. Maria Torres" />
-                <Input label="Correo del administrador" value={registerForm.email} onChangeText={(value) => setRegisterForm({ ...registerForm, email: value })} autoCapitalize="none" placeholder="correo@empresa.com" />
-                <Input label="Contrasena" value={registerForm.password} onChangeText={(value) => setRegisterForm({ ...registerForm, password: value })} secureTextEntry />
-                <Input label="Confirmar contrasena" value={registerForm.confirmPassword} onChangeText={(value) => setRegisterForm({ ...registerForm, confirmPassword: value })} secureTextEntry />
+                <Input label="RUC" value={registerForm.ruc} onChangeText={(ruc) => setRegisterForm((current) => ({ ...current, ruc: sanitizeIntegerInput(ruc).slice(0, 13) }))} keyboardType="number-pad" />
+                <Input label="Razon social o nombre del negocio" value={registerForm.businessName} onChangeText={(businessName) => setRegisterForm((current) => ({ ...current, businessName }))} placeholder="Ej. Comercial Andina" />
+                <Input label="Nombre comercial (opcional)" value={registerForm.tradeName} onChangeText={(tradeName) => setRegisterForm((current) => ({ ...current, tradeName }))} placeholder="Ej. Market Andina" />
+                <Input label="Nombre de quien administrara la cuenta" value={registerForm.adminName} onChangeText={(adminName) => setRegisterForm((current) => ({ ...current, adminName }))} placeholder="Ej. Maria Torres" autoComplete="name" textContentType="name" />
+                <Input label="Correo del administrador" value={registerForm.email} onChangeText={(email) => setRegisterForm((current) => ({ ...current, email }))} autoCapitalize="none" autoCorrect={false} autoComplete="email" textContentType="emailAddress" keyboardType="email-address" placeholder="correo@empresa.com" />
+                <Input label="Contrasena" value={registerForm.password} onChangeText={(password) => setRegisterForm((current) => ({ ...current, password }))} autoComplete="new-password" textContentType="newPassword" secureTextEntry />
+                <Input label="Confirmar contrasena" value={registerForm.confirmPassword} onChangeText={(confirmPassword) => setRegisterForm((current) => ({ ...current, confirmPassword }))} autoComplete="new-password" textContentType="newPassword" secureTextEntry />
                 <View style={styles.authActionRow}>
-                  <Pressable style={[styles.authActionPrimary, registering && styles.disabledButton]} onPress={registerTenant} disabled={registering}>
-                    <Text style={styles.primaryButtonText}>{registering ? "Creando..." : "Crear cuenta"}</Text>
+                  <Pressable style={[styles.authActionPrimary, { backgroundColor: theme.colors.primary }, registering && styles.disabledButton]} onPress={registerTenant} disabled={registering}>
+                    <Text style={[styles.primaryButtonText, { color: theme.colors.onPrimary }]}>{registering ? "Creando..." : "Crear cuenta"}</Text>
                   </Pressable>
-                  <Pressable style={styles.authActionSecondary} onPress={onCancelRegister}>
-                    <Text style={styles.authActionSecondaryText}>Regresar</Text>
+                  <Pressable style={[styles.authActionSecondary, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onCancelRegister}>
+                    <Text style={[styles.authActionSecondaryText, { color: theme.colors.primaryStrong }]}>Regresar</Text>
                   </Pressable>
                 </View>
-                {registerStatus ? <Text style={[styles.authFeedback, registerStatus.tone === "error" && styles.authFeedbackError, registerStatus.tone === "success" && styles.authFeedbackSuccess]}>{registerStatus.message}</Text> : null}
+                {registerStatus ? <Text style={[styles.authFeedback, { color: registerStatus.tone === "error" ? theme.colors.danger : registerStatus.tone === "success" ? theme.colors.success : theme.colors.info }]}>{registerStatus.message}</Text> : null}
               </View>
             </>
           ) : (
             <>
-              <View style={styles.authCard}>
-                <Text style={styles.authTitle}>RECUPERAR CONTRASENA</Text>
-                <Text style={styles.authSubtitle}>Recibira una clave temporal en el correo registrado</Text>
+              <View style={[styles.authCard, { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border, shadowColor: theme.colors.shadow }]}>
+                <Text style={[styles.authTitle, { color: theme.colors.text }]}>RECUPERAR CONTRASENA</Text>
+                <Text style={[styles.authSubtitle, { color: theme.colors.textMuted }]}>Recibira una clave temporal en el correo registrado</Text>
                 {serverUrlInput}
                 <Input label="Correo o RUC" value={recoveryIdentifier} onChangeText={setRecoveryIdentifier} autoCapitalize="none" />
                 <PrimaryButton label={recoveringPassword ? "Enviando..." : "Enviar clave temporal"} onPress={recoverPassword} />
-                {recoverStatus ? <Text style={[styles.authFeedback, recoverStatus.tone === "error" && styles.authFeedbackError, recoverStatus.tone === "success" && styles.authFeedbackSuccess]}>{recoverStatus.message}</Text> : null}
+                {recoverStatus ? <Text style={[styles.authFeedback, { color: recoverStatus.tone === "error" ? theme.colors.danger : recoverStatus.tone === "success" ? theme.colors.success : theme.colors.info }]}>{recoverStatus.message}</Text> : null}
               </View>
               <Pressable style={styles.authLinkButton} onPress={onCancelForgot}>
-                <Text style={styles.authLinkText}>Volver a iniciar sesion</Text>
+                <Text style={[styles.authLinkText, { color: theme.colors.primary }]}>Volver a iniciar sesion</Text>
               </Pressable>
             </>
           )}
@@ -493,6 +529,40 @@ const styles = StyleSheet.create({
     color: "#64748b",
     fontSize: 12,
     fontWeight: "700"
+  },
+  biometricDividerRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    marginVertical: 12
+  },
+  biometricDivider: {
+    flex: 1,
+    height: 1
+  },
+  biometricDividerText: {
+    fontSize: 12,
+    fontWeight: "800"
+  },
+  biometricButton: {
+    alignItems: "center",
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    minHeight: 48,
+    paddingHorizontal: 16
+  },
+  biometricButtonText: {
+    fontSize: 14,
+    fontWeight: "900"
+  },
+  biometricAccountText: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 8,
+    textAlign: "center"
   },
   backgroundCircleTop: {
     position: "absolute",

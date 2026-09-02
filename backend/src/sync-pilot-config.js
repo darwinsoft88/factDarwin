@@ -34,17 +34,17 @@ function evaluateIncrementalPilotAccess(config, context) {
   if (!ALLOWED_ENVIRONMENTS.has(config.environment)) return result(false, "ENVIRONMENT_REJECTED", config);
   if (!config.companyIds.has(context.companyId)) return result(false, "COMPANY_REJECTED", config);
   if (!config.platforms.has(context.platform)) return result(false, "PLATFORM_REJECTED", config);
-  if (Number(context.protocolVersion) !== 1) return result(false, "PROTOCOL_REJECTED", config);
+  const protocolVersion = [1, 2].includes(Number(context.protocolVersion)) ? Number(context.protocolVersion) : 1;
   if (compareVersions(context.appVersion, config.minimumAppVersion) < 0) return result(false, "APP_VERSION_REJECTED", config);
   if (!context.deviceTrusted) return result(false, "DEVICE_UNTRUSTED", config);
   if (config.pilotUserIds.size && !config.pilotUserIds.has(context.userId)) return result(false, "USER_REJECTED", config);
   if (config.pilotDeviceIds.size && !config.pilotDeviceIds.has(context.deviceId)) return result(false, "DEVICE_REJECTED", config);
   if (!config.clientsEnabled && !config.productsEnabled) return result(false, "MODULES_DISABLED", config);
-  return result(true, "PILOT_ENABLED", config);
+  return result(true, "PILOT_ENABLED", config, protocolVersion);
 }
 
-function result(enabled, reason, config) {
-  return { enabled, reason, protocolVersion: 1, configVersion: config.configVersion, modules: { clients: enabled && config.clientsEnabled, products: enabled && config.productsEnabled }, snapshotFallbackAvailable: true };
+function result(enabled, reason, config, protocolVersion = 1) {
+  return { enabled, reason, protocolVersion, configVersion: config.configVersion, modules: { clients: enabled && config.clientsEnabled, products: enabled && config.productsEnabled, guides: enabled && protocolVersion === 2 }, snapshotFallbackAvailable: true };
 }
 function values(value) { return new Set(String(value || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean)); }
 function bounded(value, fallback, min, max) { const parsed = Number(value); return Number.isSafeInteger(parsed) ? Math.min(max, Math.max(min, parsed)) : fallback; }

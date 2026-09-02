@@ -1,4 +1,5 @@
 const { Pool } = require("pg");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const config = require("./config");
@@ -28,6 +29,14 @@ const documentEmailSimulationMigrationSql = fs.readFileSync(path.join(__dirname,
 const documentEmailSmtpMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "003-document-email-smtp.sql"), "utf8");
 const syncChangeLogMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "004-sync-change-log.sql"), "utf8");
 const documentHistoryMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "005-document-history-index.sql"), "utf8");
+const webauthnPasskeysMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "006-webauthn-passkeys.sql"), "utf8");
+const authDeviceSessionsMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "007-auth-device-sessions.sql"), "utf8");
+const saasSubscriptionPaymentsMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "008-saas-subscription-payments.sql"), "utf8");
+const saasPaymentLicenseApplicationMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "009-saas-payment-license-application.sql"), "utf8");
+const saasPaymentLicenseReversalMigrationSql = fs.readFileSync(path.join(__dirname, "migrations", "010-saas-payment-license-reversal.sql"), "utf8");
+const { createSubscriptionPaymentsRepository } = require("./subscription-payments-repository");
+const { reconcileTenantDocumentSequences } = require("./tenant-sequence-reconciliation");
+const { reconcileFiscalDocumentsForRestore } = require("./fiscal-restore-policy");
 const { appendSnapshotChanges } = require("./sync-change-log");
 
 const pool = new Pool({
@@ -36,6 +45,11 @@ const pool = new Pool({
 });
 
 let readyPromise;
+const subscriptionPayments = createSubscriptionPaymentsRepository({
+  pool,
+  ensureSchema,
+  insertAudit: insertBackendAudit
+});
 
 async function ensureSchema() {
   if (!readyPromise) {
@@ -103,6 +117,10 @@ async function ensureSchema() {
       ALTER TABLE products DROP CONSTRAINT IF EXISTS products_code_key;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS cost NUMERIC(14, 6) NOT NULL DEFAULT 0;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS min_stock NUMERIC(14, 6) NOT NULL DEFAULT 5;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS image_key TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS image_version TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS image_updated_at TIMESTAMPTZ;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS image_mime_type TEXT;
 
       CREATE TABLE IF NOT EXISTS sales (
         id TEXT PRIMARY KEY,
@@ -394,6 +412,11 @@ async function ensureSchema() {
       ${documentEmailSmtpMigrationSql}
       ${syncChangeLogMigrationSql}
       ${documentHistoryMigrationSql}
+      ${webauthnPasskeysMigrationSql}
+      ${authDeviceSessionsMigrationSql}
+      ${saasSubscriptionPaymentsMigrationSql}
+      ${saasPaymentLicenseApplicationMigrationSql}
+      ${saasPaymentLicenseReversalMigrationSql}
     `).then(() => {
       reconcileSaasUsersFromSnapshots().catch((error) => {
         console.error("No se pudo reconciliar usuarios SaaS al iniciar:", error.message);
@@ -595,6 +618,8 @@ async function restoreTenantSnapshot(companyId = "", backup = {}, options = {}) 
       ? typeof current.rows[0].data === "string" ? JSON.parse(current.rows[0].data) : current.rows[0].data
       : null;
     restoredData = applyCanonicalIssuerEnvironment(currentData, restoredData);
+    restoredData = reconcileFiscalDocumentsForRestore(currentData || {}, restoredData);
+    validateSnapshot(restoredData);
     const storedData = compactSnapshotForStorage(restoredData);
     const summary = summarizeSnapshot(restoredData);
     if (current.rows[0]?.data) {
@@ -608,6 +633,15 @@ async function restoreTenantSnapshot(companyId = "", backup = {}, options = {}) 
     );
     await clearTenantNormalizedTables(client, normalizedCompanyId);
     await syncNormalizedTables(client, restoredData, updatedAt, normalizedCompanyId);
+    const backupSequences = backup?.version === 2 && Array.isArray(backup?.operational?.documentSequences)
+      ? backup.operational.documentSequences
+      : [];
+    await reconcileTenantDocumentSequences(client, {
+      companyId: normalizedCompanyId,
+      snapshotData: restoredData,
+      backupSequences,
+      updatedAt
+    });
     await appendSnapshotChanges(client, {
       shadowConfig: config.incrementalSyncShadow,
       companyId: normalizedCompanyId,
@@ -980,14 +1014,14 @@ async function listDiagnosticSyncChanges({ companyId, after, watermark, limit, t
   return result.rows;
 }
 
-async function getIncrementalPilotBootstrap(companyId) {
+async function getIncrementalPilotBootstrap(companyId, entityTypes = ["client", "product"]) {
   await ensureSchema();
   const client = await pool.connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
     const snapshot = await client.query("SELECT data, updated_at AS \"updatedAt\" FROM saas_snapshots WHERE company_id=$1", [companyId]);
     const watermark = await client.query("SELECT COALESCE(MAX(change_seq),0)::bigint AS sequence FROM sync_change_log WHERE company_id=$1", [companyId]);
-    const versions = await client.query(`SELECT DISTINCT ON (entity_type,entity_id) entity_type AS "entityType",entity_id AS "entityId",record_version AS "recordVersion",payload_hash AS "payloadHash",action FROM sync_change_log WHERE company_id=$1 AND entity_type IN ('client','product') ORDER BY entity_type,entity_id,change_seq DESC`, [companyId]);
+    const versions = await client.query(`SELECT DISTINCT ON (entity_type,entity_id) entity_type AS "entityType",entity_id AS "entityId",record_version AS "recordVersion",payload_hash AS "payloadHash",action FROM sync_change_log WHERE company_id=$1 AND entity_type = ANY($2::text[]) ORDER BY entity_type,entity_id,change_seq DESC`, [companyId, entityTypes]);
     await client.query("COMMIT");
     return snapshot.rows[0] ? { data: snapshot.rows[0].data, updatedAt: snapshot.rows[0].updatedAt, watermark: Number(watermark.rows[0].sequence || 0), versions: versions.rows } : null;
   } catch (error) {
@@ -998,7 +1032,7 @@ async function getIncrementalPilotBootstrap(companyId) {
 async function isIncrementalPilotDeviceTrusted({ companyId, userId, deviceId }) {
   await ensureSchema();
   if (!companyId || !userId || !deviceId) return false;
-  const result = await pool.query("SELECT 1 FROM saas_devices WHERE company_id=$1 AND user_id=$2 AND id=$3 LIMIT 1", [companyId, userId, deviceId]);
+  const result = await pool.query("SELECT 1 FROM saas_devices WHERE company_id=$1 AND user_id=$2 AND id IN ($3, $4) LIMIT 1", [companyId, userId, tenantDeviceId(companyId, deviceId), deviceId]);
   return result.rowCount === 1;
 }
 
@@ -1262,6 +1296,10 @@ async function syncNormalizedTables(client, data, updatedAt, companyId = "") {
     iva_rate: Number(item.ivaRate || 0),
     stock: Number(item.stock || 0),
     min_stock: Number(item.minStock || 5),
+    image_key: item.imageKey || null,
+    image_version: item.imageVersion || null,
+    image_updated_at: item.imageUpdatedAt || null,
+    image_mime_type: item.imageMimeType || null,
     payload: item,
     updated_at: updatedAt
   }), companyId);
@@ -1384,7 +1422,6 @@ async function clearTenantNormalizedTables(client, companyId = "") {
     throw error;
   }
   await client.query("DELETE FROM sale_items WHERE company_id = $1", [companyId]);
-  await client.query("DELETE FROM document_sequences WHERE company_id = $1", [companyId]);
   for (const table of ["cash_closings", "inventory_movements", "app_audit_logs", "remission_guides", "sales", "products", "clients", "users"]) {
     await client.query(`DELETE FROM ${table} WHERE company_id = $1`, [companyId]);
   }
@@ -1558,6 +1595,10 @@ async function applyNormalizedDeletions(client, deletedIds, companyId = "") {
     await client.query("DELETE FROM sale_items WHERE company_id = $1 AND sale_id = ANY($2)", [companyId, saleIds]);
     await client.query("DELETE FROM sales WHERE company_id = $1 AND id = ANY($2)", [companyId, saleIds]);
   }
+  const guideIds = (Array.isArray(deletedIds.guides) ? deletedIds.guides : [])
+    .flatMap((id) => [scopedRowId(companyId, id), String(id || "")])
+    .filter(Boolean);
+  if (guideIds.length) await client.query("DELETE FROM remission_guides WHERE company_id = $1 AND id = ANY($2)", [companyId, guideIds]);
   for (const [table, ids] of [["clients", deletedIds.clients], ["products", deletedIds.products], ["users", deletedIds.users]]) {
     const scopedIds = (Array.isArray(ids) ? ids : []).flatMap((id) => [scopedRowId(companyId, id), String(id || "")]).filter(Boolean);
     if (scopedIds.length) {
@@ -1726,14 +1767,15 @@ async function maximumDocumentHistorySequence(companyId = "", timeoutMs = 10_000
 async function listDocumentHistoryPage({ companyId = "", filters, watermark, after = null, limit = 51, timeoutMs = 10_000 }) {
   await ensureSchema();
   const client = await pool.connect();
-  const values = [companyId, filters.documentType, filters.status, filters.documentScope, String(watermark)];
+  const values = [companyId, filters.documentType, filters.status, filters.documentScope, String(watermark), filters.environment];
   const where = [
     "company_id = $1",
     "document_type = $2",
     "status = $3",
     "document_scope = $4",
     "history_seq <= $5::bigint",
-    "is_visible = TRUE"
+    "is_visible = TRUE",
+    "environment = $6"
   ];
   if (filters.dateFrom) {
     values.push(`${filters.dateFrom}T00:00:00.000Z`);
@@ -1762,7 +1804,7 @@ async function listDocumentHistoryPage({ companyId = "", filters, watermark, aft
     await client.query("BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
     await client.query(`SET LOCAL statement_timeout = '${Math.max(1, Math.trunc(timeoutMs))}ms'`);
     const result = await client.query(
-      `SELECT document_id AS "documentId", establishment, emission_point AS "emissionPoint",
+      `SELECT document_id AS "documentId", environment, establishment, emission_point AS "emissionPoint",
               sequence, sequence_number AS "sequenceNumber", created_at AS "createdAt",
               created_at::date::text AS "issueDate", client_id AS "clientId",
               client_name AS "clientName", client_identification AS "clientIdentification",
@@ -1862,6 +1904,10 @@ function normalizeThreeDigits(value) {
   return (digits || "1").padStart(3, "0").slice(-3);
 }
 
+function tenantDeviceId(companyId, deviceId) {
+  return `${String(companyId || "").trim()}:${String(deviceId || "").trim()}`;
+}
+
 function documentScopeFromDocument(document, issuer = {}) {
   const scope = scopeFromDocument(document, issuer);
   return {
@@ -1926,7 +1972,7 @@ async function createCompanyAccount({ company, admin, passwordHash, device }) {
       await client.query(
         `INSERT INTO saas_devices (id, company_id, user_id, device_label, platform, first_seen_at, last_seen_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [String(device.deviceId), companyId, userId, String(device.deviceLabel || ""), String(device.platform || ""), now, now]
+        [tenantDeviceId(companyId, device.deviceId), companyId, userId, String(device.deviceLabel || ""), String(device.platform || ""), now, now]
       );
     }
     await client.query("INSERT INTO saas_snapshots (company_id, data, updated_at) VALUES ($1, $2::jsonb, $3)", [companyId, JSON.stringify(data), now]);
@@ -1954,7 +2000,9 @@ async function createCompanyAccount({ company, admin, passwordHash, device }) {
     if (error?.code === "23505") {
       const duplicate = new Error(error.constraint === "saas_companies_ruc_key"
         ? "El RUC ingresado ya tiene una cuenta registrada. Inicie sesion o contacte soporte para recuperar el acceso."
-        : "Ya existe un usuario con ese correo dentro de la misma empresa.");
+        : error.constraint === "idx_saas_users_company_email_unique"
+          ? "Ya existe un usuario con ese correo dentro de la misma empresa."
+          : "No se pudo crear la cuenta porque uno de sus identificadores ya existe.");
       duplicate.statusCode = 409;
       throw duplicate;
     }
@@ -1981,9 +2029,10 @@ async function authenticateCompanyUser(
     `SELECT u.id, u.company_id AS "companyId", u.name, u.email, u.role, u.password_hash AS "passwordHash",
             u.password_must_change AS "mustChangePassword",
             c.ruc, c.business_name AS "businessName", c.trade_name AS "tradeName", c.status AS "companyStatus"
-     FROM saas_users u
-     JOIN saas_companies c ON c.id = u.company_id
-     WHERE u.status = 'active'
+    FROM saas_users u
+    JOIN saas_companies c ON c.id = u.company_id
+    WHERE u.status = 'active'
+      AND c.status NOT IN ('inactive', 'archived', 'deleted')
       AND (
       u.email = $1
       OR (
@@ -2025,7 +2074,7 @@ async function authenticateCompanyUser(
       `INSERT INTO saas_devices (id, company_id, user_id, device_label, platform, first_seen_at, last_seen_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT(id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at, user_id = EXCLUDED.user_id`,
-      [String(device.deviceId), row.companyId, row.id, String(device.deviceLabel || ""), String(device.platform || ""), now, now]
+      [tenantDeviceId(row.companyId, device.deviceId), row.companyId, row.id, String(device.deviceLabel || ""), String(device.platform || ""), now, now]
     );
   }
   return {
@@ -2078,7 +2127,7 @@ async function authenticateSupportUser(identifier, password, device = {}, compan
       `INSERT INTO saas_devices (id, company_id, user_id, device_label, platform, first_seen_at, last_seen_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT(id) DO UPDATE SET last_seen_at = EXCLUDED.last_seen_at, user_id = EXCLUDED.user_id`,
-      [String(device.deviceId), row.id, supportUser.id, String(device.deviceLabel || ""), String(device.platform || ""), now, now]
+      [tenantDeviceId(row.id, device.deviceId), row.id, supportUser.id, String(device.deviceLabel || ""), String(device.platform || ""), now, now]
     );
   }
   await insertBackendAudit(pool, "SUPPORT_TENANT_LOGIN", { companyId: row.id, ruc: row.ruc, email: config.supportAdmin.email });
@@ -2301,6 +2350,67 @@ async function listTenantAccounts() {
   });
 }
 
+async function listTenantAccountsPage(options = {}) {
+  await ensureSchema();
+  const query = String(options.query || "").trim().slice(0, 120);
+  const status = ["trial", "active", "inactive", "archived", "expired", "suspended"].includes(String(options.status || ""))
+    ? String(options.status) : "";
+  const pageSize = Math.min(50, Math.max(10, Number(options.pageSize || 20)));
+  const requestedPage = Math.max(1, Number(options.page || 1));
+  const searchPattern = `%${query}%`;
+  const where = `WHERE ($1 = '' OR c.ruc ILIKE $2 OR c.business_name ILIKE $2 OR c.trade_name ILIKE $2 OR c.email ILIKE $2
+      OR EXISTS (SELECT 1 FROM saas_users su WHERE su.company_id = c.id AND (su.name ILIKE $2 OR su.email ILIKE $2)))
+    AND ($3 = '' OR c.status = $3)`;
+  const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM saas_companies c ${where}`, [query, searchPattern, status]);
+  const total = Number(countResult.rows[0]?.total || 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+  const offset = (page - 1) * pageSize;
+  const statsResult = await pool.query(`
+    SELECT COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE c.status = 'trial'
+        AND COALESCE(s.data->'license'->>'status', 'trial') = 'trial'
+        AND COALESCE(NULLIF(s.data->'license'->>'expiresAt', '')::date, CURRENT_DATE) >= CURRENT_DATE)::int AS trial,
+      COUNT(*) FILTER (WHERE c.status IN ('trial', 'active')
+        AND COALESCE(s.data->'license'->>'status', 'trial') IN ('trial', 'active')
+        AND COALESCE(NULLIF(s.data->'license'->>'expiresAt', '')::date, CURRENT_DATE) >= CURRENT_DATE)::int AS active,
+      COUNT(*) FILTER (WHERE c.status IN ('inactive', 'archived', 'expired', 'suspended')
+        OR COALESCE(s.data->'license'->>'status', '') IN ('expired', 'suspended')
+        OR NULLIF(s.data->'license'->>'expiresAt', '')::date < CURRENT_DATE)::int AS "withoutAccess"
+    FROM saas_companies c LEFT JOIN saas_snapshots s ON s.company_id = c.id
+  `);
+  const result = await pool.query(`
+    SELECT
+      c.id, c.ruc, c.business_name AS "businessName", c.trade_name AS "tradeName", c.email, c.phone, c.status,
+      c.created_at AS "createdAt", c.updated_at AS "updatedAt", s.updated_at AS "snapshotUpdatedAt", s.data AS "snapshotData",
+      (SELECT COUNT(*)::int FROM saas_users u WHERE u.company_id = c.id) AS "userCount",
+      (SELECT COUNT(*)::int FROM saas_devices d WHERE d.company_id = c.id) AS "deviceCount",
+      (SELECT u.name FROM saas_users u WHERE u.company_id = c.id AND u.role = 'admin' ORDER BY u.created_at ASC LIMIT 1) AS "administratorName",
+      (SELECT d.platform FROM saas_devices d WHERE d.company_id = c.id ORDER BY d.last_seen_at DESC LIMIT 1) AS "lastDevicePlatform",
+      (SELECT d.device_label FROM saas_devices d WHERE d.company_id = c.id ORDER BY d.last_seen_at DESC LIMIT 1) AS "lastDeviceLabel",
+      (SELECT d.last_seen_at FROM saas_devices d WHERE d.company_id = c.id ORDER BY d.last_seen_at DESC LIMIT 1) AS "lastDeviceAt"
+    FROM saas_companies c LEFT JOIN saas_snapshots s ON s.company_id = c.id
+    ${where}
+    ORDER BY c.created_at DESC
+    LIMIT $4 OFFSET $5
+  `, [query, searchPattern, status, pageSize, offset]);
+  const items = result.rows.map((row) => {
+    const data = typeof row.snapshotData === "string" ? JSON.parse(row.snapshotData) : row.snapshotData;
+    return {
+      id: String(row.id), ruc: String(row.ruc || ""), businessName: String(row.businessName || ""),
+      tradeName: String(row.tradeName || ""), email: String(row.email || ""), phone: String(row.phone || ""),
+      administratorName: String(row.administratorName || ""), status: String(row.status || ""),
+      createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : "",
+      updatedAt: row.updatedAt ? new Date(row.updatedAt).toISOString() : "",
+      snapshotUpdatedAt: row.snapshotUpdatedAt ? new Date(row.snapshotUpdatedAt).toISOString() : "",
+      userCount: Number(row.userCount || 0), deviceCount: Number(row.deviceCount || 0),
+      lastDevice: row.lastDeviceAt ? { platform: String(row.lastDevicePlatform || ""), label: String(row.lastDeviceLabel || ""), lastSeenAt: new Date(row.lastDeviceAt).toISOString() } : null,
+      summary: data ? summarizeSnapshot(data) : null, license: data?.license || null
+    };
+  });
+  return { items, page, pageSize, total, totalPages, stats: statsResult.rows[0] || {} };
+}
+
 async function getSnapshotMetadata(companyId = "") {
   await ensureSchema();
 
@@ -2332,6 +2442,344 @@ async function getSnapshotMetadata(companyId = "") {
   };
 }
 
+async function setTenantLifecycleStatus(companyId, status) {
+  await ensureSchema();
+  const allowed = new Set(["trial", "active", "inactive", "archived", "expired", "suspended"]);
+  if (!allowed.has(status)) {
+    const error = new Error("Estado de empresa invalido.");
+    error.statusCode = 400;
+    throw error;
+  }
+  const result = await pool.query(
+    `UPDATE saas_companies SET status = $2, updated_at = NOW() WHERE id = $1 AND status <> 'deleted'
+     RETURNING id, ruc, status`,
+    [companyId, status]
+  );
+  if (!result.rows.length) {
+    const error = new Error("Empresa no encontrada.");
+    error.statusCode = 404;
+    throw error;
+  }
+  await insertBackendAudit(pool, "TENANT_LIFECYCLE_CHANGED", { companyId, status });
+  return result.rows[0];
+}
+
+async function permanentlyDeleteEmptyTenant(companyId) {
+  await ensureSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const company = await client.query("SELECT id, ruc, status FROM saas_companies WHERE id = $1 FOR UPDATE", [companyId]);
+    if (!company.rows.length) {
+      const error = new Error("Empresa no encontrada.");
+      error.statusCode = 404;
+      throw error;
+    }
+    const snapshot = await client.query("SELECT data FROM saas_snapshots WHERE company_id = $1", [companyId]);
+    const data = snapshot.rows[0]?.data || {};
+    const summary = summarizeSnapshot(typeof data === "string" ? JSON.parse(data) : data);
+    const blockingCount = ["sales", "guides", "creditPayments", "creditAdjustments", "receivedRetentions", "cashClosings", "products", "inventoryMovements", "pendingSync"]
+      .reduce((total, key) => total + Math.max(0, Number(summary[key] || 0)), 0) + Math.max(0, Number(summary.clients || 0) - 1);
+    if (blockingCount > 0) {
+      const error = new Error("La empresa contiene informacion y no puede eliminarse definitivamente. Archivela para conservar sus registros.");
+      error.statusCode = 409;
+      throw error;
+    }
+    const tables = [
+      "document_email_operations", "company_feature_flags", "sync_change_log", "document_history_index",
+      "webauthn_passkeys", "webauthn_challenges", "sync_operations", "sync_domain_operations",
+      "sale_items", "sales", "remission_guides", "inventory_movements", "app_audit_logs",
+      "cash_closings", "document_sequences", "users", "clients", "products", "saas_snapshot_history"
+    ];
+    for (const table of tables) await client.query(`DELETE FROM ${table} WHERE company_id = $1`, [companyId]);
+    await client.query("DELETE FROM saas_companies WHERE id = $1", [companyId]);
+    await insertBackendAudit(client, "TENANT_PERMANENTLY_DELETED", { companyId, ruc: company.rows[0].ruc });
+    await client.query("COMMIT");
+    return { companyId, ruc: company.rows[0].ruc, deleted: true };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function listUserPasskeys(companyId, userId) {
+  await ensureSchema();
+  const result = await pool.query(
+    `SELECT credential_id AS id, public_key AS "publicKey", counter, transports,
+            device_type AS "deviceType", backed_up AS "backedUp"
+       FROM webauthn_passkeys
+      WHERE company_id = $1 AND user_id = $2
+      ORDER BY created_at`,
+    [companyId, userId]
+  );
+  return result.rows.map((row) => ({ ...row, counter: Number(row.counter || 0), transports: row.transports || [] }));
+}
+
+async function saveUserPasskey(passkey) {
+  await ensureSchema();
+  await pool.query(
+    `INSERT INTO webauthn_passkeys
+       (credential_id, company_id, user_id, public_key, counter, transports, device_type, backed_up)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)
+     ON CONFLICT (credential_id) DO UPDATE SET
+       public_key = EXCLUDED.public_key,
+       counter = EXCLUDED.counter,
+       transports = EXCLUDED.transports,
+       device_type = EXCLUDED.device_type,
+       backed_up = EXCLUDED.backed_up`,
+    [passkey.id, passkey.companyId, passkey.userId, Buffer.from(passkey.publicKey), passkey.counter,
+      JSON.stringify(passkey.transports || []), passkey.deviceType || null, Boolean(passkey.backedUp)]
+  );
+}
+
+async function findUserPasskey(credentialId) {
+  await ensureSchema();
+  const result = await pool.query(
+    `SELECT p.credential_id AS id, p.company_id AS "companyId", p.user_id AS "userId",
+            p.public_key AS "publicKey", p.counter, p.transports,
+            u.name, u.email, u.role, u.status, u.password_must_change AS "mustChangePassword"
+       FROM webauthn_passkeys p
+       JOIN saas_users u ON u.company_id = p.company_id AND u.id = p.user_id
+      WHERE p.credential_id = $1`,
+    [credentialId]
+  );
+  const row = result.rows[0];
+  if (!row || row.status !== "active") return null;
+  return { ...row, counter: Number(row.counter || 0), transports: row.transports || [] };
+}
+
+async function updateUserPasskeyCounter(credentialId, counter) {
+  await ensureSchema();
+  await pool.query(
+    `UPDATE webauthn_passkeys SET counter = $2, last_used_at = NOW() WHERE credential_id = $1`,
+    [credentialId, counter]
+  );
+}
+
+async function deleteUserPasskeys(companyId, userId) {
+  await ensureSchema();
+  const result = await pool.query(
+    `DELETE FROM webauthn_passkeys WHERE company_id = $1 AND user_id = $2`,
+    [companyId, userId]
+  );
+  return result.rowCount;
+}
+
+async function createWebauthnChallenge(challenge) {
+  await ensureSchema();
+  await pool.query(
+    `INSERT INTO webauthn_challenges (id, purpose, company_id, user_id, challenge, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [challenge.id, challenge.purpose, challenge.companyId || null, challenge.userId || null,
+      challenge.challenge, challenge.expiresAt]
+  );
+}
+
+async function consumeWebauthnChallenge(id, purpose) {
+  await ensureSchema();
+  const result = await pool.query(
+    `UPDATE webauthn_challenges
+        SET consumed_at = NOW()
+      WHERE id = $1 AND purpose = $2 AND consumed_at IS NULL AND expires_at > NOW()
+      RETURNING challenge, company_id AS "companyId", user_id AS "userId"`,
+    [id, purpose]
+  );
+  return result.rows[0] || null;
+}
+
+async function registerDeviceSession(input) {
+  await ensureSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const identity = await client.query(
+      `SELECT u.id, u.company_id AS "companyId", u.status, c.status AS "companyStatus"
+         FROM saas_users u
+         JOIN saas_companies c ON c.id = u.company_id
+        WHERE u.id = $1 AND u.company_id = $2
+        FOR UPDATE OF u`,
+      [input.userId, input.companyId]
+    );
+    const user = identity.rows[0];
+    if (!user || user.status !== "active" || ["inactive", "archived", "deleted"].includes(user.companyStatus)) {
+      throw deviceSessionError("ACCOUNT_DISABLED", 401);
+    }
+    await client.query(
+      `UPDATE auth_device_sessions
+          SET status = 'revoked', revoked_at = NOW(), revoked_reason = 're_registered'
+        WHERE company_id = $1 AND user_id = $2 AND device_id = $3 AND status = 'active'`,
+      [input.companyId, input.userId, input.deviceId]
+    );
+    await client.query(
+      `INSERT INTO auth_device_sessions
+         (id, company_id, user_id, device_id, token_family_id, credential_version,
+          device_label, platform, app_version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [input.sessionId, input.companyId, input.userId, input.deviceId, input.tokenFamilyId,
+        input.credentialVersion, input.deviceLabel, input.platform, input.appVersion]
+    );
+    await client.query(
+      `INSERT INTO auth_device_refresh_tokens (id, session_id, generation, token_hash)
+       VALUES ($1, $2, 1, $3)`,
+      [input.tokenId, input.sessionId, input.tokenHash]
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function rotateDeviceSession(input) {
+  await ensureSchema();
+  const client = await pool.connect();
+  let committedError = null;
+  try {
+    await client.query("BEGIN");
+    const result = await client.query(
+      `SELECT t.id AS "tokenId", t.token_hash AS "tokenHash", t.generation,
+              t.consumed_at AS "consumedAt", t.request_id AS "requestId",
+              t.replaced_by AS "replacedBy", s.id AS "sessionId", s.device_id AS "deviceId",
+              s.status AS "sessionStatus", s.company_id AS "companyId", s.user_id AS "userId",
+              u.name, u.email, u.role, u.status AS "userStatus",
+              u.password_must_change AS "mustChangePassword", c.status AS "companyStatus",
+              c.ruc, c.business_name AS "businessName", c.trade_name AS "tradeName"
+         FROM auth_device_refresh_tokens t
+         JOIN auth_device_sessions s ON s.id = t.session_id
+         JOIN saas_users u ON u.id = s.user_id AND u.company_id = s.company_id
+         JOIN saas_companies c ON c.id = s.company_id
+        WHERE t.id = $1 AND t.session_id = $2
+        FOR UPDATE OF t, s`,
+      [input.tokenId, input.sessionId]
+    );
+    const row = result.rows[0];
+    if (!row || !safeHashEqual(row.tokenHash, input.presentedTokenHash)) {
+      throw deviceSessionError("DEVICE_SESSION_CREDENTIAL_INVALID", 401);
+    }
+    if (row.sessionStatus !== "active") throw deviceSessionError("DEVICE_SESSION_REVOKED", 401);
+    if (row.userStatus !== "active" || ["inactive", "archived", "deleted"].includes(row.companyStatus)) {
+      await revokeDeviceSessionInTransaction(client, row.sessionId, "account_disabled");
+      committedError = deviceSessionError("ACCOUNT_DISABLED", 401);
+      await client.query("COMMIT");
+      throw committedError;
+    }
+    if (row.deviceId !== input.deviceId) throw deviceSessionError("TENANT_MISMATCH", 401);
+
+    const nextGeneration = Number(row.generation) + 1;
+    if (row.consumedAt) {
+      if (String(row.requestId || "") === input.requestId && row.replacedBy) {
+        const replacement = input.deriveReplacement({ tokenId: row.replacedBy, generation: nextGeneration });
+        const stored = await client.query(
+          `SELECT token_hash AS "tokenHash" FROM auth_device_refresh_tokens
+            WHERE id = $1 AND session_id = $2 AND generation = $3`,
+          [row.replacedBy, row.sessionId, nextGeneration]
+        );
+        if (!stored.rows[0] || !safeHashEqual(stored.rows[0].tokenHash, replacement.tokenHash)) {
+          throw deviceSessionError("DEVICE_SESSION_REFRESH_FAILED", 401);
+        }
+        await client.query("COMMIT");
+        return deviceRefreshResult(row, row.replacedBy, replacement.secret, true);
+      }
+      await client.query(
+        `UPDATE auth_device_refresh_tokens SET replay_detected_at = NOW() WHERE id = $1`,
+        [row.tokenId]
+      );
+      await revokeDeviceSessionInTransaction(client, row.sessionId, "refresh_replay_detected");
+      committedError = deviceSessionError("REFRESH_REPLAY", 401);
+      await client.query("COMMIT");
+      throw committedError;
+    }
+
+    const replacementTokenId = crypto.randomUUID();
+    const replacement = input.deriveReplacement({ tokenId: replacementTokenId, generation: nextGeneration });
+    await client.query(
+      `INSERT INTO auth_device_refresh_tokens (id, session_id, generation, token_hash)
+       VALUES ($1, $2, $3, $4)`,
+      [replacementTokenId, row.sessionId, nextGeneration, replacement.tokenHash]
+    );
+    await client.query(
+      `UPDATE auth_device_refresh_tokens
+          SET consumed_at = NOW(), request_id = $2, replaced_by = $3
+        WHERE id = $1 AND consumed_at IS NULL`,
+      [row.tokenId, input.requestId, replacementTokenId]
+    );
+    await client.query(
+      `UPDATE auth_device_sessions SET last_used_at = NOW() WHERE id = $1`,
+      [row.sessionId]
+    );
+    await client.query("COMMIT");
+    return deviceRefreshResult(row, replacementTokenId, replacement.secret, false);
+  } catch (error) {
+    if (!committedError) await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function revokeDeviceSession({ sessionId, companyId, userId, reason }) {
+  await ensureSchema();
+  const result = await pool.query(
+    `UPDATE auth_device_sessions
+        SET status = 'revoked', revoked_at = COALESCE(revoked_at, NOW()),
+            revoked_reason = COALESCE(revoked_reason, $4)
+      WHERE id = $1 AND company_id = $2 AND user_id = $3
+      RETURNING id`,
+    [sessionId, companyId, userId, reason]
+  );
+  return Boolean(result.rowCount);
+}
+
+async function revokeDeviceSessionInTransaction(client, sessionId, reason) {
+  await client.query(
+    `UPDATE auth_device_sessions
+        SET status = 'revoked', revoked_at = COALESCE(revoked_at, NOW()),
+            revoked_reason = COALESCE(revoked_reason, $2)
+      WHERE id = $1`,
+    [sessionId, reason]
+  );
+}
+
+function deviceRefreshResult(row, replacementTokenId, replacementSecret, idempotentReplay) {
+  return {
+    replacementTokenId,
+    replacementSecret,
+    idempotentReplay,
+    user: {
+      id: row.userId,
+      companyId: row.companyId,
+      name: row.name,
+      email: row.email,
+      role: row.role || "vendedor",
+      mustChangePassword: Boolean(row.mustChangePassword),
+      company: {
+        id: row.companyId,
+        ruc: row.ruc,
+        businessName: row.businessName,
+        tradeName: row.tradeName,
+        status: row.companyStatus
+      }
+    }
+  };
+}
+
+function safeHashEqual(left, right) {
+  const a = Buffer.from(String(left || ""));
+  const b = Buffer.from(String(right || ""));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function deviceSessionError(code, statusCode) {
+  const error = new Error(code);
+  error.code = code;
+  error.statusCode = statusCode;
+  return error;
+}
+
 module.exports = {
   addAudit,
   authenticateCompanyUser,
@@ -2352,6 +2800,14 @@ module.exports = {
   listSalesHistory,
   listDiagnosticSyncChanges,
   listTenantAccounts,
+  listTenantAccountsPage,
+  listTenantSubscriptionPayments: subscriptionPayments.list,
+  getTenantSubscriptionPayment: subscriptionPayments.get,
+  markTenantSubscriptionPaymentLicenseApplied: subscriptionPayments.markLicenseApplied,
+  markTenantSubscriptionPaymentLicenseReversed: subscriptionPayments.markLicenseReversed,
+  createTenantSubscriptionPayment: subscriptionPayments.create,
+  updateTenantSubscriptionPaymentStatus: subscriptionPayments.updateStatus,
+  permanentlyDeleteEmptyTenant,
   mergeSnapshotPatch,
   maximumSyncChangeSequence,
   maximumDocumentHistorySequence,
@@ -2367,5 +2823,16 @@ module.exports = {
   changeCompanyUserPassword,
   getSnapshotMetadata,
   saveSnapshot,
-  updateCompanySriEnvironment
+  setTenantLifecycleStatus,
+  updateCompanySriEnvironment,
+  listUserPasskeys,
+  saveUserPasskey,
+  findUserPasskey,
+  updateUserPasskeyCounter,
+  deleteUserPasskeys,
+  createWebauthnChallenge,
+  consumeWebauthnChallenge,
+  registerDeviceSession,
+  rotateDeviceSession,
+  revokeDeviceSession
 };

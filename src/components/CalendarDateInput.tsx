@@ -1,9 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { monthOptions } from "../constants/options";
 import { buildCalendarDays, parseInputDate, toInputDate } from "../utils/format";
+import { useAppTheme } from "../theme/AppTheme";
 
 export function CalendarDateInput({ label, value, onChange, allowClear = false }: { label: string; value: string; onChange: (value: string) => void; allowClear?: boolean }) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 14 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 14 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
   const parsedValue = parseInputDate(value, "start");
   const parsedValueTime = parsedValue?.getTime();
   const [visible, setVisible] = useState(false);
@@ -29,25 +38,26 @@ export function CalendarDateInput({ label, value, onChange, allowClear = false }
 
   return (
     <View style={styles.inputGroup}>
-      <Text style={styles.label}>{label}</Text>
-      <Pressable style={styles.dateField} onPress={() => setVisible(true)}>
-        <Text style={[styles.dateFieldText, !value && styles.dateFieldPlaceholder]}>{value || "Seleccionar fecha"}</Text>
+      <Text style={[styles.label, { color: theme.colors.textMuted }]}>{label}</Text>
+      <Pressable style={[styles.dateField, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.surfaceMuted }]} onPress={() => setVisible(true)}>
+        <Text style={[styles.dateFieldText, { color: theme.colors.text }, !value && { color: theme.colors.textMuted }]}>{value || "Seleccionar fecha"}</Text>
       </Pressable>
       <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
-        <Pressable style={styles.calendarBackdrop} onPress={() => setVisible(false)}>
-          <Pressable style={styles.calendarSheet}>
+        <Pressable style={[styles.calendarBackdrop, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]} onPress={() => setVisible(false)}>
+          <Pressable style={[styles.calendarSheet, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+            <ScrollView contentContainerStyle={styles.calendarContent}>
             <View style={styles.calendarHeader}>
-              <Pressable style={styles.calendarNavButton} onPress={() => moveMonth(-1)}>
-                <Text style={styles.calendarNavText}>{"<"}</Text>
+              <Pressable style={[styles.calendarNavButton, { backgroundColor: theme.colors.surfaceMuted }]} onPress={() => moveMonth(-1)}>
+                <Text style={[styles.calendarNavText, { color: theme.colors.text }]}>{"<"}</Text>
               </Pressable>
-              <Text style={styles.calendarTitle}>{monthLabel}</Text>
-              <Pressable style={styles.calendarNavButton} onPress={() => moveMonth(1)}>
-                <Text style={styles.calendarNavText}>{">"}</Text>
+              <Text style={[styles.calendarTitle, { color: theme.colors.text }]}>{monthLabel}</Text>
+              <Pressable style={[styles.calendarNavButton, { backgroundColor: theme.colors.surfaceMuted }]} onPress={() => moveMonth(1)}>
+                <Text style={[styles.calendarNavText, { color: theme.colors.text }]}>{">"}</Text>
               </Pressable>
             </View>
             <View style={styles.calendarWeekRow}>
               {["Lu", "Ma", "Mi", "Ju", "Vi", "Sa", "Do"].map((day) => (
-                <Text key={day} style={styles.calendarWeekText}>{day}</Text>
+                <Text key={day} style={[styles.calendarWeekText, { color: theme.colors.textMuted }]}>{day}</Text>
               ))}
             </View>
             <View style={styles.calendarGrid}>
@@ -57,22 +67,23 @@ export function CalendarDateInput({ label, value, onChange, allowClear = false }
                 const selected = value === dateValue;
                 const today = dateValue === toInputDate(new Date());
                 return (
-                  <Pressable key={`${dateValue}-${index}`} style={[styles.calendarDay, selected && styles.calendarDaySelected, today && !selected && styles.calendarDayToday]} onPress={() => selectDate(date)}>
-                    <Text style={[styles.calendarDayText, !isCurrentMonth && styles.calendarDayMuted, selected && styles.calendarDaySelectedText]}>{date.getDate()}</Text>
+                  <Pressable key={`${dateValue}-${index}`} style={[styles.calendarDay, { backgroundColor: theme.colors.surfaceMuted }, selected && { backgroundColor: theme.colors.primary }, today && !selected && { borderWidth: 1, borderColor: theme.colors.primary }]} onPress={() => selectDate(date)}>
+                    <Text style={[styles.calendarDayText, { color: theme.colors.text }, !isCurrentMonth && { color: theme.colors.textMuted }, selected && { color: theme.colors.onPrimary }]}>{date.getDate()}</Text>
                   </Pressable>
                 );
               })}
             </View>
             <View style={styles.calendarActions}>
               {allowClear ? (
-                <Pressable style={styles.actionSheetCancel} onPress={() => { onChange(""); setVisible(false); }}>
-                  <Text style={styles.actionSheetCancelText}>Limpiar</Text>
+                <Pressable style={[styles.actionSheetCancel, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={() => { onChange(""); setVisible(false); }}>
+                  <Text style={[styles.actionSheetCancelText, { color: theme.colors.primary }]}>Limpiar</Text>
                 </Pressable>
               ) : null}
-              <Pressable style={styles.actionSheetButton} onPress={() => selectDate(new Date())}>
-                <Text style={styles.actionSheetButtonText}>Hoy</Text>
+              <Pressable style={[styles.actionSheetButton, { backgroundColor: theme.colors.surfaceMuted }]} onPress={() => selectDate(new Date())}>
+                <Text style={[styles.actionSheetButtonText, { color: theme.colors.text }]}>Hoy</Text>
               </Pressable>
             </View>
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -118,6 +129,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderWidth: 1,
     borderColor: "#e5e7eb",
+    overflow: "hidden"
+  },
+  calendarContent: {
     padding: 14,
     gap: 10
   },

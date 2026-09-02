@@ -1,5 +1,8 @@
 import React from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useAppTheme } from "../theme/AppTheme";
 import { OnboardingStep } from "./OnboardingStep";
 
 type OnboardingModalProps = {
@@ -9,25 +12,33 @@ type OnboardingModalProps = {
 };
 
 export function OnboardingModal({ visible, onConfigure, onClose }: OnboardingModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 18 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 18 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.onboardingBackdrop}>
-        <View style={styles.onboardingCard}>
-          <Text style={styles.onboardingEyebrow}>Cuenta lista</Text>
-          <Text style={styles.onboardingTitle}>Preparemos la empresa</Text>
-          <Text style={styles.onboardingText}>Complete estos pasos para que la app quede lista para facturar con su marca y datos SRI.</Text>
+      <View style={[styles.onboardingBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
+        <View style={[styles.onboardingCard, { backgroundColor: theme.colors.surfaceElevated, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <ScrollView contentContainerStyle={styles.onboardingContent}>
+          <Text style={[styles.onboardingEyebrow, { color: theme.colors.primary }]}>Cuenta lista</Text>
+          <Text style={[styles.onboardingTitle, { color: theme.colors.text }]}>Bienvenido a FactuDarwin</Text>
+          <Text style={[styles.onboardingText, { color: theme.colors.textMuted }]}>Te ayudaremos a preparar tu negocio y realizar tu primera venta. Podrás avanzar a tu ritmo desde Inicio.</Text>
+          <Text style={[styles.onboardingText, { color: theme.colors.textMuted }]}>FactuDarwin comienza en modo de prueba para que conozcas la aplicación sin emitir comprobantes reales accidentalmente.</Text>
           <View style={styles.onboardingSteps}>
-            <OnboardingStep number="1" title="Datos de empresa" text="RUC, razon social, direccion y secuenciales." />
-            <OnboardingStep number="2" title="Logo del negocio" text="Se usara en RIDE, guias y reportes." />
-            <OnboardingStep number="3" title="Firma electronica .p12" text="Necesaria para firmar y autorizar comprobantes." />
-            <OnboardingStep number="4" title="Ambiente SRI" text="Empiece en pruebas y pase a produccion cuando todo este validado." />
+            <OnboardingStep number="1" title="Prepara lo esencial" text="Revisa tu negocio y agrega un producto o servicio." />
+            <OnboardingStep number="2" title="Realiza tu primera venta" text="Puedes comenzar con una venta interna sin configurar todavía la firma electrónica." />
           </View>
-          <Pressable style={styles.onboardingPrimary} onPress={onConfigure}>
-            <Text style={styles.onboardingPrimaryText}>Configurar ahora</Text>
+          <Pressable style={[styles.onboardingPrimary, { backgroundColor: theme.colors.primary }]} onPress={onConfigure}>
+            <Text style={[styles.onboardingPrimaryText, { color: theme.colors.onPrimary }]}>Comenzar</Text>
           </Pressable>
           <Pressable style={styles.onboardingSecondary} onPress={onClose}>
-            <Text style={styles.onboardingSecondaryText}>Despues</Text>
+            <Text style={[styles.onboardingSecondaryText, { color: theme.colors.textMuted }]}>Explorar por mi cuenta</Text>
           </Pressable>
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -46,6 +57,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e2e8f0",
     backgroundColor: "#ffffff",
+    overflow: "hidden"
+  },
+  onboardingContent: {
     padding: 18,
     gap: 12
   },

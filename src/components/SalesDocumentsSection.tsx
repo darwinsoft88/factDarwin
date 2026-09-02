@@ -1,4 +1,5 @@
 import React from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { money } from "../sri";
 import { AppData, DocumentType, Sale, User } from "../types";
 import { canAccessDeveloperTools, canIssueFromInternalDocuments, canManageFiscalAdjustments, canRetryDocuments, canVoidDocuments } from "../utils/appAccess";
@@ -12,8 +13,18 @@ import { DismissibleNotice } from "./DismissibleNotice";
 import { InvoiceStatsGrid } from "./InvoiceStatsGrid";
 import { ListItem } from "./ListItem";
 import { PaginationControls } from "./PaginationControls";
-import { SalesFilters } from "./SalesFilters";
+import { SalesFilters, SalesStatusFilter } from "./SalesFilters";
 import { CollapsibleSection, Empty, Input, Section } from "./common";
+import type { AccentCardTone } from "./ThemedAccentCard";
+import { useAppTheme } from "../theme/AppTheme";
+
+function documentAccentTone(status: string): AccentCardTone {
+  if (status === "AUTORIZADA") return "success";
+  if (status === "DEVUELTA" || status === "ERROR_SRI") return "danger";
+  if (status === "PROFORMA") return "warning";
+  if (["FIRMADA", "ENVIADA", "ENVIADA_SRI", "PENDIENTE_SRI", "EN_REVISION_SRI", "TICKET_OFFLINE"].includes(status)) return "info";
+  return "primary";
+}
 
 type SalesDocumentsSectionProps = {
   cancelDocument: (sale: Sale) => void;
@@ -28,6 +39,9 @@ type SalesDocumentsSectionProps = {
   historicalIds: Set<string>;
   canLoadOlder: boolean;
   loadingOlder: boolean;
+  localEnvironmentSimulationAvailable: boolean;
+  readOnlySimulation: boolean;
+  onToggleEnvironmentSimulation: () => void;
   onLoadOlder: () => void;
   loadSaleDetail: (saleId: string) => Promise<Sale | null>;
   editSale: (sale: Sale) => void;
@@ -75,6 +89,9 @@ export function SalesDocumentsSection({
   historicalIds,
   canLoadOlder,
   loadingOlder,
+  localEnvironmentSimulationAvailable,
+  readOnlySimulation,
+  onToggleEnvironmentSimulation,
   onLoadOlder,
   loadSaleDetail,
   editSale,
@@ -108,40 +125,61 @@ export function SalesDocumentsSection({
   visibleSales,
   whatsappSale
 }: SalesDocumentsSectionProps) {
-  const canOpenTechnicalDetail = canAccessDeveloperTools(user);
+  const { theme } = useAppTheme();
+  const canOpenTechnicalDetail = !readOnlySimulation && canAccessDeveloperTools(user);
 
   return (
-    <Section title="Documentos">
+    <Section title={`Documentos - ${data.issuer.environment === "1" ? "Ambiente de pruebas" : "Ambiente de producción"}`}>
+      {localEnvironmentSimulationAvailable ? (
+        <View style={[simulationStyles.banner, { backgroundColor: theme.colors.warningSoft, borderColor: theme.colors.warning }]}>
+          <View style={simulationStyles.textArea}>
+            <Text style={[simulationStyles.title, { color: theme.colors.warning }]}>SIMULACIÓN LOCAL · SOLO LECTURA</Text>
+            <Text style={[simulationStyles.detail, { color: theme.colors.textMuted }]}>Cambia únicamente la vista para comprobar el aislamiento. No modifica el ambiente fiscal ni envía documentos al SRI.</Text>
+          </View>
+          <Pressable onPress={onToggleEnvironmentSimulation} style={[simulationStyles.button, { backgroundColor: theme.colors.primary }]}>
+            <Text style={[simulationStyles.buttonText, { color: theme.colors.onPrimary }]}>Ver {data.issuer.environment === "1" ? "PRODUCCIÓN" : "PRUEBAS"}</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <DismissibleNotice message={notice} tone="success" title="Factura enviada" onDismiss={() => setNotice("")} />
       <Input label="Buscar documento" value={invoiceSearch} onChangeText={setInvoiceSearch} placeholder="Cliente, cedula, secuencial o clave" autoCapitalize="none" />
-      <CollapsibleSection title="Filtros y resumen" embedded>
+      <CollapsibleSection
+        title="Filtros y resumen"
+        embedded
+        headerAccessory={<SalesStatusFilter status={statusFilter} onStatusChange={setStatusFilter} compact />}
+      >
         <InvoiceStatsGrid stats={invoiceStats} />
         <SalesFilters
           startDate={startDate}
           endDate={endDate}
-          status={statusFilter}
           onStartDateChange={setStartDate}
           onEndDateChange={setEndDate}
           onToday={onToday}
           onMonth={onMonth}
           onClearDates={onClearDates}
-          onStatusChange={setStatusFilter}
         />
       </CollapsibleSection>
-      {historySales.length === 0 ? <Empty text="Aun no hay ventas." /> : null}
+      {historySales.length === 0 ? <Empty text={`No hay documentos en el ambiente de ${data.issuer.environment === "1" ? "pruebas" : "producción"}.`} /> : null}
       {historySales.length > 0 && filteredSales.length === 0 ? <Empty text="No hay documentos con ese filtro." /> : null}
       {visibleSales.map((sale) => {
         const client = data.clients.find((item) => item.id === sale.clientId);
         const clientDisplayName = client?.name || historicalClientNames[sale.id] || "Cliente";
-        const canonicalSale = data.sales.find((item) => item.id === sale.id);
+        const canonicalSale = readOnlySimulation ? undefined : data.sales.find((item) => item.id === sale.id);
         const isHistoricalOnly = historicalIds.has(sale.id) && !canonicalSale;
         const actionableSale = canonicalSale ?? sale;
+        const documentContext = `${formatShortDate(sale.createdAt)} | ${documentTypeLabel(sale)} | ${displayInvoiceStatus(sale.status)}`;
+        const creditContext = sale.paymentCondition === "credito" ? ` | Credito pendiente $${money(sale.creditBalance ?? sale.total)}` : "";
+        const technicalContext = ` | ${sale.authorizationNumber || sale.accessKey || "Interno"}${sriStatusHelpText(sale) ? ` | ${sriStatusHelpText(sale)}` : sale.sriMessage ? ` | ${shortText(sale.sriMessage, 90)}` : ""}`;
         return (
           <ListItem
             key={sale.id}
-            title={`${documentNumber(sale, data.issuer)} - ${clientDisplayName}`}
-            meta={`${formatShortDate(sale.createdAt)} | ${documentTypeLabel(sale)} | ${displayInvoiceStatus(sale.status)} | $${money(sale.total)}${sale.paymentCondition === "credito" ? ` | Credito pendiente $${money(sale.creditBalance ?? sale.total)}` : ""} | ${sale.authorizationNumber || sale.accessKey || "Interno"}${sriStatusHelpText(sale) ? ` | ${sriStatusHelpText(sale)}` : sale.sriMessage ? ` | ${shortText(sale.sriMessage, 90)}` : ""}`}
+            title={clientDisplayName}
+            titleReference={documentNumber(sale, data.issuer)}
+            meta={`${documentContext} | $${money(sale.total)}${creditContext}${technicalContext}`}
+            cardMeta={`${documentContext}${creditContext}${technicalContext}`}
+            trailingValue={`$${money(sale.total)}`}
             badge={sale.status}
+            accentTone={documentAccentTone(sale.status)}
             onOpen={canOpenTechnicalDetail && !isHistoricalOnly ? () => {
               if (!client) return;
               void loadSaleDetail(sale.id).then((detail) => {
@@ -165,13 +203,13 @@ export function SalesDocumentsSection({
             onEmail={() => client && canonicalSale && emailSale(canonicalSale, client)}
             whatsappLabel={!isHistoricalOnly && isInvoiceSale(sale) && sale.status === "AUTORIZADA" ? "WhatsApp" : undefined}
             onWhatsapp={() => client && canonicalSale && whatsappSale(canonicalSale, client)}
-            supportLabel={(isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status !== "AUTORIZADA" ? "Ver detalle SRI" : undefined}
+            supportLabel={!readOnlySimulation && (isInvoiceSale(sale) || isCreditNoteSale(sale)) && sale.status !== "AUTORIZADA" ? "Ver detalle SRI" : undefined}
             onSupport={() => client && onXml(formatSaleDetail(actionableSale, client, data.issuer))}
             creditNoteLabel={canManageFiscalAdjustments(user.role) && client && canonicalSale && canIssueCreditNoteForSale(data.sales, canonicalSale, client) ? "Nota credito" : undefined}
             onCreditNote={() => client && canonicalSale && openCreditNoteForm(canonicalSale)}
             retentionLabel={!isHistoricalOnly && canManageFiscalAdjustments(user.role) && isInvoiceSale(sale) && sale.status === "AUTORIZADA" ? "Retencion" : undefined}
             onRetention={() => canonicalSale && openRetentionForm(canonicalSale)}
-            editLabel={canIssueFromInternalDocuments(user.role) && canEditSale(sale) ? "Editar" : undefined}
+            editLabel={!readOnlySimulation && canIssueFromInternalDocuments(user.role) && canEditSale(sale) ? "Editar" : undefined}
             onEdit={() => canonicalSale && editSale(canonicalSale)}
             retryLabel={!isHistoricalOnly && canRetryDocuments(user.role) && isInvoiceSale(sale) && sale.status === "AUTORIZADA" && sale.inventoryState === "RECONCILIATION_PENDING"
               ? (retryingSaleId === sale.id ? "Reconciliando..." : "Reconciliar inventario")
@@ -188,3 +226,12 @@ export function SalesDocumentsSection({
     </Section>
   );
 }
+
+const simulationStyles = StyleSheet.create({
+  banner: { alignItems: "center", borderRadius: 12, borderWidth: 1, flexDirection: "row", gap: 10, padding: 11 },
+  textArea: { flex: 1 },
+  title: { fontSize: 11, fontWeight: "900" },
+  detail: { fontSize: 11, lineHeight: 15, marginTop: 2 },
+  button: { borderRadius: 9, paddingHorizontal: 11, paddingVertical: 9 },
+  buttonText: { fontSize: 11, fontWeight: "900" }
+});

@@ -8,6 +8,7 @@ import { money } from "../sri";
 import { Product } from "../types";
 import { productCost, productMinStock } from "../utils/accounting";
 import { PaginationResult } from "../utils/pagination";
+import { useAppTheme } from "../theme/AppTheme";
 
 type InventoryProductPickerModalProps = {
   filteredProducts: Product[];
@@ -32,34 +33,35 @@ export function InventoryProductPickerModal({
   productSearch,
   visible
 }: InventoryProductPickerModalProps) {
+  const { theme } = useAppTheme();
   if (!visible) return null;
 
   return (
-    <View style={styles.pickerPanel}>
+    <View style={[styles.pickerPanel, { backgroundColor: theme.colors.surface, borderColor: theme.colors.borderStrong }]}>
       <View style={styles.modalHeader}>
         <View style={styles.flex}>
-          <Text style={styles.modalTitle}>Buscar producto</Text>
-          <Text style={styles.modalMeta}>Resultados paginados para inventario</Text>
+          <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Buscar producto</Text>
+          <Text style={[styles.modalMeta, { color: theme.colors.textMuted }]}>Resultados paginados para inventario</Text>
         </View>
-        <Pressable style={styles.closeButton} onPress={onClose}>
-          <Text style={styles.closeButtonText}>Cerrar</Text>
+        <Pressable style={[styles.closeButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+          <Text style={[styles.closeButtonText, { color: theme.colors.primaryStrong }]}>Cerrar</Text>
         </Pressable>
       </View>
       <Input label="" value={productSearch} onChangeText={onProductSearchChange} placeholder="Codigo o nombre" autoCapitalize="none" />
       <View style={styles.resultHeader}>
-        <Text style={styles.resultLabel}>Productos encontrados</Text>
-        <Text style={styles.resultCount}>{filteredProducts.length} registro(s)</Text>
+        <Text style={[styles.resultLabel, { color: theme.colors.textMuted }]}>Productos encontrados</Text>
+        <Text style={[styles.resultCount, { color: theme.colors.primary }]}>{filteredProducts.length} registro(s)</Text>
       </View>
-      <ScrollView style={styles.resultsBox} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+      <ScrollView style={[styles.resultsBox, { borderColor: theme.colors.border }]} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
         {productPagination.items.map((product) => {
           const selected = product.id === productId;
           return (
-            <Pressable key={product.id} style={[styles.productRow, selected && styles.productRowSelected]} onPress={() => onSelectProduct(product.id)}>
+            <Pressable key={product.id} style={[styles.productRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }, selected && [styles.productRowSelected, { borderColor: theme.colors.success, backgroundColor: theme.colors.successSoft }]]} onPress={() => onSelectProduct(product.id)}>
               <View style={styles.flex}>
-                <Text style={[styles.productName, selected && styles.productNameSelected]} numberOfLines={1}>{product.code} - {product.name}</Text>
-                <Text style={styles.productMeta} numberOfLines={1}>Stock {product.stock}/{productMinStock(product)} | Costo ${money(productCost(product))} | Publico ${money(product.price)}</Text>
+                <Text style={[styles.productName, { color: theme.colors.text }, selected && [styles.productNameSelected, { color: theme.colors.success }]]} numberOfLines={1}>{product.code} - {product.name}</Text>
+                <Text style={[styles.productMeta, { color: theme.colors.textMuted }]} numberOfLines={1}>Stock {product.stock}/{productMinStock(product)} | Costo ${money(productCost(product))} | Publico ${money(product.price)}</Text>
               </View>
-              {selected ? <MaterialCommunityIcons name="check-circle" size={22} color="#047857" /> : <MaterialCommunityIcons name="chevron-right" size={22} color="#64748b" />}
+              {selected ? <MaterialCommunityIcons name="check-circle" size={22} color={theme.colors.success} /> : <MaterialCommunityIcons name="chevron-right" size={22} color={theme.colors.textMuted} />}
             </Pressable>
           );
         })}

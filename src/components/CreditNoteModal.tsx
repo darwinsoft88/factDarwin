@@ -1,13 +1,15 @@
 import React from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useKeyboardInset } from "../hooks/useKeyboardInset";
 import { calculateLineTotal, money } from "../sri";
 import { Issuer, Sale } from "../types";
 import { documentNumber } from "../utils/documents";
 import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
 import { buildCreditNoteItem, formatQuantity, getCreditLineAvailable, getCreditLineKey } from "../utils/sales";
 import { Input, PrimaryButton } from "./common";
-import { AppToast } from "./AppToast";
+import { useAppTheme } from "../theme/AppTheme";
 
 type CreditNoteTotals = {
   subtotal: number;
@@ -44,24 +46,33 @@ export function CreditNoteModal({
   onClose,
   onIssue
 }: CreditNoteModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardInset = useKeyboardInset();
+  const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? MODAL_SAFE_BOTTOM_PADDING : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+
   return (
     <Modal visible={Boolean(source)} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-        <View style={styles.creditModalBackdrop}>
-          <View style={styles.creditModal}>
-            <View style={styles.creditModalHeader}>
+        <View style={[styles.creditModalBackdrop, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }]}>
+          <View style={[styles.creditModal, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+            <View style={[styles.creditModalHeader, { borderBottomColor: theme.colors.border }]}>
               <View style={styles.flex}>
-                <Text style={styles.creditModalTitle}>Nota de credito</Text>
-                <Text style={styles.creditModalMeta}>{source ? `Factura ${documentNumber(source, issuer)}` : ""}</Text>
+                <Text style={[styles.creditModalTitle, { color: theme.colors.text }]}>Nota de credito</Text>
+                <Text style={[styles.creditModalMeta, { color: theme.colors.textMuted }]}>{source ? `Factura ${documentNumber(source, issuer)}` : ""}</Text>
               </View>
-              <Pressable style={styles.smallButton} onPress={onClose}>
-                <Text style={styles.smallButtonText}>Cerrar</Text>
+              <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+                <Text style={[styles.smallButtonText, { color: theme.colors.primary }]}>Cerrar</Text>
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+            <ScrollView contentContainerStyle={[styles.creditModalContent, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING }]} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
               <Input label="Motivo" value={reason} onChangeText={onReasonChange} placeholder="Ej: devolucion parcial" />
-              <Pressable style={styles.creditSelectAllButton} onPress={onSelectAll}>
-                <Text style={styles.creditSelectAllText}>Seleccionar todo disponible</Text>
+              <Pressable style={[styles.creditSelectAllButton, { backgroundColor: theme.colors.infoSoft }]} onPress={onSelectAll}>
+                <Text style={[styles.creditSelectAllText, { color: theme.colors.info }]}>Seleccionar todo disponible</Text>
               </Pressable>
               {source?.items.map((item, index) => {
                 const lineKey = getCreditLineKey(item, index);
@@ -69,9 +80,9 @@ export function CreditNoteModal({
                 const selectedQuantity = Math.max(0, parseDecimal(quantities[lineKey] || "0") || 0);
                 const selectedItem = selectedQuantity > 0 ? buildCreditNoteItem(item, selectedQuantity, lineKey) : undefined;
                 return (
-                  <View key={lineKey} style={styles.creditLineCard}>
-                    <Text style={styles.creditLineTitle}>{item.code} - {item.name}</Text>
-                    <Text style={styles.creditLineMeta}>Facturado: {formatQuantity(item.quantity)} | Disponible: {formatQuantity(available)} | Total linea: ${money(calculateLineTotal(item))}</Text>
+                  <View key={lineKey} style={[styles.creditLineCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
+                    <Text style={[styles.creditLineTitle, { color: theme.colors.text }]}>{item.code} - {item.name}</Text>
+                    <Text style={[styles.creditLineMeta, { color: theme.colors.textMuted }]}>Facturado: {formatQuantity(item.quantity)} | Disponible: {formatQuantity(available)} | Total linea: ${money(calculateLineTotal(item))}</Text>
                     <View style={styles.row}>
                       <View style={styles.flex}>
                         <Input
@@ -82,25 +93,24 @@ export function CreditNoteModal({
                           keyboardType="decimal-pad"
                         />
                       </View>
-                      <View style={styles.creditLineTotalBox}>
-                        <Text style={styles.creditLineMeta}>Valor</Text>
-                        <Text style={styles.creditLineTotal}>{selectedItem ? `$${money(calculateLineTotal(selectedItem))}` : "$0.00"}</Text>
+                      <View style={[styles.creditLineTotalBox, { backgroundColor: theme.colors.primarySoft }]}>
+                        <Text style={[styles.creditLineMeta, { color: theme.colors.textMuted }]}>Valor</Text>
+                        <Text style={[styles.creditLineTotal, { color: theme.colors.primary }]}>{selectedItem ? `$${money(calculateLineTotal(selectedItem))}` : "$0.00"}</Text>
                       </View>
                     </View>
                   </View>
                 );
               })}
-              <View style={styles.creditTotalsBox}>
-                <Text style={styles.totalLine}>Subtotal: ${money(totals.subtotal)}</Text>
-                <Text style={styles.totalLine}>IVA: ${money(totals.tax)}</Text>
-                <Text style={styles.totalStrong}>Total nota credito: ${money(totals.total)}</Text>
+              <View style={[styles.creditTotalsBox, { backgroundColor: theme.colors.primarySoft }]}>
+                <Text style={[styles.totalLine, { color: theme.colors.textMuted }]}>Subtotal: ${money(totals.subtotal)}</Text>
+                <Text style={[styles.totalLine, { color: theme.colors.textMuted }]}>IVA: ${money(totals.tax)}</Text>
+                <Text style={[styles.totalStrong, { color: theme.colors.text }]}>Total nota credito: ${money(totals.total)}</Text>
               </View>
               <PrimaryButton label={issuing ? "Procesando..." : "Emitir nota de credito"} onPress={issuing ? () => undefined : onIssue} />
             </ScrollView>
           </View>
         </View>
       </KeyboardAvoidingView>
-      <AppToast />
     </Modal>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { PersistMutation } from "./useSyncAndBackup";
 import { lookupIdentityData } from "../services/backend";
 import { syncPatchToBackend } from "../utils/sync";
 import { AppData, Client, User } from "../types";
@@ -23,7 +24,7 @@ type RemoteClientResults = { items: Client[]; total: number } | null;
 type UseQuickSaleClientEditorParams = {
   backendToken: string;
   data: AppData;
-  persist: (data: AppData) => Promise<void>;
+  persistMutation: PersistMutation;
   selectedClient?: Client;
   user: User;
   setClientId: React.Dispatch<React.SetStateAction<string>>;
@@ -38,13 +39,14 @@ const emptyQuickClientForm: QuickClientForm = {
   email: "",
   phone: "",
   address: "",
-  identificationType: "05"
+  identificationType: "05",
+  defaultSalePriceTier: "pvp1"
 };
 
 export function useQuickSaleClientEditor({
   backendToken,
   data,
-  persist,
+  persistMutation,
   selectedClient,
   setClientId,
   setIssueNotice,
@@ -87,7 +89,8 @@ export function useQuickSaleClientEditor({
       email: selectedClient.email,
       phone: selectedClient.phone || "",
       address: selectedClient.address,
-      identificationType: selectedClient.identificationType
+      identificationType: selectedClient.identificationType,
+      defaultSalePriceTier: selectedClient.defaultSalePriceTier || "pvp1"
     });
     setQuickClientVisible(true);
   };
@@ -131,8 +134,8 @@ export function useQuickSaleClientEditor({
           clients: [createdClient, ...data.clients]
         }, user, "CLIENT_CREATED_FROM_SALE", "client", createdClient.id, `Cliente creado desde venta: ${createdClient.name}`);
 
-        await persist(nextData);
-        const synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [createdClient], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", nextData, persist);
+        await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
+        const synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [createdClient], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", { persistMutation });
         if (!synced) return;
         setClientId(createdClient.id);
         setSelectedRemoteClient(createdClient);
@@ -159,8 +162,8 @@ export function useQuickSaleClientEditor({
         clients: nextClients
       }, user, "CLIENT_UPDATED_FROM_SALE", "client", clientToUpdate.id, `Cliente actualizado desde venta: ${updatedClient.name}`);
 
-      await persist(nextData);
-      const synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [updatedClient], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", nextData, persist);
+      await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
+      const synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [updatedClient], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", { persistMutation });
       if (!synced) return;
       setClientId(updatedClient.id);
       setSelectedRemoteClient(updatedClient);
@@ -194,7 +197,8 @@ export function useQuickSaleClientEditor({
         email: existingClient.email,
         phone: existingClient.phone || "",
         address: existingClient.address,
-        identificationType: existingClient.identificationType
+        identificationType: existingClient.identificationType,
+        defaultSalePriceTier: existingClient.defaultSalePriceTier || "pvp1"
       });
       setClientId(existingClient.id);
       setSelectedRemoteClient(existingClient);

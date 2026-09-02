@@ -111,6 +111,102 @@ function buildAutomaticEmailOperation(companyId, finalData, transition, createdA
   };
 }
 
+function buildManualEmailOperation(companyId, data, request = {}, createdAt = new Date().toISOString()) {
+  const documentId = String(request.documentId || "").trim();
+  const requestedType = String(request.documentType || "").trim();
+  const document = (data?.sales || []).find((item) => {
+    if (String(item?.id || "") !== documentId) return false;
+    return !requestedType || normalizeDocumentType(item) === requestedType;
+  });
+  if (!document) throw operationError("No se encontro el documento solicitado.", 404);
+  if (document.status !== "AUTORIZADA") {
+    throw operationError("Solo se puede enviar un documento autorizado.", 409);
+  }
+
+  const documentType = normalizeDocumentType(document);
+  if (!documentType) throw operationError("El tipo documental no permite envio por correo.", 400);
+  const client = (data.clients || []).find((item) => item.id === document.clientId);
+  if (!client) throw operationError("No se encontro el cliente asociado al documento.", 404);
+  const recipientEmail = String(request.recipientEmail || client.email || "").trim().toLowerCase();
+  if (!recipientEmail || !isValidEmail(recipientEmail)) {
+    throw operationError("El correo del destinatario no es valido.", 400);
+  }
+  const sourceDocument = documentType === "nota_credito" && document.sourceSaleId
+    ? (data.sales || []).find((item) => item.id === document.sourceSaleId)
+    : undefined;
+  const issuer = data.issuer || {};
+  const requestId = String(request.requestId || crypto.randomUUID()).trim();
+
+  return {
+    id: `manual_email_${sha256(`${companyId}:${documentType}:${documentId}:${recipientEmail}:${requestId}`).slice(0, 40)}`,
+    companyId,
+    documentType,
+    documentId,
+    clientId: document.clientId || null,
+    origin: "manual_resend",
+    recipientEmail,
+    payload: {
+      schemaVersion: 1,
+      authorizationSnapshot: {
+        capturedAt: createdAt,
+        document,
+        client,
+        issuer,
+        sourceDocument: sourceDocument || null,
+        recipientEmailAtAuthorization: recipientEmail,
+        missing: []
+      },
+      delivery: { recipientEmail }
+    }
+  };
+}
+
+function buildManualRideOperation(companyId, data, request = {}, createdAt = new Date().toISOString()) {
+  const documentId = String(request.documentId || "").trim();
+  const requestedType = String(request.documentType || "").trim();
+  const document = (data?.sales || []).find((item) => {
+    if (String(item?.id || "") !== documentId) return false;
+    return !requestedType || normalizeDocumentType(item) === requestedType;
+  });
+  if (!document) throw operationError("No se encontro el documento solicitado.", 404);
+  if (document.status !== "AUTORIZADA") {
+    throw operationError("El RIDE solo esta disponible para documentos autorizados.", 409);
+  }
+
+  const documentType = normalizeDocumentType(document);
+  if (!documentType) throw operationError("El tipo documental no dispone de RIDE.", 400);
+  const client = (data.clients || []).find((item) => item.id === document.clientId);
+  if (!client) throw operationError("No se encontro el cliente asociado al documento.", 404);
+  const sourceDocument = documentType === "nota_credito" && document.sourceSaleId
+    ? (data.sales || []).find((item) => item.id === document.sourceSaleId)
+    : undefined;
+
+  return {
+    id: `manual_ride_${sha256(`${companyId}:${documentType}:${documentId}`).slice(0, 40)}`,
+    companyId,
+    documentType,
+    documentId,
+    origin: "manual_ride",
+    payload: {
+      schemaVersion: 1,
+      authorizationSnapshot: {
+        capturedAt: createdAt,
+        document,
+        client,
+        issuer: data.issuer || {},
+        sourceDocument: sourceDocument || null,
+        missing: []
+      }
+    }
+  };
+}
+
+function operationError(message, statusCode) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
 async function insertAutomaticEmailOperation(client, operation) {
   const result = await client.query(
     `INSERT INTO document_email_operations (
@@ -198,6 +294,8 @@ module.exports = {
   AUTOMATIC_EMAIL_FEATURE,
   automaticEmailFeatureMode,
   buildAutomaticEmailOperation,
+  buildManualEmailOperation,
+  buildManualRideOperation,
   createAutomaticEmailOperations,
   detectAutomaticEmailTransitions,
   insertAutomaticEmailOperation

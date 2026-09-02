@@ -1,73 +1,83 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
 
 type MetricIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
 export function QuickAction({ label, onPress, icon }: { label: string; onPress: () => void; icon?: MetricIconName }) {
+  const { theme } = useAppTheme();
   return (
-    <Pressable style={styles.quickAction} onPress={onPress}>
+    <Pressable style={[styles.quickAction, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.primarySoft }]} onPress={onPress}>
       {icon ? (
-        <View style={styles.quickActionIcon}>
-          <MaterialCommunityIcons name={icon} size={17} color="#0f766e" />
+        <View style={[styles.quickActionIcon, { backgroundColor: theme.colors.successSoft }]}>
+          <MaterialCommunityIcons name={icon} size={17} color={theme.colors.primary} />
         </View>
       ) : null}
-      <Text style={styles.quickActionText}>{label}</Text>
+      <Text style={[styles.quickActionText, { color: theme.colors.primary }]}>{label}</Text>
     </Pressable>
   );
 }
 
 export function AlertRow({ title, detail, tone, icon }: { title: string; detail: string; tone: "warning" | "danger"; icon?: MetricIconName }) {
+  const { theme } = useAppTheme();
+  const toneColor = tone === "danger" ? theme.colors.danger : theme.colors.warning;
   return (
-    <View style={[styles.alertRow, tone === "danger" ? styles.alertDanger : styles.alertWarning]}>
+    <View style={[styles.alertRow, { borderColor: toneColor, backgroundColor: tone === "danger" ? theme.colors.dangerSoft : theme.colors.warningSoft }]}>
       <View style={styles.alertHeader}>
-        {icon ? <MaterialCommunityIcons name={icon} size={17} color={tone === "danger" ? "#991b1b" : "#92400e"} /> : null}
-        <Text style={[styles.alertTitle, tone === "danger" ? styles.alertDangerText : styles.alertWarningText]}>{title}</Text>
+        {icon ? <MaterialCommunityIcons name={icon} size={17} color={toneColor} /> : null}
+        <Text style={[styles.alertTitle, { color: toneColor }]}>{title}</Text>
       </View>
-      <Text style={[styles.alertDetail, tone === "danger" ? styles.alertDangerText : styles.alertWarningText]}>{detail}</Text>
+      <Text style={[styles.alertDetail, { color: toneColor }]}>{detail}</Text>
     </View>
   );
 }
 
 export function ReportRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+  const { theme } = useAppTheme();
   return (
-    <View style={styles.reportRow}>
-      <Text style={[styles.reportLabel, strong && styles.reportStrong]}>{label}</Text>
-      <Text style={[styles.reportValue, strong && styles.reportStrong]}>{value}</Text>
+    <View style={[styles.reportRow, { borderColor: theme.colors.border }]}>
+      <Text style={[styles.reportLabel, { color: theme.colors.textMuted }, strong && [styles.reportStrong, { color: theme.colors.primary }]]}>{label}</Text>
+      <Text style={[styles.reportValue, { color: theme.colors.text }, strong && [styles.reportStrong, { color: theme.colors.primary }]]}>{value}</Text>
     </View>
   );
 }
 
 export function OperationTile({ title, value, detail, tone, icon }: { title: string; value: string; detail: string; tone: "success" | "warning" | "danger"; icon?: MetricIconName }) {
+  const { theme } = useAppTheme();
+  const toneColor = tone === "success" ? theme.colors.success : tone === "warning" ? theme.colors.warning : theme.colors.danger;
+  const toneSoft = tone === "success" ? theme.colors.successSoft : tone === "warning" ? theme.colors.warningSoft : theme.colors.dangerSoft;
   return (
-    <View style={[styles.operationTile, tone === "success" && styles.operationSuccess, tone === "warning" && styles.operationWarning, tone === "danger" && styles.operationDanger]}>
+    <View style={[styles.operationTile, { borderColor: toneColor, backgroundColor: toneSoft, shadowColor: theme.colors.shadow }]}>
       <View style={styles.operationHeader}>
         {icon ? (
-          <View style={[styles.operationIcon, tone === "success" && styles.operationIconSuccess, tone === "warning" && styles.operationIconWarning, tone === "danger" && styles.operationIconDanger]}>
-            <MaterialCommunityIcons name={icon} size={16} color={tone === "success" ? "#166534" : tone === "warning" ? "#92400e" : "#991b1b"} />
+          <View style={[styles.operationIcon, { backgroundColor: toneSoft }]}>
+            <MaterialCommunityIcons name={icon} size={16} color={toneColor} />
           </View>
         ) : null}
-        <Text style={[styles.operationTitle, tone === "success" && styles.operationSuccessText, tone === "warning" && styles.operationWarningText, tone === "danger" && styles.operationDangerText]}>{title}</Text>
+        <Text style={[styles.operationTitle, { color: toneColor }]}>{title}</Text>
       </View>
-      <Text style={styles.operationValue}>{value}</Text>
-      <Text style={styles.operationDetail}>{detail}</Text>
+      <Text style={[styles.operationValue, { color: theme.colors.text }]}>{value}</Text>
+      <Text style={[styles.operationDetail, { color: theme.colors.textMuted }]}>{detail}</Text>
     </View>
   );
 }
 
 export function StatBox({ label, value, tone = "default", icon }: { label: string; value: string; tone?: "default" | "success" | "warning" | "danger" | "info"; icon?: MetricIconName }) {
-  const iconColor = tone === "success" ? "#15803d" : tone === "warning" ? "#b45309" : tone === "danger" ? "#b91c1c" : tone === "info" ? "#1d4ed8" : "#0f766e";
+  const { theme } = useAppTheme();
+  const iconColor = tone === "success" ? theme.colors.success : tone === "warning" ? theme.colors.warning : tone === "danger" ? theme.colors.danger : tone === "info" ? theme.colors.info : theme.colors.primary;
+  const toneSoft = tone === "success" ? theme.colors.successSoft : tone === "warning" ? theme.colors.warningSoft : tone === "danger" ? theme.colors.dangerSoft : tone === "info" ? theme.colors.infoSoft : theme.colors.surfaceMuted;
   return (
-    <View style={[styles.statBox, tone === "success" && styles.statBoxSuccess, tone === "warning" && styles.statBoxWarning, tone === "danger" && styles.statBoxDanger, tone === "info" && styles.statBoxInfo]}>
+    <View style={[styles.statBox, { borderColor: theme.colors.border, backgroundColor: toneSoft, shadowColor: theme.colors.shadow }]}>
       <View style={styles.statHeader}>
-        <Text style={styles.statValue}>{value}</Text>
+        <Text style={[styles.statValue, { color: theme.colors.text }]}>{value}</Text>
         {icon ? (
-          <View style={[styles.statIcon, tone === "success" && styles.statIconSuccess, tone === "warning" && styles.statIconWarning, tone === "danger" && styles.statIconDanger, tone === "info" && styles.statIconInfo]}>
+          <View style={[styles.statIcon, { backgroundColor: toneSoft }]}>
             <MaterialCommunityIcons name={icon} size={15} color={iconColor} />
           </View>
         ) : null}
       </View>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={[styles.statLabel, { color: theme.colors.textMuted }]}>{label}</Text>
     </View>
   );
 }

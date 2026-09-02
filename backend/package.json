@@ -15,10 +15,14 @@
     "users:reconcile": "node src/tools/reconcileUsers.js",
     "sync-shadow:reconcile": "node src/tools/reconcileSyncShadow.js",
     "reset:test-sale": "node src/tools/resetTestSaleSequence.js",
+    "recovery:preflight": "node src/tools/prevalidateManualInvoiceRecovery.js",
+    "recovery:resend": "node src/tools/resendManualInvoiceAfterPreflight.js",
+    "recovery:restore-363": "node src/tools/restoreInvoice363TerminalStatus.js",
     "validate-cert": "node src/tools/validateCert.js",
     "tunnel": "lt --port 4000"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.2",
     "@xmldom/xmldom": "^0.8.10",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.9.0",
@@ -31,6 +35,7 @@
     "osodreamer-sri-xml-signer": "^0.1.3",
     "pdfkit": "^0.17.2",
     "pg": "^8.20.0",
+    "sharp": "^0.34.3",
     "sql.js": "^1.14.1",
     "undici": "^7.25.0",
     "xml-crypto": "^6.0.0"

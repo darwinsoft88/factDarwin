@@ -1,5 +1,5 @@
 import { AuthorizationResponse } from "../services/backend";
-import { AppData, CashClosing, Issuer, RemissionGuide, Sale } from "../types";
+import { AppData, CashClosing, Environment, Issuer, RemissionGuide, Sale } from "../types";
 import { dateKey } from "./format";
 import { activeEstablishment, issuerForGuide, issuerForSale } from "./establishments";
 import { isCreditNoteSale, isInvoiceSale } from "./sales";
@@ -45,8 +45,8 @@ export function isAccessKeyUsed(data: AppData, accessKey: string, currentId = ""
   return data.sales.some((sale) => sale.id !== currentId && sale.accessKey === accessKey) || (data.guides || []).some((guide) => guide.id !== currentId && guide.accessKey === accessKey);
 }
 
-export function getRetryInfo(document: { retryHistory?: string[] }) {
-  const today = dateKey(new Date());
+export function getRetryInfo(document: { retryHistory?: string[] }, now = new Date()) {
+  const today = dateKey(now);
   const todayAttempts = (document.retryHistory || []).filter((item) => dateKey(new Date(item)) === today).length;
 
   return {
@@ -58,6 +58,35 @@ export function getRetryInfo(document: { retryHistory?: string[] }) {
 export function activeScopeId(data: AppData) {
   const establishment = activeEstablishment(data.issuer);
   return establishment.id;
+}
+
+type EnvironmentScopedDocument = {
+  environment?: string;
+  sriEnvironment?: string;
+  accessKey?: string;
+};
+
+/** Resuelve el ambiente sin depender de la zona, estado o ambiente actual del dispositivo. */
+export function documentEnvironment(document: EnvironmentScopedDocument): Environment | undefined {
+  const explicit = normalizeDocumentEnvironment(document.environment) || normalizeDocumentEnvironment(document.sriEnvironment);
+  if (explicit) return explicit;
+  const accessKey = String(document.accessKey || "");
+  if (/^\d{49}$/.test(accessKey)) return normalizeDocumentEnvironment(accessKey.slice(23, 24));
+  return undefined;
+}
+
+export function documentInEnvironment(document: EnvironmentScopedDocument, environment: Environment) {
+  const resolved = documentEnvironment(document);
+  // Compatibilidad no destructiva: registros legacy sin metadata ni clave válida no se ocultan.
+  // Todo documento nuevo queda marcado explícitamente y sí se aísla de forma estricta.
+  return resolved === undefined || resolved === environment;
+}
+
+export function normalizeDocumentEnvironment(value?: string): Environment | undefined {
+  const normalized = String(value || "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (["1", "PRUEBA", "PRUEBAS", "TEST"].includes(normalized)) return "1";
+  if (["2", "PRODUCCION", "PRODUCTION"].includes(normalized)) return "2";
+  return undefined;
 }
 
 export function documentScopeId(document: { establishment?: string; emissionPoint?: string; accessKey?: string }, fallbackIssuer: Issuer) {
@@ -73,27 +102,30 @@ export function scopeIdFromAccessKey(accessKey: string) {
 }
 
 export function saleInActiveScope(sale: Sale, data: AppData) {
-  return documentScopeId(sale, data.issuer) === activeScopeId(data);
+  return documentScopeId(sale, data.issuer) === activeScopeId(data) && documentInEnvironment(sale, data.issuer.environment);
 }
 
 export function guideInActiveScope(guide: RemissionGuide, data: AppData) {
-  return documentScopeId(guide, data.issuer) === activeScopeId(data);
+  return documentScopeId(guide, data.issuer) === activeScopeId(data) && documentInEnvironment(guide, data.issuer.environment);
 }
 
 export function closingInActiveScope(closing: CashClosing, data: AppData) {
+  const inEnvironment = documentInEnvironment(closing, data.issuer.environment);
+  if (!inEnvironment) return false;
   if (closing.establishment && closing.emissionPoint) return `${closing.establishment}-${closing.emissionPoint}` === activeScopeId(data);
   return true;
 }
 
 export function scopedReportData(data: AppData, scopeId = activeScopeId(data)) {
-  const sales = data.sales.filter((sale) => documentScopeId(sale, data.issuer) === scopeId);
+  const inRequestedScope = (document: { establishment?: string; emissionPoint?: string; accessKey?: string }) => scopeId === "all" || documentScopeId(document, data.issuer) === scopeId;
+  const sales = data.sales.filter((sale) => inRequestedScope(sale) && documentInEnvironment(sale, data.issuer.environment));
   const saleIds = new Set(sales.map((sale) => sale.id));
   return {
     ...data,
     sales,
-    guides: (data.guides || []).filter((guide) => documentScopeId(guide, data.issuer) === scopeId),
+    guides: (data.guides || []).filter((guide) => inRequestedScope(guide) && documentInEnvironment(guide, data.issuer.environment)),
     receivedRetentions: (data.receivedRetentions || []).filter((retention) => !retention.saleId || saleIds.has(retention.saleId)),
-    cashClosings: (data.cashClosings || []).filter((closing) => closing.establishment && closing.emissionPoint ? `${closing.establishment}-${closing.emissionPoint}` === scopeId : true)
+    cashClosings: (data.cashClosings || []).filter((closing) => documentInEnvironment(closing, data.issuer.environment) && (scopeId === "all" || (closing.establishment && closing.emissionPoint ? `${closing.establishment}-${closing.emissionPoint}` === scopeId : true)))
   };
 }
 

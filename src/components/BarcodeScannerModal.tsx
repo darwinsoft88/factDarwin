@@ -1,11 +1,13 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useAudioPlayer } from "expo-audio";
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import scanBeep from "../../assets/sounds/scan-beep.wav";
 import { normalizeProductCode } from "../validation";
+import { useAppTheme } from "../theme/AppTheme";
 import { PrimaryButton } from "./common";
-import { AppToast } from "./AppToast";
 type BarcodeScannerModalProps = {
   visible: boolean;
   title: string;
@@ -15,6 +17,13 @@ type BarcodeScannerModalProps = {
 };
 
 export function BarcodeScannerModal({ visible, title, onClose, onScan, continuous = false }: BarcodeScannerModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 12 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 12 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+  const adaptiveCameraHeight = Math.max(180, Math.min(360, adaptiveMaxHeight - 150));
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [lastCode, setLastCode] = useState("");
@@ -52,24 +61,24 @@ export function BarcodeScannerModal({ visible, title, onClose, onScan, continuou
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.scannerBackdrop}>
-        <View style={styles.scannerSheet}>
-          <View style={styles.scannerHeader}>
+      <View style={[styles.scannerBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
+        <View style={[styles.scannerSheet, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <View style={[styles.scannerHeader, { borderBottomColor: theme.colors.border }]}>
             <View style={styles.flex}>
-              <Text style={styles.scannerTitle}>{title}</Text>
-              <Text style={styles.scannerMeta}>Apunte al codigo de barras o QR del producto.</Text>
+              <Text style={[styles.scannerTitle, { color: theme.colors.text }]}>{title}</Text>
+              <Text style={[styles.scannerMeta, { color: theme.colors.textMuted }]}>Apunte al codigo de barras o QR del producto.</Text>
             </View>
-            <Pressable style={styles.smallButton} onPress={onClose}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
+            <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+              <Text style={[styles.smallButtonText, { color: theme.colors.primaryStrong }]}>Cerrar</Text>
             </Pressable>
           </View>
           {!permission?.granted ? (
             <View style={styles.scannerPermission}>
-              <Text style={styles.paragraph}>La app necesita permiso de camara para escanear codigos.</Text>
+              <Text style={[styles.paragraph, { color: theme.colors.textMuted }]}>La app necesita permiso de camara para escanear codigos.</Text>
               <PrimaryButton label="Permitir camara" onPress={handleOpenPermission} />
             </View>
           ) : (
-            <View style={styles.scannerCameraWrap}>
+            <View style={[styles.scannerCameraWrap, Platform.OS !== "web" && { height: adaptiveCameraHeight }]}>
               <CameraView
                 key="active-barcode-scanner"
                 style={styles.scannerCamera}
@@ -90,21 +99,20 @@ export function BarcodeScannerModal({ visible, title, onClose, onScan, continuou
                   }
                 }}
               />
-              <View style={styles.scannerFrame} />
+              <View style={[styles.scannerFrame, { borderColor: theme.colors.success }]} />
             </View>
           )}
           {continuous ? (
-            <View style={styles.scanStatus}>
-              <Text style={styles.scanStatusText}>{scanned ? `Codigo ${lastCode || ""} leido. Acerque el siguiente producto.` : "Escaner continuo activo."}</Text>
+            <View style={[styles.scanStatus, { backgroundColor: theme.colors.successSoft, borderTopColor: theme.colors.success }]}>
+              <Text style={[styles.scanStatusText, { color: theme.colors.success }]}>{scanned ? `Codigo ${lastCode || ""} leido. Acerque el siguiente producto.` : "Escaner continuo activo."}</Text>
             </View>
           ) : scanned ? (
-            <Pressable style={styles.scanButton} onPress={() => setScanned(false)}>
-              <Text style={styles.scanButtonText}>Escanear otro</Text>
+            <Pressable style={[styles.scanButton, { backgroundColor: theme.colors.primary }]} onPress={() => setScanned(false)}>
+              <Text style={[styles.scanButtonText, { color: theme.colors.onPrimary }]}>Escanear otro</Text>
             </Pressable>
           ) : null}
         </View>
       </View>
-      <AppToast />
     </Modal>
   );
 }

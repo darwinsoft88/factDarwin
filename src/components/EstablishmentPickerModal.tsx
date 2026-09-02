@@ -7,8 +7,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useAppTheme } from "../theme/AppTheme";
 
 type EstablishmentPickerModalProps = {
   visible: boolean;
@@ -33,6 +37,12 @@ export function EstablishmentPickerModal({
   onSelect,
   onCancel
 }: EstablishmentPickerModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 24 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 24 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
   const selectingRef = useRef(false);
   const [selectingId, setSelectingId] = useState("");
   const cancelStyle = cancelVariant === "cancel" ? styles.actionSheetCancel : styles.secondaryActionButton;
@@ -65,10 +75,10 @@ export function EstablishmentPickerModal({
   statusBarTranslucent
   onRequestClose={onCancel}
 >
-      <View style={styles.smallNoticeBackdrop}>
-        <View style={styles.establishmentPickerModal}>
-          <Text style={styles.smallNoticeTitle}>{title}</Text>
-          <Text style={styles.smallNoticeText}>{subtitle}</Text>
+      <View style={[styles.smallNoticeBackdrop, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
+        <View style={[styles.establishmentPickerModal, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <Text style={[styles.smallNoticeTitle, { color: theme.colors.text }]}>{title}</Text>
+          <Text style={[styles.smallNoticeText, { color: theme.colors.textMuted }]}>{subtitle}</Text>
           <ScrollView
             style={styles.establishmentList}
             contentContainerStyle={styles.establishmentListContent}
@@ -87,15 +97,15 @@ export function EstablishmentPickerModal({
                   key={item.id}
                   style={[
                     styles.establishmentPickerOption,
-                    active && styles.establishmentPickerOptionActive,
+                    { borderColor: active ? theme.colors.primary : theme.colors.borderStrong, backgroundColor: active ? theme.colors.primarySoft : theme.colors.surfaceMuted },
                     Boolean(selectingId) && styles.establishmentPickerOptionDisabled
                   ]}
                   disabled={Boolean(selectingId)}
                   onPress={() => { void selectEstablishment(item.id); }}
                 >
-                  <Text style={styles.companyChoiceTitle}>{item.name}</Text>
+                  <Text style={[styles.companyChoiceTitle, { color: theme.colors.text }]}>{item.name}</Text>
 
-                  <Text style={styles.companyChoiceMeta}>
+                  <Text style={[styles.companyChoiceMeta, { color: theme.colors.textMuted }]}>
                     {selecting
                       ? "Ingresando..."
                       : `${item.establishment}-${item.emissionPoint} | Sec. factura ${item.sequential}`}
@@ -105,11 +115,11 @@ export function EstablishmentPickerModal({
             })}
           </ScrollView>
           <Pressable
-            style={[cancelStyle, Boolean(selectingId) && styles.establishmentPickerOptionDisabled]}
+            style={[cancelStyle, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }, Boolean(selectingId) && styles.establishmentPickerOptionDisabled]}
             disabled={Boolean(selectingId)}
             onPress={onCancel}
           >
-            <Text style={cancelTextStyle}>{cancelLabel}</Text>
+            <Text style={[cancelTextStyle, { color: theme.colors.primary }]}>{cancelLabel}</Text>
           </Pressable>
         </View>
       </View>
@@ -129,8 +139,7 @@ const styles = StyleSheet.create({
 },
   establishmentPickerModal: {
     alignSelf: "center",
-    width: 340,
-
+    width: "100%",
     maxWidth: 340,
     maxHeight: "85%",
     borderRadius: 12,

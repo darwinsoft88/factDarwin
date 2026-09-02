@@ -45,6 +45,20 @@ export async function reserveDocumentSequence(backendUrl: string, payload: { doc
   return result;
 }
 
+export async function queryInvoiceAuthorization(backendUrl: string, accessKey: string, token = ""): Promise<AuthorizationResponse> {
+  const baseUrl = backendBaseUrl(backendUrl);
+  const response = await postJson(
+    `${baseUrl}/api/facturas/consultar-autorizacion`,
+    { accessKey },
+    "No hay conexion para consultar la autorizacion del documento.",
+    token,
+    INVOICE_AUTHORIZATION_TIMEOUT_MS
+  );
+  const result = (await readJson(response)) as AuthorizationResponse;
+  if (!response.ok) throw new Error(result.error || "No se pudo consultar la autorizacion de la factura.");
+  return result;
+}
+
 export async function getCompanySriEnvironment(backendUrl: string, token = ""): Promise<SriEnvironmentResponse> {
   const response = await fetchWithTimeout(`${backendBaseUrl(backendUrl)}/api/sri/environment`, { headers: authHeaders(token), cache: "no-store" }, 12_000, "No se pudo confirmar el ambiente SRI vigente.");
   const result = await readJson(response) as SriEnvironmentResponse;

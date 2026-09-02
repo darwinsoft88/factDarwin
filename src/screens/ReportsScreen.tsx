@@ -18,12 +18,23 @@ import { buildMobileReportHtml, buildReportExcelHtml, buildReportHtml, formatIva
 import { saleProfitForItemFilter, saleSubtotalForItemFilter, saleTaxForItemFilter, saleTotalForItemFilter } from "../utils/reports";
 import { documentTypeLabel } from "../utils/sales";
 import { money } from "../sri";
+import { useAppTheme } from "../theme/AppTheme";
+import type { AccentCardTone } from "../components/ThemedAccentCard";
 
 type ReportsListItemProps = {
   title: string;
   meta: string;
   badge?: string;
+  accentTone?: AccentCardTone;
 };
+
+function reportDocumentAccentTone(status: string): AccentCardTone {
+  if (status === "AUTORIZADA") return "success";
+  if (status === "DEVUELTA" || status === "ERROR_SRI") return "danger";
+  if (status === "PROFORMA") return "warning";
+  if (["FIRMADA", "ENVIADA", "ENVIADA_SRI", "PENDIENTE_SRI", "EN_REVISION_SRI", "TICKET_OFFLINE"].includes(status)) return "info";
+  return "primary";
+}
 
 type CalendarDateInputProps = {
   label: string;
@@ -42,6 +53,7 @@ export function ReportsScreen({
   ListItemComponent: React.ComponentType<ReportsListItemProps>;
   CalendarDateInputComponent: React.ComponentType<CalendarDateInputProps>;
 }) {
+  const { theme } = useAppTheme();
   const reportsState = useReportsState(data);
   const {
     availableYears,
@@ -121,8 +133,8 @@ export function ReportsScreen({
   return (
     <View style={styles.stack}>
       <Section title="Reporte contable">
-        <View style={styles.infoStrip}>
-          <Text style={styles.infoText}>Tributario para declaraciones. Operativo para revisar movimientos, notas y proformas.</Text>
+        <View style={[styles.infoStrip, { borderColor: theme.colors.info, backgroundColor: theme.colors.infoSoft }]}>
+          <Text style={[styles.infoText, { color: theme.colors.info }]}>Tributario para declaraciones. Operativo para revisar movimientos, notas y proformas.</Text>
         </View>
         <Select
           label="Establecimiento"
@@ -240,6 +252,7 @@ export function ReportsScreen({
               title={`${documentNumber(sale, data.issuer)} - ${client?.name ?? "Cliente"}`}
               meta={`${documentTypeLabel(sale)} | ${formatShortDate(sale.createdAt)} | Base $${accountingMoney(sale, saleSubtotalForItemFilter(sale, itemFilter))} | IVA $${accountingMoney(sale, saleTaxForItemFilter(sale, itemFilter))} | Total $${accountingMoney(sale, saleTotalForItemFilter(sale, itemFilter))} | Util. $${money(saleProfitForItemFilter(sale, reportData.products, itemFilter))}${sale.voidReason ? ` | ${sale.voidReason}` : ""}`}
               badge={sale.status}
+              accentTone={reportDocumentAccentTone(sale.status)}
             />
           );
         })}

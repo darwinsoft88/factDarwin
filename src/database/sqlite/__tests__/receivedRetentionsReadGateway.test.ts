@@ -40,7 +40,7 @@ function database(options: {
         source_hash: options.hash ?? "retentions-hash",
         row_count: options.count ?? 1,
         status: options.dirty ? "dirty" : "validated",
-        schema_version: 11,
+        schema_version: 12,
         validated_at: "2026-07-29",
         updated_at: "2026-07-29",
         last_error_code: null,
@@ -52,7 +52,7 @@ function database(options: {
       if (!source.includes("app_metadata")) return [];
       return [
         { key: "tenant_id", value_json: JSON.stringify("tenant-1") },
-        { key: "schema_version", value_json: JSON.stringify(11) },
+        { key: "schema_version", value_json: JSON.stringify(12) },
         { key: "migration_state", value_json: JSON.stringify("not_started") },
         { key: "snapshot_hash", value_json: JSON.stringify("payload-hash") },
       ] as T[];

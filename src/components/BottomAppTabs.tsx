@@ -1,8 +1,9 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { LayoutChangeEvent, Pressable, StyleSheet, Text, View } from "react-native";
 import { AppTab } from "../utils/appAccess";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAppTheme } from "../theme/AppTheme";
 
 type MaterialIconName = React.ComponentProps<
     typeof MaterialCommunityIcons
@@ -13,6 +14,7 @@ type BottomAppTabsProps = {
     activeTab: AppTab;
     onChange: (tab: AppTab) => void;
     onOpenMore: () => void;
+    onHeightChange?: (height: number) => void;
 };
 
 type PrimaryTab = "dashboard" | "ventas" | "documentos";
@@ -47,9 +49,11 @@ export function BottomAppTabs({
     availableTabs,
     activeTab,
     onChange,
-    onOpenMore
+    onOpenMore,
+    onHeightChange
 }: BottomAppTabsProps) {
     const insets = useSafeAreaInsets();
+    const { theme } = useAppTheme();
     const visiblePrimaryTabs = primaryTabs.filter(({ tab }) =>
         availableTabs.includes(tab)
     );
@@ -59,16 +63,20 @@ export function BottomAppTabs({
 
     return (
         <View
+            onLayout={(event: LayoutChangeEvent) => onHeightChange?.(event.nativeEvent.layout.height)}
             style={[
                 styles.navigation,
                 {
-                    paddingBottom: Math.max(insets.bottom, 8)
+                    paddingBottom: Math.max(insets.bottom, 8),
+                    backgroundColor: theme.colors.surface,
+                    borderTopColor: theme.colors.border,
+                    shadowColor: theme.colors.shadow
                 }
             ]} >
 
             {visiblePrimaryTabs.map(({ tab, label, icon, selectedIcon }) => {
                 const selected = activeTab === tab;
-                const color = selected ? "#0f766e" : "#64748b";
+                const color = selected ? theme.colors.primary : theme.colors.textMuted;
 
                 return (
                     <Pressable
@@ -78,12 +86,12 @@ export function BottomAppTabs({
                         accessibilityLabel={`Ir a ${label}`}
                         style={({ pressed }) => [
                             styles.item,
-                            selected && styles.itemSelected,
+                            selected && [styles.itemSelected, { backgroundColor: theme.colors.primarySoft }],
                             pressed && styles.itemPressed
                         ]}
                         onPress={() => onChange(tab)}
                     >
-                        <View style={[styles.iconBox, selected && styles.iconBoxSelected]}>
+                        <View style={[styles.iconBox, selected && [styles.iconBoxSelected, { backgroundColor: theme.colors.successSoft }]]}>
                             <MaterialCommunityIcons
                                 name={selected ? selectedIcon : icon}
                                 size={22}
@@ -93,12 +101,12 @@ export function BottomAppTabs({
 
                         <Text
                             numberOfLines={1}
-                            style={[styles.label, selected && styles.labelSelected]}
+                            style={[styles.label, { color: theme.colors.textMuted }, selected && [styles.labelSelected, { color: theme.colors.primary }]]}
                         >
                             {label}
                         </Text>
 
-                        {selected ? <View style={styles.activeIndicator} /> : null}
+                        {selected ? <View style={[styles.activeIndicator, { backgroundColor: theme.colors.primary }]} /> : null}
                     </Pressable>
                 );
             })}
@@ -109,28 +117,28 @@ export function BottomAppTabs({
                 accessibilityLabel="Abrir más opciones"
                 style={({ pressed }) => [
                     styles.item,
-                    moreSelected && styles.itemSelected,
+                    moreSelected && [styles.itemSelected, { backgroundColor: theme.colors.primarySoft }],
                     pressed && styles.itemPressed
                 ]}
                 onPress={onOpenMore}
             >
                 <View
-                    style={[styles.iconBox, moreSelected && styles.iconBoxSelected]}
+                    style={[styles.iconBox, moreSelected && [styles.iconBoxSelected, { backgroundColor: theme.colors.successSoft }]]}
                 >
                     <MaterialCommunityIcons
                         name={moreSelected ? "menu-open" : "menu-open"}
                         size={24}
-                        color={moreSelected ? "#0f766e" : "#64748b"}
+                        color={moreSelected ? theme.colors.primary : theme.colors.textMuted}
                     />
                 </View>
 
                 <Text
-                    style={[styles.label, moreSelected && styles.labelSelected]}
+                    style={[styles.label, { color: theme.colors.textMuted }, moreSelected && [styles.labelSelected, { color: theme.colors.primary }]]}
                 >
                     Menú
                 </Text>
 
-                {moreSelected ? <View style={styles.activeIndicator} /> : null}
+                {moreSelected ? <View style={[styles.activeIndicator, { backgroundColor: theme.colors.primary }]} /> : null}
             </Pressable>
         </View>
     );

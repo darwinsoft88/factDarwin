@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   buildDocumentEmail,
+  buildDocumentRide,
   normalizeRecipient,
   sha256,
   simulationResult
@@ -134,6 +135,16 @@ test("genera RIDE como Buffer PDF valido", async () => {
   assert.equal(pdf.subarray(0, 5).toString("ascii"), "%PDF-");
 });
 
+test("Ver RIDE reutiliza el mismo constructor PDF sin depender del correo", async () => {
+  const current = operation("factura", { operation: { recipientEmail: "" } });
+  const ride = await buildDocumentRide(current, { limits: LIMITS });
+
+  assert.equal(ride.contentType, "application/pdf");
+  assert.match(ride.filename, /\.pdf$/);
+  assert.equal(ride.content.subarray(0, 4).toString("ascii"), "%PDF");
+  assert.equal(ride.size, ride.content.length);
+});
+
 test("genera un RIDE multipagina sin perder el formato PDF", async () => {
   const current = operation("factura", {
     document: {
@@ -146,6 +157,33 @@ test("genera un RIDE multipagina sin perder el formato PDF", async () => {
         discount: 0,
         ivaRate: 0.15
       }))
+    }
+  });
+  const snapshot = current.payload.authorizationSnapshot;
+  const pdf = await buildRidePdf({
+    documentType: current.documentType,
+    document: snapshot.document,
+    client: snapshot.client,
+    issuer: snapshot.issuer,
+    sourceDocument: snapshot.sourceDocument
+  });
+
+  assert.equal(Buffer.isBuffer(pdf), true);
+  assert.equal(pdf.subarray(0, 5).toString("ascii"), "%PDF-");
+  assert.ok((pdf.toString("latin1").match(/\/Type\s*\/Page\b/g) || []).length > 1);
+});
+
+test("genera RIDE con informacion adicional extensa sin desbordar el resumen", async () => {
+  const current = operation("factura", {
+    document: {
+      additionalInfo: Array.from({ length: 12 }, (_value, index) => ({
+        name: `Campo adicional ${index + 1}`,
+        value: `Informacion extensa ${index + 1} ${"detalle ".repeat(12)}`
+      }))
+    },
+    client: {
+      phone: "0999999999",
+      email: "cliente@example.com"
     }
   });
   const snapshot = current.payload.authorizationSnapshot;

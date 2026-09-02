@@ -5,11 +5,15 @@ import { Empty } from "../components/common";
 import { AlertRow } from "../components/metrics";
 import { AppData, Sale, User } from "../types";
 import { productMinStock } from "../utils/accounting";
-import { AppTab, appLicenseStatus, licenseStatusLabel, tabsForRole } from "../utils/appAccess";
+import { AppTab, appLicenseStatus, licenseStatusLabel } from "../utils/appAccess";
 import { buildDashboard } from "../utils/dashboard";
 import { documentNumber } from "../utils/documents";
 import { maxEmissionPointsForLicense } from "../utils/license";
 import { money } from "../sri";
+import { useAppTheme } from "../theme/AppTheme";
+import type { CompanyAssetsStatus } from "../services/backendApi/types";
+import { GettingStartedCard } from "../components/GettingStartedCard";
+import type { OnboardingEvaluation, OnboardingExperience, OnboardingStepState } from "../onboarding/onboardingTypes";
 
 type DashboardListItemProps = {
   title: string;
@@ -24,25 +28,55 @@ type IconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
 export function DashboardScreen({
   data,
-  user,
+  user: _user,
+  certificateStatus,
+  onboardingEvaluation,
+  onboardingExperience,
+  onOpenOnboardingStep,
+  onMinimizeOnboarding,
+  onExpandOnboarding,
+  onSkipOnboardingStep,
+  onAcknowledgeOnboarding,
+  availableTabs,
   onNavigate
 }: {
   data: AppData;
   user: User;
+  certificateStatus?: CompanyAssetsStatus["certificate"];
+  onboardingEvaluation: OnboardingEvaluation;
+  onboardingExperience: OnboardingExperience;
+  onOpenOnboardingStep: (step: OnboardingStepState) => void;
+  onMinimizeOnboarding: () => void;
+  onExpandOnboarding: () => void;
+  onSkipOnboardingStep: (step: OnboardingStepState) => void;
+  onAcknowledgeOnboarding: () => void;
+  availableTabs: AppTab[];
   onNavigate: (tab: AppTab) => void;
   ListItemComponent: React.ComponentType<DashboardListItemProps>;
 }) {
+  const { theme } = useAppTheme();
   const dashboard = useMemo(() => buildDashboard(data), [data]);
-  const allowedTabs = tabsForRole(user.role);
+  const allowedTabs = availableTabs;
   const primaryTab: AppTab = allowedTabs.includes("ventas") ? "ventas" : allowedTabs.includes("caja") ? "caja" : "reportes";
   const licenseState = appLicenseStatus(data.license);
   const maxPoints = maxEmissionPointsForLicense(data.license);
   const activePoints = data.issuer.establishments?.length || 1;
   const visibleRecentSales = dashboard.recentSales.slice(0, 3);
   const topLowStock = dashboard.lowStock[0];
+  const certificateAlert = buildCertificateAlert(certificateStatus);
+  const hasGeneralAlerts = dashboard.pendingCount > 0 || dashboard.rejectedCount > 0 || dashboard.lowStock.length > 0 || Boolean(certificateAlert);
 
   return (
     <View style={styles.stack}>
+      <GettingStartedCard
+        evaluation={onboardingEvaluation}
+        experience={onboardingExperience}
+        onOpenStep={onOpenOnboardingStep}
+        onMinimize={onMinimizeOnboarding}
+        onExpand={onExpandOnboarding}
+        onSkipOptional={onSkipOnboardingStep}
+        onAcknowledge={onAcknowledgeOnboarding}
+      />
       <View style={styles.dashboardHero}>
         <View style={styles.heroMain}>
           <View style={styles.heroAmountRow}>
@@ -75,7 +109,7 @@ export function DashboardScreen({
       ) : null}
 
       <View style={styles.sectionBlock}>
-        <Text style={styles.sectionLabel}>Accesos rapidos</Text>
+        <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>Accesos rapidos</Text>
         <View style={styles.quickGrid}>
           {allowedTabs.includes("caja") ? <DashboardQuickCard label="Caja" icon="cash-register" tone="warning" onPress={() => onNavigate("caja")} /> : null}
           {allowedTabs.includes("creditos") ? <DashboardQuickCard label="Creditos" icon="account-cash-outline" tone="info" onPress={() => onNavigate("creditos")} /> : null}
@@ -85,35 +119,35 @@ export function DashboardScreen({
       </View>
 
       <View style={styles.sectionBlock}>
-        <Text style={styles.sectionLabel}>Ultimos documentos</Text>
+        <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>Ultimos documentos</Text>
         {visibleRecentSales.length === 0 ? <Empty text="Aun no hay facturas emitidas." /> : null}
         <View style={styles.recentList}>
           {visibleRecentSales.map((sale: Sale) => {
             const client = data.clients.find((item) => item.id === sale.clientId);
             return (
-              <Pressable key={sale.id} style={styles.recentRow} onPress={() => onNavigate("documentos")}>
+              <Pressable key={sale.id} style={[styles.recentRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]} onPress={() => onNavigate("documentos")}>
                 <View style={styles.recentStatusWrap}>
-                  <Text style={[styles.recentBadge, sale.status === "AUTORIZADA" && styles.recentBadgeSuccess]} numberOfLines={1}>{sale.status}</Text>
+                  <Text style={[styles.recentBadge, { backgroundColor: theme.colors.dangerSoft, color: theme.colors.danger }, sale.status === "AUTORIZADA" && { backgroundColor: theme.colors.successSoft, color: theme.colors.success }]} numberOfLines={1}>{sale.status}</Text>
                 </View>
                 <View style={styles.recentContent}>
-                  <Text style={styles.recentNumber} numberOfLines={1}>{documentNumber(sale, data.issuer)}</Text>
-                  <Text style={styles.recentClient} numberOfLines={1}>{client?.name ?? "Cliente"}</Text>
+                  <Text style={[styles.recentNumber, { color: theme.colors.textMuted }]} numberOfLines={1}>{documentNumber(sale, data.issuer)}</Text>
+                  <Text style={[styles.recentClient, { color: theme.colors.text }]} numberOfLines={1}>{client?.name ?? "Cliente"}</Text>
                 </View>
-                <Text style={styles.recentAmount}>${money(sale.total)}</Text>
+                <Text style={[styles.recentAmount, { color: theme.colors.success }]}>${money(sale.total)}</Text>
               </Pressable>
             );
           })}
         </View>
         {dashboard.recentSales.length > 3 ? (
           <Pressable style={styles.viewAllButton} onPress={() => onNavigate("documentos")}>
-            <Text style={styles.viewAllText}>Ver todos los documentos</Text>
-            <MaterialCommunityIcons name="arrow-right" size={16} color="#0f766e" />
+            <Text style={[styles.viewAllText, { color: theme.colors.primary }]}>Ver todos los documentos</Text>
+            <MaterialCommunityIcons name="arrow-right" size={16} color={theme.colors.primary} />
           </Pressable>
         ) : null}
       </View>
 
       <View style={styles.sectionBlock}>
-        <Text style={styles.sectionLabel}>Resumen del mes</Text>
+        <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>Resumen del mes</Text>
         <View style={styles.compactGrid}>
           <CompactMetric label="Ventas mes" value={`$${money(dashboard.monthTotal)}`} icon="chart-line" tone="info" />
           <CompactMetric label="IVA mes" value={`$${money(dashboard.monthTax)}`} icon="file-percent-outline" />
@@ -123,7 +157,7 @@ export function DashboardScreen({
       </View>
 
       <View style={styles.sectionBlock}>
-        <Text style={styles.sectionLabel}>Estado de licencia</Text>
+        <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>Estado de licencia</Text>
         <View style={styles.compactGrid}>
           <CompactMetric
             label={licenseStatusLabel(data.license)}
@@ -141,41 +175,54 @@ export function DashboardScreen({
       </View>
 
       <View style={styles.sectionBlock}>
-        <Text style={styles.sectionLabel}>Alertas generales</Text>
+        <Text style={[styles.sectionLabel, { color: theme.colors.textMuted }]}>Alertas generales</Text>
+        {certificateAlert ? <AlertRow title={certificateAlert.title} detail={certificateAlert.detail} tone={certificateAlert.tone} icon="certificate-outline" /> : null}
         {dashboard.pendingCount > 0 ? <AlertRow title="Facturas por revisar" detail={`${dashboard.pendingCount} factura(s) no autorizada(s). Puede reintentarlas desde Documentos.`} tone="warning" icon="clock-alert-outline" /> : null}
         {dashboard.rejectedCount > 0 ? <AlertRow title="Facturas rechazadas" detail={`${dashboard.rejectedCount} factura(s) requieren correccion o reintento.`} tone="danger" icon="alert-octagon-outline" /> : null}
-        {dashboard.lowStock.length > 0 ? (
-          dashboard.lowStock.slice(0, 5).map((product) => <AlertRow key={product.id} title={product.name} detail={`Stock actual: ${product.stock} | minimo ${productMinStock(product)}`} tone={product.stock <= 0 ? "danger" : "warning"} icon="package-variant-closed" />)
-        ) : (
-          <Empty text="Sin alertas importantes por ahora." />
-        )}
+        {dashboard.lowStock.slice(0, 5).map((product) => <AlertRow key={product.id} title={product.name} detail={`Stock actual: ${product.stock} | minimo ${productMinStock(product)}`} tone={product.stock <= 0 ? "danger" : "warning"} icon="package-variant-closed" />)}
+        {!hasGeneralAlerts ? <Empty text="Sin alertas importantes por ahora." /> : null}
       </View>
     </View>
   );
 }
 
+function buildCertificateAlert(certificate?: CompanyAssetsStatus["certificate"]): { title: string; detail: string; tone: "warning" | "danger" } | null {
+  if (!certificate?.configured) return null;
+  const date = certificate.expiresAt ? new Date(certificate.expiresAt).toLocaleDateString("es-EC") : "";
+  if (certificate.expirationStatus === "expired") return { title: "Firma electronica vencida", detail: `No podra emitir comprobantes${date ? `; vencio el ${date}` : ""}. Suba una firma vigente en SRI.`, tone: "danger" };
+  if (certificate.expirationStatus === "not_yet_valid") return { title: "Firma electronica aun no vigente", detail: "Revise la fecha de inicio del certificado antes de emitir.", tone: "danger" };
+  if (certificate.expirationStatus === "critical") return { title: "Firma electronica por vencer", detail: `Quedan ${certificate.daysRemaining ?? 0} dia(s)${date ? `; vence el ${date}` : ""}. Renuevela cuanto antes.`, tone: "danger" };
+  if (certificate.expirationStatus === "warning") return { title: "Renueve pronto su firma electronica", detail: `Quedan ${certificate.daysRemaining ?? 0} dias${date ? `; vence el ${date}` : ""}.`, tone: "warning" };
+  return null;
+}
+
 function DashboardQuickCard({ label, icon, tone, onPress }: { label: string; icon: IconName; tone: "success" | "warning" | "info" | "purple"; onPress: () => void }) {
+  const { theme } = useAppTheme();
+  const color = tone === "warning" ? theme.colors.warning : tone === "info" ? theme.colors.info : tone === "purple" ? theme.colors.accent : theme.colors.success;
+  const soft = tone === "warning" ? theme.colors.warningSoft : tone === "info" ? theme.colors.infoSoft : tone === "purple" ? theme.colors.accentSoft : theme.colors.successSoft;
   return (
-    <Pressable style={styles.quickCard} onPress={onPress}>
-      <View style={[styles.quickIcon, tone === "warning" && styles.quickIconWarning, tone === "info" && styles.quickIconInfo, tone === "purple" && styles.quickIconPurple]}>
-        <MaterialCommunityIcons name={icon} size={18} color={tone === "warning" ? "#b45309" : tone === "info" ? "#1d4ed8" : tone === "purple" ? "#7e22ce" : "#0f766e"} />
+    <Pressable style={[styles.quickCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface, shadowColor: theme.colors.shadow }]} onPress={onPress}>
+      <View style={[styles.quickIcon, { backgroundColor: soft }]}>
+        <MaterialCommunityIcons name={icon} size={18} color={color} />
       </View>
-      <Text style={styles.quickText}>{label}</Text>
+      <Text style={[styles.quickText, { color: theme.colors.text }]}>{label}</Text>
     </Pressable>
   );
 }
 
 function CompactMetric({ label, value, icon, tone = "default" }: { label: string; value: string; icon: IconName; tone?: "default" | "success" | "warning" | "danger" | "info" }) {
-  const color = tone === "success" ? "#15803d" : tone === "warning" ? "#b45309" : tone === "danger" ? "#b91c1c" : tone === "info" ? "#1d4ed8" : "#0f766e";
+  const { theme } = useAppTheme();
+  const color = tone === "success" ? theme.colors.success : tone === "warning" ? theme.colors.warning : tone === "danger" ? theme.colors.danger : tone === "info" ? theme.colors.info : theme.colors.primary;
+  const soft = tone === "success" ? theme.colors.successSoft : tone === "warning" ? theme.colors.warningSoft : tone === "danger" ? theme.colors.dangerSoft : tone === "info" ? theme.colors.infoSoft : theme.colors.surface;
   return (
-    <View style={[styles.metricCard, tone === "success" && styles.metricSuccess, tone === "warning" && styles.metricWarning, tone === "danger" && styles.metricDanger, tone === "info" && styles.metricInfo]}>
+    <View style={[styles.metricCard, { borderColor: theme.colors.border, backgroundColor: soft }]}>
       <View style={styles.metricTop}>
-        <Text style={styles.metricValue} numberOfLines={1}>{value}</Text>
-        <View style={[styles.metricIcon, tone === "warning" && styles.metricIconWarning, tone === "danger" && styles.metricIconDanger, tone === "info" && styles.metricIconInfo]}>
+        <Text style={[styles.metricValue, { color: theme.colors.text }]} numberOfLines={1}>{value}</Text>
+        <View style={[styles.metricIcon, { backgroundColor: soft }]}>
           <MaterialCommunityIcons name={icon} size={16} color={color} />
         </View>
       </View>
-      <Text style={styles.metricLabel} numberOfLines={2}>{label}</Text>
+      <Text style={[styles.metricLabel, { color: theme.colors.textMuted }]} numberOfLines={2}>{label}</Text>
     </View>
   );
 }

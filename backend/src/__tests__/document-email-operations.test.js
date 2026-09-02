@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   buildAutomaticEmailOperation,
+  buildManualEmailOperation,
   createAutomaticEmailOperations,
   detectAutomaticEmailTransitions
 } = require("../document-email-operations");
@@ -109,6 +110,33 @@ test("la clave de operacion separa empresa, tipo y documento", () => {
 
   assert.notEqual(first.id, otherCompany.id);
   assert.notEqual(first.id, otherType.id);
+});
+
+test("el reenvio manual construye el mismo snapshot autorizado para el generador backend", () => {
+  const data = authorized(fixture());
+  const operation = buildManualEmailOperation("company-1", data, {
+    documentId: "sale-1",
+    documentType: "factura",
+    recipientEmail: "NUEVO@EXAMPLE.COM",
+    requestId: "manual-request-1"
+  }, "2026-07-26T13:00:00.000Z");
+
+  assert.equal(operation.origin, "manual_resend");
+  assert.equal(operation.recipientEmail, "nuevo@example.com");
+  assert.equal(operation.payload.authorizationSnapshot.document.authorizedXml, "<autorizacion />");
+  assert.equal(operation.payload.authorizationSnapshot.client.id, "client-1");
+  assert.equal(operation.payload.authorizationSnapshot.issuer.ruc, "1790012345001");
+});
+
+test("el reenvio manual rechaza documentos no autorizados", () => {
+  assert.throws(
+    () => buildManualEmailOperation("company-1", fixture(), {
+      documentId: "sale-1",
+      documentType: "factura",
+      recipientEmail: "cliente@example.com"
+    }),
+    /Solo se puede enviar un documento autorizado/
+  );
 });
 
 test("dos inserciones concurrentes conservan una sola operacion automatica", async () => {

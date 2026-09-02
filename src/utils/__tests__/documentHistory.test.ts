@@ -17,7 +17,7 @@ function sale(id: string, status: Sale["status"] = "AUTORIZADA", createdAt = "20
 }
 
 function summary(id: string, createdAt = "2025-01-01T12:00:00.000Z"): HistoricalDocumentSummary {
-  return { documentId: id, documentType: "factura", establishment: "002", emissionPoint: "010", sequential: id.padStart(9, "0"), issueDate: "01/01/2025", createdAt, clientId: `client-${id}`, clientDisplayName: `Cliente historico ${id}`, totalMicros: "1150000", paymentCondition: "contado", status: "AUTORIZADA", sriStatus: "AUTORIZADA", emailStatus: "none", hasAuthorizedXml: true, hasRideData: true };
+  return { documentId: id, documentType: "factura", environment: "1", establishment: "002", emissionPoint: "010", sequential: id.padStart(9, "0"), issueDate: "01/01/2025", createdAt, clientId: `client-${id}`, clientDisplayName: `Cliente historico ${id}`, totalMicros: "1150000", paymentCondition: "contado", status: "AUTORIZADA", sriStatus: "AUTORIZADA", emailStatus: "none", hasAuthorizedXml: true, hasRideData: true };
 }
 
 function page(items: HistoricalDocumentSummary[], overrides: Record<string, unknown> = {}) {

@@ -53,6 +53,7 @@ const envExample = fs.readFileSync(path.join(backendRoot, ".env.production.examp
   "DATABASE_URL=",
   "JWT_SECRET=",
   "ASSET_ENCRYPTION_SECRET=",
+  "DEVICE_SESSION_TOKEN_PEPPER=",
   "MASTER_ADMIN_KEY=",
   "SUPPORT_ADMIN_PASSWORD_HASH=",
   "SRI_ALLOW_INSECURE_TLS=false"

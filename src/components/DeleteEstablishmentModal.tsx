@@ -1,8 +1,11 @@
 import React from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useKeyboardInset } from "../hooks/useKeyboardInset";
+import { useAppTheme } from "../theme/AppTheme";
 import { IssuerEstablishment } from "../types";
 import { Input } from "./common";
-import { AppToast } from "./AppToast";
 
 type DeleteEstablishmentModalProps = {
   visible: boolean;
@@ -23,40 +26,52 @@ export function DeleteEstablishmentModal({
   onClose,
   onConfirm
 }: DeleteEstablishmentModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardInset = useKeyboardInset();
+  const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? 12 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 12 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
   const canDelete = confirmText.trim() === establishment.id && !deleting;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => { if (!deleting) onClose(); }}>
-      <View style={styles.creditModalBackdrop}>
-        <View style={styles.establishmentModal}>
-          <View style={styles.creditModalHeader}>
+      <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+      <View style={[styles.creditModalBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }]}>
+        <View style={[styles.establishmentModal, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <View style={[styles.creditModalHeader, { borderBottomColor: theme.colors.border }]}>
             <View style={styles.flex}>
-              <Text style={styles.creditModalTitle}>Eliminar establecimiento</Text>
-              <Text style={styles.creditModalMeta}>Esta accion solo esta disponible si no existen documentos asociados.</Text>
+              <Text style={[styles.creditModalTitle, { color: theme.colors.text }]}>Eliminar establecimiento</Text>
+              <Text style={[styles.creditModalMeta, { color: theme.colors.textMuted }]}>Esta accion solo esta disponible si no existen documentos asociados.</Text>
             </View>
-            <Pressable style={[styles.smallButton, deleting && styles.disabledButton]} onPress={() => { if (!deleting) onClose(); }} disabled={deleting}>
-              <Text style={styles.smallButtonText}>Cerrar</Text>
+            <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }, deleting && styles.disabledButton]} onPress={() => { if (!deleting) onClose(); }} disabled={deleting}>
+              <Text style={[styles.smallButtonText, { color: theme.colors.primaryStrong }]}>Cerrar</Text>
             </Pressable>
           </View>
-          <View style={styles.creditModalContent}>
-            <Text style={styles.paragraph}>Para eliminar {establishment.name} escriba exactamente {establishment.id}.</Text>
+          <ScrollView contentContainerStyle={[styles.creditModalContent, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING }]} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+            <Text style={[styles.paragraph, { color: theme.colors.textMuted }]}>Para eliminar {establishment.name} escriba exactamente {establishment.id}.</Text>
             <Input label="Confirmar codigo" value={confirmText} onChangeText={onConfirmTextChange} autoCapitalize="characters" />
             <Pressable
-              style={[styles.establishmentDeleteButton, !canDelete && styles.disabledDangerButton]}
+              style={[styles.establishmentDeleteButton, { borderColor: theme.colors.danger, backgroundColor: theme.colors.dangerSoft }, !canDelete && styles.disabledDangerButton]}
               onPress={onConfirm}
               disabled={!canDelete}
             >
-              <Text style={styles.establishmentDeleteButtonText}>{deleting ? "Eliminando..." : "Eliminar definitivamente"}</Text>
+              <Text style={[styles.establishmentDeleteButtonText, { color: theme.colors.danger }]}>{deleting ? "Eliminando..." : "Eliminar definitivamente"}</Text>
             </Pressable>
-          </View>
+          </ScrollView>
         </View>
       </View>
-      <AppToast />
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoiding: {
+    flex: 1
+  },
   creditModalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(15, 23, 42, 0.4)",

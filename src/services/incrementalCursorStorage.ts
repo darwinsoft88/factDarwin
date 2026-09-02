@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 export type IncrementalEntityVersion = { recordVersion: number; payloadHash: string; action: "UPSERT" | "DELETE" };
 export type IncrementalCursorState = {
   companyId: string;
-  protocolVersion: 1;
+  protocolVersion: 1 | 2;
   configVersion: string;
   moduleSet: string;
   cursor: string;
@@ -14,21 +14,21 @@ export type IncrementalCursorState = {
 };
 
 const prefix = "factudarwin:incremental-cursor:v1";
-const key = (companyId: string, configVersion: string, moduleSet: string) => `${prefix}:${companyId}:p1:${configVersion}:${moduleSet}`;
+const key = (companyId: string, configVersion: string, moduleSet: string, protocolVersion: 1 | 2 = 1) => `${prefix}:${companyId}:p${protocolVersion}:${configVersion}:${moduleSet}`;
 
-export async function loadIncrementalCursor(companyId: string, configVersion: string, moduleSet: string): Promise<IncrementalCursorState | null> {
+export async function loadIncrementalCursor(companyId: string, configVersion: string, moduleSet: string, protocolVersion: 1 | 2 = 1): Promise<IncrementalCursorState | null> {
   try {
-    const raw = await AsyncStorage.getItem(key(companyId, configVersion, moduleSet));
+    const raw = await AsyncStorage.getItem(key(companyId, configVersion, moduleSet, protocolVersion));
     if (!raw) return null;
     const value = JSON.parse(raw) as IncrementalCursorState;
-    if (value.companyId !== companyId || value.protocolVersion !== 1 || value.configVersion !== configVersion || value.moduleSet !== moduleSet || !value.cursor || !value.versions || value.inactive) return null;
+    if (value.companyId !== companyId || value.protocolVersion !== protocolVersion || value.configVersion !== configVersion || value.moduleSet !== moduleSet || !value.cursor || !value.versions || value.inactive) return null;
     return value;
   } catch { return null; }
 }
 
 export async function saveIncrementalCursor(state: IncrementalCursorState): Promise<void> {
   const serialized = JSON.stringify(state);
-  const storageKey = key(state.companyId, state.configVersion, state.moduleSet);
+  const storageKey = key(state.companyId, state.configVersion, state.moduleSet, state.protocolVersion);
   await AsyncStorage.setItem(storageKey, serialized);
   if (await AsyncStorage.getItem(storageKey) !== serialized) throw new Error("No se pudo verificar el cursor incremental.");
 }

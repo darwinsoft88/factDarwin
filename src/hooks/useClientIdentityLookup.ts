@@ -6,16 +6,8 @@ import {
 } from "../utils/dialogs";
 import { lookupIdentityData } from "../services/backend";
 import { AppData, Client } from "../types";
+import type { ClientFormValues } from "../components/ClientForm";
 import { normalizeClientIdentification } from "../validation";
-
-type ClientFormValues = {
-  name: string;
-  identification: string;
-  email: string;
-  phone: string;
-  address: string;
-  identificationType: Client["identificationType"];
-};
 
 type UseClientIdentityLookupParams = {
   backendToken: string;
@@ -55,7 +47,8 @@ export function useClientIdentityLookup({
         email: existingClient.email,
         phone: existingClient.phone || "",
         address: existingClient.address,
-        identificationType: existingClient.identificationType
+        identificationType: existingClient.identificationType,
+        defaultSalePriceTier: existingClient.defaultSalePriceTier || "pvp1"
       });
       setEditModalVisible(true);
       setClientSearch(existingClient.identification);

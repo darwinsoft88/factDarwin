@@ -26,6 +26,10 @@ interface ProductRow {
   tax_rate_basis_points: number;
   stock_micros: number;
   min_stock_micros: number;
+  image_key: string | null;
+  image_version: string | null;
+  image_updated_at: string | null;
+  image_mime_type: string | null;
   unit_measure: string | null;
   active: number;
   deleted: number;
@@ -64,7 +68,8 @@ export class ProductsRepository extends TenantRepository {
       `SELECT
         id, item_type, code, barcode, name, unit_price_micros,
         cost_micros, tax_rate_basis_points, stock_micros,
-        min_stock_micros, unit_measure, active, deleted, updated_at,
+        min_stock_micros, image_key, image_version, image_updated_at,
+        image_mime_type, unit_measure, active, deleted, updated_at,
         compatibility_json, record_hash
        FROM products
        WHERE tenant_id = ?
@@ -90,6 +95,10 @@ export class ProductsRepository extends TenantRepository {
         ivaRate: Number(row.tax_rate_basis_points) / 10_000,
         stock: Number(row.stock_micros) / 1_000_000,
         minStock: Number(row.min_stock_micros) / 1_000_000,
+        ...(row.image_key ? { imageKey: row.image_key } : {}),
+        ...(row.image_version ? { imageVersion: row.image_version } : {}),
+        ...(row.image_updated_at ? { imageUpdatedAt: row.image_updated_at } : {}),
+        ...(row.image_mime_type ? { imageMimeType: row.image_mime_type as "image/webp" } : {}),
         ...(row.unit_measure ? { unitMeasure: row.unit_measure } : {}),
         ...(Number(row.active) === 0 ? { active: false } : {}),
         ...(Number(row.deleted) === 1 ? { deleted: true } : {}),
@@ -108,7 +117,8 @@ export class ProductsRepository extends TenantRepository {
       `SELECT
         id, item_type, code, barcode, name, unit_price_micros,
         cost_micros, tax_rate_basis_points, stock_micros,
-        min_stock_micros, unit_measure, active, deleted, updated_at,
+        min_stock_micros, image_key, image_version, image_updated_at,
+        image_mime_type, unit_measure, active, deleted, updated_at,
         compatibility_json, record_hash
        FROM products
        WHERE tenant_id = ? AND name LIKE ? ESCAPE '\\' COLLATE NOCASE
@@ -125,7 +135,8 @@ export class ProductsRepository extends TenantRepository {
       `SELECT
         id, item_type, code, barcode, name, unit_price_micros,
         cost_micros, tax_rate_basis_points, stock_micros,
-        min_stock_micros, unit_measure, active, deleted, updated_at,
+        min_stock_micros, image_key, image_version, image_updated_at,
+        image_mime_type, unit_measure, active, deleted, updated_at,
         compatibility_json, record_hash
        FROM products
        WHERE tenant_id = ?
@@ -182,6 +193,10 @@ export class ProductsRepository extends TenantRepository {
         ivaRateBasisPoints: Number(row.tax_rate_basis_points),
         stockMicros: Number(row.stock_micros),
         minStockMicros: Number(row.min_stock_micros),
+        imageKey: row.image_key,
+        imageVersion: row.image_version,
+        imageUpdatedAt: row.image_updated_at,
+        imageMimeType: row.image_mime_type,
         unitMeasure: row.unit_measure,
         active: Number(row.active) === 1,
         deleted: Number(row.deleted) === 1,
@@ -246,9 +261,10 @@ export class ProductsRepository extends TenantRepository {
           `INSERT INTO products (
             tenant_id, id, item_type, code, barcode, name,
             unit_price_micros, cost_micros, tax_rate_basis_points,
-            stock_micros, min_stock_micros, unit_measure, active,
+            stock_micros, min_stock_micros, image_key, image_version,
+            image_updated_at, image_mime_type, unit_measure, active,
             deleted, updated_at, compatibility_json, record_hash
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           this.tenantId,
           record.id,
           record.itemType,
@@ -260,6 +276,10 @@ export class ProductsRepository extends TenantRepository {
           record.ivaRateBasisPoints,
           record.stockMicros,
           record.minStockMicros,
+          record.imageKey,
+          record.imageVersion,
+          record.imageUpdatedAt,
+          record.imageMimeType,
           record.unitMeasure,
           record.active ? 1 : 0,
           record.deleted ? 1 : 0,
@@ -333,9 +353,10 @@ export class ProductsRepository extends TenantRepository {
           `INSERT INTO products (
             tenant_id, id, item_type, code, barcode, name,
             unit_price_micros, cost_micros, tax_rate_basis_points,
-            stock_micros, min_stock_micros, unit_measure, active,
+            stock_micros, min_stock_micros, image_key, image_version,
+            image_updated_at, image_mime_type, unit_measure, active,
             deleted, updated_at, compatibility_json, record_hash
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(tenant_id, id) DO UPDATE SET
             item_type = excluded.item_type,
             code = excluded.code,
@@ -346,6 +367,10 @@ export class ProductsRepository extends TenantRepository {
             tax_rate_basis_points = excluded.tax_rate_basis_points,
             stock_micros = excluded.stock_micros,
             min_stock_micros = excluded.min_stock_micros,
+            image_key = excluded.image_key,
+            image_version = excluded.image_version,
+            image_updated_at = excluded.image_updated_at,
+            image_mime_type = excluded.image_mime_type,
             unit_measure = excluded.unit_measure,
             active = excluded.active,
             deleted = excluded.deleted,
@@ -363,6 +388,10 @@ export class ProductsRepository extends TenantRepository {
           record.ivaRateBasisPoints,
           record.stockMicros,
           record.minStockMicros,
+          record.imageKey,
+          record.imageVersion,
+          record.imageUpdatedAt,
+          record.imageMimeType,
           record.unitMeasure,
           record.active ? 1 : 0,
           record.deleted ? 1 : 0,

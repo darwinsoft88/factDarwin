@@ -1,5 +1,9 @@
 import React from "react";
-import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useKeyboardInset } from "../hooks/useKeyboardInset";
+import { useAppTheme } from "../theme/AppTheme";
 import { Input, PrimaryButton } from "./common";
 
 type CompanyAssetsSectionProps = {
@@ -35,14 +39,23 @@ export function CompanyAssetsSection({
   onConfirmCertificateUpload,
   onCancelCertificateUpload
 }: CompanyAssetsSectionProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardInset = useKeyboardInset();
+  const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? 18 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 18 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+
   return (
     <>
-      <Text style={styles.paragraph}>Estos archivos se guardan por empresa en el servidor. El certificado .p12 no se guarda en la app y queda cifrado.</Text>
-      {assetStatus ? <Text style={[styles.inlineInfo, assetStatusTone === "success" && styles.successText, assetStatusTone === "error" && styles.errorText]}>{assetStatus}</Text> : null}
+      <Text style={[styles.paragraph, { color: theme.colors.textMuted }]}>Estos archivos se guardan por empresa en el servidor. El certificado .p12 no se guarda en la app y queda cifrado.</Text>
+      {assetStatus ? <Text style={[styles.inlineInfo, { color: assetStatusTone === "success" ? theme.colors.success : assetStatusTone === "error" ? theme.colors.danger : theme.colors.info }]}>{assetStatus}</Text> : null}
       {logoUrl ? (
-        <View style={styles.assetInfoBox}>
-          <Text style={styles.assetInfoLabel}>URL logo RIDE</Text>
-          <Text style={styles.assetInfoValue} selectable>{logoUrl}</Text>
+        <View style={[styles.assetInfoBox, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
+          <Text style={[styles.assetInfoLabel, { color: theme.colors.textMuted }]}>URL logo RIDE</Text>
+          <Text style={[styles.assetInfoValue, { color: theme.colors.text }]} selectable>{logoUrl}</Text>
         </View>
       ) : null}
       <View style={styles.row}>
@@ -56,32 +69,39 @@ export function CompanyAssetsSection({
       <PrimaryButton label={uploading ? "Procesando..." : "Seleccionar firma .p12"} onPress={uploading ? () => undefined : onUploadCertificate} />
 
       <Modal visible={certificateModalVisible} transparent animationType="fade" onRequestClose={uploading ? () => undefined : onCancelCertificateUpload}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Confirmar firma electronica</Text>
-            <Text style={styles.modalMeta}>{pendingCertificateName || "Archivo .p12 seleccionado"}</Text>
-            <Text style={styles.paragraph}>Ingrese la contrasena del certificado para validarlo y guardarlo cifrado en el servidor.</Text>
+        <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+        <View style={[styles.modalBackdrop, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }]}>
+          <View style={[styles.modal, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border, shadowColor: theme.colors.shadow }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+            <ScrollView contentContainerStyle={[styles.modalContent, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING }]} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+            <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Confirmar firma electronica</Text>
+            <Text style={[styles.modalMeta, { color: theme.colors.primary }]}>{pendingCertificateName || "Archivo .p12 seleccionado"}</Text>
+            <Text style={[styles.paragraph, { color: theme.colors.textMuted }]}>Ingrese la contrasena del certificado para validarlo y guardarlo cifrado en el servidor.</Text>
             <Input label="Contrasena del certificado .p12" value={certificatePassword} onChangeText={onCertificatePasswordChange} secureTextEntry autoComplete="new-password" />
             <View style={styles.row}>
               <View style={styles.flex}>
-                <Pressable style={[styles.secondaryButton, uploading && styles.disabledButton]} onPress={uploading ? () => undefined : onCancelCertificateUpload}>
-                  <Text style={styles.secondaryButtonText}>Cancelar</Text>
+                <Pressable style={[styles.secondaryButton, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.surface }, uploading && styles.disabledButton]} onPress={uploading ? () => undefined : onCancelCertificateUpload}>
+                  <Text style={[styles.secondaryButtonText, { color: theme.colors.text }]}>Cancelar</Text>
                 </Pressable>
               </View>
               <View style={styles.flex}>
-                <Pressable style={[styles.confirmButton, uploading && styles.disabledButton]} onPress={uploading ? () => undefined : onConfirmCertificateUpload}>
-                  <Text style={styles.confirmButtonText}>{uploading ? "Validando..." : "Validar y subir"}</Text>
+                <Pressable style={[styles.confirmButton, { backgroundColor: theme.colors.primary }, uploading && styles.disabledButton]} onPress={uploading ? () => undefined : onConfirmCertificateUpload}>
+                  <Text style={[styles.confirmButtonText, { color: theme.colors.onPrimary }]}>{uploading ? "Validando..." : "Validar y subir"}</Text>
                 </Pressable>
               </View>
             </View>
+            </ScrollView>
           </View>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  keyboardAvoiding: {
+    flex: 1
+  },
   paragraph: {
     color: "#4b5563",
     lineHeight: 20
@@ -138,8 +158,7 @@ const styles = StyleSheet.create({
     maxWidth: 380,
     borderRadius: 10,
     backgroundColor: "#ffffff",
-    padding: 16,
-    gap: 12,
+    overflow: "hidden",
     borderWidth: 1,
     borderColor: "#dbe4f0",
     shadowColor: "#0f172a",
@@ -147,6 +166,10 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 6
+  },
+  modalContent: {
+    padding: 16,
+    gap: 12
   },
   modalTitle: {
     color: "#111827",

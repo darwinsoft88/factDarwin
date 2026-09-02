@@ -1,17 +1,16 @@
-import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Linking, Platform } from "react-native";
+import { Alert, Platform } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
 import { sendInvoiceEmail } from "../services/backend";
-import { buildRideHtml } from "../sri/ride";
-import { buildCreditNoteXml, buildInvoiceXml, money } from "../sri";
+import { getCachedDocumentRide, waitForDocumentSync } from "../services/documentRideCoordinator";
 import { AppData, Client, Sale, User } from "../types";
 import { appendAudit } from "../utils/audit";
 import { resolveCompanyLogoUrl } from "../utils/assets";
 import { showError, showInfo, showSuccess, showWarning } from "../utils/dialogs";
-import { buildCreditNoteRideHtml, buildInternalTicketHtml, buildProformaHtml } from "../utils/documentHtml";
+import { buildInternalTicketHtml, buildProformaHtml } from "../utils/documentHtml";
 import { issuerForSale } from "../utils/establishments";
-import { createPdfBase64, estimateTicketPageHeightMm, handlePdfDocument, handleThermalPdfDocument, openHtmlViewer } from "../utils/printFiles";
+import { estimateTicketPageHeightMm, handlePdfDocument, handleThermalPdfDocument, openHtmlViewer, openPdfFile } from "../utils/printFiles";
 import { isCreditNoteSale } from "../utils/sales";
 import { syncPatchToBackendResult } from "../utils/sync";
 import { isValidEmail } from "../validation";
@@ -50,20 +49,13 @@ export function useSaleDocumentActions({
     };
   }, []);
 
-  const createRide = async (sale: Sale, client: Client) => {
+  const createRide = async (sale: Sale, _client: Client) => {
     if (sale.status !== "AUTORIZADA") {
       Alert.alert("RIDE no disponible", "El RIDE se genera cuando la factura esta autorizada.");
       return;
     }
 
-    const html = buildRideHtml(sale, client, issuerForDocument(data, sale));
-
-    if (typeof window !== "undefined" && "document" in window) {
-      openHtmlViewer(html, `RIDE ${sale.sequence}`);
-      return;
-    }
-
-    await handlePdfDocument(html, `RIDE ${sale.sequence}`, "RIDE factura");
+    await openBackendRide(sale);
   };
 
   const createTicket = async (sale: Sale, client: Client) => {
@@ -89,19 +81,45 @@ export function useSaleDocumentActions({
     await handlePdfDocument(html, `Proforma ${sale.sequence}`, "Proforma");
   };
 
-  const createCreditNoteRide = async (sale: Sale, client: Client, source?: Sale) => {
+  const createCreditNoteRide = async (sale: Sale, _client: Client, _source?: Sale) => {
     if (sale.status !== "AUTORIZADA") {
       Alert.alert("RIDE no disponible", "La nota de credito debe estar autorizada.");
       return;
     }
 
-    const html = buildCreditNoteRideHtml(sale, client, issuerForDocument(data, sale), source);
-    if (Platform.OS === "web") {
-      openHtmlViewer(html, `Nota credito ${sale.sequence}`);
-      return;
-    }
+    await openBackendRide(sale);
+  };
 
-    await handlePdfDocument(html, `Nota credito ${sale.sequence}`, "Nota de credito");
+  const openBackendRide = async (sale: Sale) => {
+    const isCreditNote = isCreditNoteSale(sale);
+    const documentType = isCreditNote ? "nota_credito" : "factura";
+    const pendingWindow = Platform.OS === "web" && typeof window !== "undefined" ? window.open("", "_blank") : null;
+    try {
+      const ready = await waitForDocumentSync(data.backendUrl, sale.id, documentType);
+      if (!ready) throw new Error("El documento está guardado y su sincronización continúa pendiente. Intente compartirlo nuevamente en unos segundos.");
+      const ride = await getCachedDocumentRide(data.backendUrl, {
+        documentId: sale.id,
+        documentType
+      }, backendToken);
+      if (Platform.OS === "web") {
+        const binary = atob(ride.pdfBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        const url = URL.createObjectURL(new Blob([bytes], { type: ride.mimeType }));
+        if (pendingWindow) pendingWindow.location.href = url;
+        else window.open(url, "_blank");
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+        return;
+      }
+      const baseDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+      if (!baseDirectory) throw new Error("No existe una ubicacion disponible para abrir el RIDE.");
+      const uri = `${baseDirectory}${ride.filename.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
+      await FileSystem.writeAsStringAsync(uri, ride.pdfBase64, { encoding: FileSystem.EncodingType.Base64 });
+      await openPdfFile(uri, isCreditNote ? "RIDE nota de credito" : "RIDE factura");
+    } catch (error) {
+      pendingWindow?.close();
+      showError("RIDE no disponible", error instanceof Error ? error.message : "No se pudo obtener el RIDE.");
+    }
   };
 
   const recordSaleEmailAttempt = async (sale: Sale, to: string, status: "sent" | "failed", error = "") => {
@@ -126,7 +144,7 @@ export function useSaleDocumentActions({
     return true;
   };
 
-  const sendSaleEmail = async (sale: Sale, client: Client, source?: Sale, showAlerts = true) => {
+  const sendSaleEmail = async (sale: Sale, client: Client, showAlerts = true) => {
     if (sendingEmailRef.current) return false;
 
     if (sale.status !== "AUTORIZADA") {
@@ -146,7 +164,6 @@ export function useSaleDocumentActions({
 
     const isCreditNote = isCreditNoteSale(sale);
     const documentLabel = isCreditNote ? "nota de credito" : "factura";
-    const documentTitle = isCreditNote ? "Nota de credito" : "Factura";
     const saleIssuer = issuerForDocument(data, sale);
     const documentNumber = `${saleIssuer.establishment}-${saleIssuer.emissionPoint}-${sale.sequence}`;
 
@@ -156,16 +173,10 @@ export function useSaleDocumentActions({
       setProcessingMessage(`Enviando ${documentLabel} al correo del cliente...`);
     }
     try {
-      const rideHtml = isCreditNote ? buildCreditNoteRideHtml(sale, client, saleIssuer, source) : buildRideHtml(sale, client, saleIssuer);
-      const pdfBase64 = await createPdfBase64(rideHtml);
       await sendInvoiceEmail(data.backendUrl, {
         to: client.email,
-        subject: `${documentTitle} ${documentNumber}`,
-        html: rideHtml,
-        pdfBase64,
-        xml: sale.authorizedXml || sale.signedXml || (isCreditNote ? buildCreditNoteXml(sale, client, saleIssuer) : buildInvoiceXml(sale, client, saleIssuer)),
+        documentId: sale.id,
         documentType: isCreditNote ? "nota_credito" : "factura",
-        documentNumber
       }, backendToken);
       let historySaved = false;
       try {
@@ -200,7 +211,7 @@ export function useSaleDocumentActions({
   };
 
   const emailSale = async (sale: Sale, client: Client) => {
-    await sendSaleEmail(sale, client, data.sales.find((item) => item.id === sale.sourceSaleId));
+    await sendSaleEmail(sale, client);
   };
 
   const whatsappSale = async (sale: Sale, client: Client) => {
@@ -209,33 +220,51 @@ export function useSaleDocumentActions({
       return;
     }
 
-    const saleIssuer = issuerForDocument(data, sale);
-    const html = buildRideHtml(sale, client, saleIssuer);
-
-    if (Platform.OS === "web") {
-      openHtmlViewer(html, `RIDE ${sale.sequence}`);
+    if (sale.status !== "AUTORIZADA") {
+      showInfo("WhatsApp no disponible", "Solo se comparte cuando el documento esta autorizado.");
       return;
     }
 
-    const file = await Print.printToFileAsync({ html, base64: false });
+    try {
+      const isCreditNote = isCreditNoteSale(sale);
+      const documentType = isCreditNote ? "nota_credito" : "factura";
+      const ready = await waitForDocumentSync(data.backendUrl, sale.id, documentType);
+      if (!ready) throw new Error("El documento está guardado y su sincronización continúa pendiente. Intente compartirlo nuevamente en unos segundos.");
+      const ride = await getCachedDocumentRide(data.backendUrl, {
+        documentId: sale.id,
+        documentType
+      }, backendToken);
 
-    if (!(await Sharing.isAvailableAsync())) {
-      const phone = client.phone.replace(/\D/g, "");
-      const message = [
-        `Hola ${client.name},`,
-        `Su factura ${saleIssuer.establishment}-${saleIssuer.emissionPoint}-${sale.sequence} fue autorizada por el SRI.`,
-        `Total: $${money(sale.total)}`,
-        `Autorizacion: ${sale.authorizationNumber || sale.accessKey}`
-      ].join("\n");
-      await Linking.openURL(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`);
-      return;
+      if (Platform.OS === "web") {
+        const binary = atob(ride.pdfBase64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+        const pdfFile = new File([bytes], ride.filename, { type: ride.mimeType });
+        if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [pdfFile] }))) {
+          await navigator.share({ files: [pdfFile], title: `RIDE ${sale.sequence}` });
+          return;
+        }
+        const url = URL.createObjectURL(pdfFile);
+        window.open(url, "_blank");
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+        showInfo("RIDE preparado", "El navegador no permite adjuntar archivos directamente a WhatsApp. Descargue el PDF abierto y adjuntelo en la conversacion.");
+        return;
+      }
+
+      const baseDirectory = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+      if (!baseDirectory) throw new Error("No existe una ubicacion disponible para compartir el RIDE.");
+      const uri = `${baseDirectory}${ride.filename.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
+      await FileSystem.writeAsStringAsync(uri, ride.pdfBase64, { encoding: FileSystem.EncodingType.Base64 });
+      if (!(await Sharing.isAvailableAsync())) throw new Error("Este dispositivo no permite compartir archivos.");
+      await Sharing.shareAsync(uri, {
+        mimeType: ride.mimeType,
+        dialogTitle: "Enviar RIDE por WhatsApp",
+        UTI: "com.adobe.pdf"
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") return;
+      showError("No se pudo compartir", error instanceof Error ? error.message : "No se pudo preparar el RIDE para WhatsApp.");
     }
-
-    await Sharing.shareAsync(file.uri, {
-      mimeType: "application/pdf",
-      dialogTitle: "Enviar RIDE por WhatsApp",
-      UTI: "com.adobe.pdf"
-    });
   };
 
   return {

@@ -19,6 +19,7 @@ import {
   SQLITE_SCHEMA_V9,
   SQLITE_SCHEMA_V10,
   SQLITE_SCHEMA_V11,
+  SQLITE_SCHEMA_V12,
   SQLITE_SCHEMA_VERSION,
 } from "../schema";
 import type {
@@ -116,19 +117,9 @@ describe("infraestructura SQLite", () => {
     await applySQLiteMigrations(database);
     await applySQLiteMigrations(database);
 
-    expect(database.appliedVersions).toEqual([
-      1,
-      2,
-      3,
-      4,
-      5,
-      6,
-      7,
-      8,
-      9,
-      10,
-      SQLITE_SCHEMA_VERSION,
-    ]);
+    expect(database.appliedVersions).toEqual(
+      Array.from({ length: SQLITE_SCHEMA_VERSION }, (_, index) => index + 1),
+    );
     expect(
       database.execCalls.filter((sql) => sql === SQLITE_SCHEMA_V1),
     ).toHaveLength(1);
@@ -148,12 +139,13 @@ describe("infraestructura SQLite", () => {
     expect(SQLITE_SCHEMA_V11).not.toMatch(
       /UNIQUE[^\n]*request_id/i,
     );
+    expect(SQLITE_SCHEMA_V12).toContain("image_version TEXT");
     expect(SQLITE_SCHEMA_V8).not.toMatch(
       /UNIQUE[^\n]*(operation_id|batch_operation_id|void_operation_id)/i,
     );
   });
 
-  it.each(Array.from({ length: 11 }, (_, version) => version))(
+  it.each(Array.from({ length: 12 }, (_, version) => version))(
     "migra de v%i a v11, reabre e ignora una segunda ejecución",
     async (fromVersion) => {
       const database = new FakeSQLiteConnection();
@@ -173,11 +165,12 @@ describe("infraestructura SQLite", () => {
         SQLITE_SCHEMA_V9,
         SQLITE_SCHEMA_V10,
         SQLITE_SCHEMA_V11,
+        SQLITE_SCHEMA_V12,
       ];
 
       await applySQLiteMigrations(database);
       expect(database.appliedVersions).toEqual(
-        Array.from({ length: 11 }, (_, index) => index + 1),
+        Array.from({ length: 12 }, (_, index) => index + 1),
       );
       const executedMigrations = database.execCalls.filter(
         (sql) => historicalSchemas.includes(sql),
@@ -201,7 +194,7 @@ describe("infraestructura SQLite", () => {
     },
   );
 
-  it.each(Array.from({ length: 11 }, (_, version) => version))(
+  it.each(Array.from({ length: 12 }, (_, version) => version))(
     "revierte íntegramente si falla la ruta v%i a v11",
     async (fromVersion) => {
       const database = new FakeSQLiteConnection();
@@ -234,12 +227,13 @@ describe("infraestructura SQLite", () => {
     await applySQLiteMigrations(database);
 
     expect(database.appliedVersions).toEqual([
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
     ]);
     expect(database.execCalls).toContain(SQLITE_SCHEMA_V8);
     expect(database.execCalls).toContain(SQLITE_SCHEMA_V9);
     expect(database.execCalls).toContain(SQLITE_SCHEMA_V10);
     expect(database.execCalls).toContain(SQLITE_SCHEMA_V11);
+    expect(database.execCalls).toContain(SQLITE_SCHEMA_V12);
     expect(database.execCalls).not.toContain(SQLITE_SCHEMA_V7);
   });
 

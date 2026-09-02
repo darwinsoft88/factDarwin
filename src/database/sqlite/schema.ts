@@ -1,4 +1,4 @@
-export const SQLITE_SCHEMA_VERSION = 11;
+export const SQLITE_SCHEMA_VERSION = 12;
 
 export const SQLITE_DATABASE_NAME = "factudarwin-v2.db";
 
@@ -760,4 +760,11 @@ CREATE INDEX idx_pending_sync_tenant_request
   ON pending_sync_operations (tenant_id, request_id);
 CREATE INDEX idx_pending_sync_tenant_created
   ON pending_sync_operations (tenant_id, created_at);
+`;
+
+export const SQLITE_SCHEMA_V12 = `
+ALTER TABLE products ADD COLUMN image_key TEXT;
+ALTER TABLE products ADD COLUMN image_version TEXT;
+ALTER TABLE products ADD COLUMN image_updated_at TEXT;
+ALTER TABLE products ADD COLUMN image_mime_type TEXT;
 `;

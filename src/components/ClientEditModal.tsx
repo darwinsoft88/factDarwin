@@ -31,6 +31,7 @@ export function ClientEditModal({
 }: ClientEditModalProps) {
   return (
     <EntityEditModal
+      adaptiveViewport
       visible={visible}
       title={editingId ? "Editar cliente" : "Nuevo cliente"}
       subtitle={editingId ? editingClientName : "Registre los datos del cliente"}

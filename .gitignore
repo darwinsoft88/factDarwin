@@ -59,3 +59,7 @@ GoogleService-Info.plist
 # Expo extras
 .expo-shared/
 web-build/
+
+# Artefactos locales de compilacion, evidencias y copias de trabajo
+/output/
+*.bak-*

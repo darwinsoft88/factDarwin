@@ -1,4 +1,7 @@
 import type { SyncState } from "./support";
+import type { Sale } from "../types";
+import { isCreditNoteSale, isInvoiceSale } from "./sales";
+import { isStaleSriPendingDocument, shouldAutoRetrySriDocument } from "./sriRetryPolicy";
 
 export type SyncStatusBannerAction = "open" | "retry" | "view";
 
@@ -21,15 +24,20 @@ export function countUniqueAttentionDocuments(...documentIdGroups: string[][]) {
   return new Set(documentIdGroups.flat().filter(Boolean)).size;
 }
 
+export function requiresSyncBannerAttention(sale: Sale, now = new Date()) {
+  if (!(isInvoiceSale(sale) || isCreditNoteSale(sale))) return false;
+  if (sale.inventoryState === "RECONCILIATION_PENDING") return true;
+  if (isStaleSriPendingDocument(sale, now)) return true;
+  if (sale.status === "DEVUELTA") return true;
+  if (sale.status === "ERROR_SRI") return !shouldAutoRetrySriDocument(sale, now);
+  return false;
+}
+
 export function buildSyncStatusBannerView({
   documentCount,
   hasError,
-  pendingCount,
-  reviewCount,
   retrying,
-  sriPendingCount,
-  staleSriCount,
-  syncState
+  staleSriCount
 }: {
   documentCount: number;
   hasError: boolean;
@@ -40,7 +48,9 @@ export function buildSyncStatusBannerView({
   staleSriCount: number;
   syncState: SyncState;
 }): SyncStatusBannerView {
-  const visible = documentCount > 0 || reviewCount > 0 || pendingCount > 0 || hasError || syncState === "syncing" || syncState === "pending";
+  // La actividad normal del outbox es silenciosa. La franja superior se reserva
+  // para documentos tributarios que realmente requieren intervencion.
+  const visible = documentCount > 0 || staleSriCount > 0;
   if (!visible) return { visible: false, title: "", tone: "warning" };
 
   const actions = documentCount > 0
@@ -52,7 +62,6 @@ export function buildSyncStatusBannerView({
     : {};
 
   if (staleSriCount > 0) return { visible, title: `SRI requiere atención (${documentCount || staleSriCount})`, tone: "danger", ...actions };
-  if (syncState === "syncing") return { visible, title: "Sincronizando documentos", tone: "info", ...actions };
   if (hasError) {
     return {
       visible,
@@ -61,19 +70,9 @@ export function buildSyncStatusBannerView({
       ...actions
     };
   }
-  if (sriPendingCount > 0) {
-    return {
-      visible,
-      title: `${documentCount} documento${documentCount === 1 ? "" : "s"} requiere${documentCount === 1 ? "" : "n"} atención`,
-      tone: "warning",
-      ...actions
-    };
-  }
   return {
     visible,
-    title: reviewCount > 0
-      ? `${reviewCount} documento${reviewCount === 1 ? "" : "s"} requiere${reviewCount === 1 ? "" : "n"} atención`
-      : `Sincronización requiere atención${pendingCount > 0 ? ` (${pendingCount})` : ""}`,
+    title: `${documentCount} documento${documentCount === 1 ? "" : "s"} requiere${documentCount === 1 ? "" : "n"} atención`,
     tone: "warning",
     ...actions
   };

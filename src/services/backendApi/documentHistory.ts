@@ -6,6 +6,7 @@ export const HISTORICAL_DOCUMENT_PAGE_SIZE = 100;
 export type HistoricalDocumentSummary = {
   documentId: string;
   documentType: "factura";
+  environment: "1" | "2";
   establishment: string;
   emissionPoint: string;
   sequential: string;
@@ -39,6 +40,7 @@ export type HistoricalDocumentPage = {
 
 export type HistoricalDocumentQuery = {
   documentScope: string;
+  environment: "1" | "2";
   cursor?: string | null;
   dateFrom?: string;
   dateTo?: string;
@@ -56,6 +58,7 @@ export async function getHistoricalDocumentsPage(
   const limit = Math.min(HISTORICAL_DOCUMENT_PAGE_SIZE, Math.max(1, query.limit || HISTORICAL_DOCUMENT_PAGE_SIZE));
   const params = new URLSearchParams({
     documentScope: query.documentScope,
+    environment: query.environment,
     documentType: "factura",
     status: "AUTORIZADA",
     limit: String(limit),
@@ -116,8 +119,8 @@ export function validateHistoricalDocumentPage(value: unknown, requestedLimit = 
 
 function validateSummary(value: unknown): HistoricalDocumentSummary {
   if (!isRecord(value)) throw historyClientError("HISTORICAL_DOCUMENTS_RESPONSE_INVALID");
-  const requiredText = ["documentId", "establishment", "emissionPoint", "sequential", "issueDate", "createdAt", "clientId", "clientDisplayName", "totalMicros"];
-  if (requiredText.some((field) => typeof value[field] !== "string") || value.documentType !== "factura" || value.status !== "AUTORIZADA" || value.sriStatus !== "AUTORIZADA") {
+  const requiredText = ["documentId", "environment", "establishment", "emissionPoint", "sequential", "issueDate", "createdAt", "clientId", "clientDisplayName", "totalMicros"];
+  if (requiredText.some((field) => typeof value[field] !== "string") || !["1", "2"].includes(String(value.environment)) || value.documentType !== "factura" || value.status !== "AUTORIZADA" || value.sriStatus !== "AUTORIZADA") {
     throw historyClientError("HISTORICAL_DOCUMENTS_RESPONSE_INVALID");
   }
   if (!Number.isFinite(Date.parse(String(value.createdAt))) || !/^-?\d+$/.test(String(value.totalMicros))) {

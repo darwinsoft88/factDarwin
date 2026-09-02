@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { LIST_BATCH_SIZE } from "../constants/app";
 import { money } from "../sri";
-import { AdditionalInfoField, AppData, Client, DocumentType, PaymentCondition, PaymentMethod, Product, SaleItem, SalePaymentSplit } from "../types";
+import { AdditionalInfoField, AppData, Client, DocumentType, PaymentCondition, PaymentMethod, Product, SaleItem, SalePaymentSplit, SalePriceTier } from "../types";
 
 export function useSaleFormState(data: AppData) {
   const [clientId, setClientId] = useState(data.clients[0]?.id ?? "");
   const [productId, setProductId] = useState(data.products[0]?.id ?? "");
   const [quantity, setQuantity] = useState("1");
   const [unitGrossPrice, setUnitGrossPrice] = useState(data.products[0] ? money(data.products[0].price) : "");
+  const [salePriceTier, setSalePriceTier] = useState<SalePriceTier>("pvp1");
   const [grossDiscount, setGrossDiscount] = useState("0");
   const [discountMode, setDiscountMode] = useState<"amount" | "percent">("amount");
   const [documentType, setDocumentType] = useState<DocumentType>("factura");
@@ -81,6 +82,7 @@ export function useSaleFormState(data: AppData) {
     sourceProformaId,
     sourceTicketId,
     unitGrossPrice,
+    salePriceTier,
     visibleClientCount,
     visibleProductCount,
     setAdditionalInfo,
@@ -111,6 +113,7 @@ export function useSaleFormState(data: AppData) {
     setSourceProformaId,
     setSourceTicketId,
     setUnitGrossPrice,
+    setSalePriceTier,
     setVisibleClientCount,
     setVisibleProductCount
   };

@@ -42,7 +42,8 @@ export function mergeAppDataSnapshots(remoteData: AppData, localData: AppData): 
     autoBackupLastError: localData.autoBackupLastError || "",
     pendingSync: localData.pendingSync || [],
     deletedIds: mergeDeletedIds(remoteData.deletedIds, localData.deletedIds),
-    historyPolicy: remoteData.historyPolicy || localData.historyPolicy
+    historyPolicy: remoteData.historyPolicy || localData.historyPolicy,
+    license: remoteData.license || localData.license
   };
   return sanitizeAppData(reconcileProductStockFromMovements(reconcileCreditBalancesFromPayments(merged)));
 }
@@ -196,6 +197,7 @@ function mergeDeletedIds(remoteDeleted?: AppData["deletedIds"], localDeleted?: A
     products: Array.from(new Set([...(remoteDeleted?.products || []), ...(localDeleted?.products || [])])),
     users: Array.from(new Set([...(remoteDeleted?.users || []), ...(localDeleted?.users || [])])),
     sales: Array.from(new Set([...(remoteDeleted?.sales || []), ...(localDeleted?.sales || [])])),
+    guides: Array.from(new Set([...(remoteDeleted?.guides || []), ...(localDeleted?.guides || [])])),
     inventoryMovements: Array.from(new Set([...(remoteDeleted?.inventoryMovements || []), ...(localDeleted?.inventoryMovements || [])]))
   };
 }
@@ -285,7 +287,7 @@ function mergeSalesWithRemoteAuthority(remoteSales: Sale[], localSales: Sale[], 
   localSales.forEach((localSale) => {
     if (!localSale?.id || seen.has(localSale.id)) return;
     const remoteSale = remoteById.get(localSale.id);
-    result.push(remoteSale && !protectedLocalIds.has(localSale.id) ? remoteSale : localSale);
+    result.push(preferredSale(remoteSale, localSale, protectedLocalIds.has(localSale.id)));
     seen.add(localSale.id);
   });
   remoteSales.forEach((remoteSale) => {
@@ -294,6 +296,25 @@ function mergeSalesWithRemoteAuthority(remoteSales: Sale[], localSales: Sale[], 
     seen.add(remoteSale.id);
   });
   return result;
+}
+
+function preferredSale(remoteSale: Sale | undefined, localSale: Sale, localPending: boolean): Sale {
+  if (!remoteSale) return localSale;
+
+  // AUTORIZADA es un estado fiscal definitivo y no puede ser degradado
+  // por una copia local pendiente o atrasada.
+  if (remoteSale.status === "AUTORIZADA") return remoteSale;
+
+  if (localSale.status === "AUTORIZADA") {
+    return localSale;
+  }
+
+  if (localPending) return localSale;
+  if (["ANULADA", "CONVERTIDA"].includes(localSale.status) && !["AUTORIZADA", "ANULADA", "CONVERTIDA"].includes(remoteSale.status)) {
+    return localSale;
+  }
+
+  return remoteSale;
 }
 
 function pendingSaleIds(data: AppData) {

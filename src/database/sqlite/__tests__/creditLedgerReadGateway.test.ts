@@ -122,7 +122,7 @@ function receipt(
     source_hash: paymentCatalog ? "payments-hash" : "adjustments-hash",
     row_count: paymentCatalog ? payments.length : adjustments.length,
     status: "validated",
-    schema_version: 11,
+    schema_version: 12,
     validated_at: "2026-07-28T10:00:00.000Z",
     updated_at: "2026-07-28T10:00:00.000Z",
     last_error_code: null,
@@ -163,7 +163,7 @@ function database(overrides: ReceiptOverrides = {}) {
       sql.includes("app_metadata")
         ? [
           { key: "tenant_id", value_json: JSON.stringify("tenant-1") },
-          { key: "schema_version", value_json: JSON.stringify(11) },
+          { key: "schema_version", value_json: JSON.stringify(12) },
           {
             key: "migration_state",
             value_json: JSON.stringify("products_validated"),

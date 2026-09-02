@@ -72,6 +72,10 @@ if (config.databaseUrl) {
     iva_rate REAL NOT NULL DEFAULT 0,
     stock REAL NOT NULL DEFAULT 0,
     min_stock REAL NOT NULL DEFAULT 5,
+    image_key TEXT,
+    image_version TEXT,
+    image_updated_at TEXT,
+    image_mime_type TEXT,
     payload TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -915,6 +919,10 @@ if (config.databaseUrl) {
 
     ensureColumn("products", "cost", "REAL NOT NULL DEFAULT 0");
     ensureColumn("products", "min_stock", "REAL NOT NULL DEFAULT 5");
+    ensureColumn("products", "image_key", "TEXT");
+    ensureColumn("products", "image_version", "TEXT");
+    ensureColumn("products", "image_updated_at", "TEXT");
+    ensureColumn("products", "image_mime_type", "TEXT");
 
     replaceTable("clients", data.clients || [], updatedAt, (client) => ({
       id: scopedRowId(companyId, client.id),
@@ -939,6 +947,10 @@ if (config.databaseUrl) {
       iva_rate: Number(product.ivaRate || 0),
       stock: Number(product.stock || 0),
       min_stock: Number(product.minStock || 5),
+      image_key: product.imageKey || null,
+      image_version: product.imageVersion || null,
+      image_updated_at: product.imageUpdatedAt || null,
+      image_mime_type: product.imageMimeType || null,
       payload: JSON.stringify(product),
       updated_at: updatedAt
     }), companyId);
@@ -1224,6 +1236,13 @@ if (config.databaseUrl) {
         deleteSale.run({ companyId, id });
       });
     }
+    const guideIds = (Array.isArray(deletedIds.guides) ? deletedIds.guides : [])
+      .flatMap((id) => [scopedRowId(companyId, id), String(id || "")])
+      .filter(Boolean);
+    if (guideIds.length) {
+      const deleteGuide = db.prepare("DELETE FROM remission_guides WHERE company_id = @companyId AND id = @id");
+      guideIds.forEach((id) => deleteGuide.run({ companyId, id }));
+    }
     for (const [table, ids] of [["clients", deletedIds.clients], ["products", deletedIds.products], ["users", deletedIds.users]]) {
       const deleteRow = db.prepare(`DELETE FROM ${table} WHERE company_id = @companyId AND id = @id`);
       (Array.isArray(ids) ? ids : []).flatMap((id) => [scopedRowId(companyId, id), String(id || "")]).filter(Boolean).forEach((id) => {
@@ -1447,6 +1466,10 @@ if (config.databaseUrl) {
     return (digits || "1").padStart(3, "0").slice(-3);
   }
 
+  function tenantDeviceId(companyId, deviceId) {
+    return `${String(companyId || "").trim()}:${String(deviceId || "").trim()}`;
+  }
+
   function documentScopeFromDocument(document, issuer = {}) {
     const scope = scopeFromDocument(document, issuer);
     return {
@@ -1517,7 +1540,7 @@ if (config.databaseUrl) {
       INSERT INTO saas_devices (id, company_id, user_id, device_label, platform, first_seen_at, last_seen_at)
       VALUES (@id, @companyId, @userId, @deviceLabel, @platform, @firstSeenAt, @lastSeenAt)
     `).run({
-        id: String(device.deviceId),
+        id: tenantDeviceId(companyId, device.deviceId),
         companyId,
         userId,
         deviceLabel: String(device.deviceLabel || ""),
@@ -1561,6 +1584,7 @@ if (config.databaseUrl) {
     FROM saas_users u
     JOIN saas_companies c ON c.id = u.company_id
     WHERE u.status = 'active'
+      AND c.status NOT IN ('inactive', 'archived', 'deleted')
       AND (u.email = @email OR (c.ruc = @ruc AND u.role = 'admin'))
       AND (@companyId = '' OR u.company_id = @companyId)
     ORDER BY CASE WHEN u.email = @email THEN 0 ELSE 1 END
@@ -1587,7 +1611,7 @@ if (config.databaseUrl) {
       VALUES (@id, @companyId, @userId, @deviceLabel, @platform, @firstSeenAt, @lastSeenAt)
       ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at, user_id = excluded.user_id
     `).run({
-        id: String(device.deviceId),
+        id: tenantDeviceId(row.companyId, device.deviceId),
         companyId: row.companyId,
         userId: row.id,
         deviceLabel: String(device.deviceLabel || ""),
@@ -1643,7 +1667,7 @@ if (config.databaseUrl) {
       VALUES (@id, @companyId, @userId, @deviceLabel, @platform, @firstSeenAt, @lastSeenAt)
       ON CONFLICT(id) DO UPDATE SET last_seen_at = excluded.last_seen_at, user_id = excluded.user_id
     `).run({
-        id: String(device.deviceId),
+        id: tenantDeviceId(row.id, device.deviceId),
         companyId: row.id,
         userId: supportUser.id,
         deviceLabel: String(device.deviceLabel || ""),

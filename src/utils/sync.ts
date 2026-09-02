@@ -8,7 +8,15 @@ import { userFriendlyActionError } from "./sriMessages";
 
 export type IncrementalPatch = Partial<AppData> & { baseData: AppData; requestId?: string; deletions?: Partial<Record<keyof AppData, string[]>> };
 
-export type SyncMutationWriter = (mutation: AppDataMutation) => Promise<AppData>;
+export type SyncMutationWriterOptions = {
+  skipAutoBackup?: boolean;
+  syncState?: "synced" | "pending" | "syncing" | "error";
+};
+
+export type SyncMutationWriter = (
+  mutation: AppDataMutation,
+  options?: SyncMutationWriterOptions
+) => Promise<AppData>;
 
 export type SyncMutationOptions = {
   persistMutation: SyncMutationWriter;
@@ -69,16 +77,25 @@ async function syncPatchToBackendInternal(backendUrl: string, backendToken: stri
   const identifiedPatch = identifyIncrementalPatch(patch);
   const writer = mutationOptions?.persistMutation || updateStoredData;
   const pendingItem = buildPendingSyncItem(identifiedPatch, pendingTitle, "Pendiente de envio.");
-  const persisted = await writer((current) => appendPendingSync(current, pendingItem));
+  const persisted = await writer(
+    (current) => appendPendingSync(current, pendingItem),
+    { skipAutoBackup: true, syncState: "pending" }
+  );
   const durablePending = findPendingSyncRequest(persisted, identifiedPatch.requestId);
   if (!durablePending) throw new Error("No se pudo confirmar la persistencia durable del pendiente de sincronizacion.");
   try {
     await mergeBackendData(backendUrl, durablePending.patch as IdentifiedIncrementalPatch, backendToken);
-    await writer((current) => clearPendingSyncRequest(current, identifiedPatch.requestId));
+    await writer(
+      (current) => clearPendingSyncRequest(current, identifiedPatch.requestId),
+      { skipAutoBackup: true, syncState: "synced" }
+    );
     return true;
   } catch (error) {
     const message = userFriendlyActionError(error, "sync");
-    await writer((current) => markPendingRequestError(current, identifiedPatch.requestId, message));
+    await writer(
+      (current) => markPendingRequestError(current, identifiedPatch.requestId, message),
+      { skipAutoBackup: true, syncState: "pending" }
+    );
     if (error instanceof SyncOperationMismatchError) throw error;
     showMessage(pendingTitle, message);
     return false;

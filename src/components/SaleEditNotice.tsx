@@ -1,6 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Sale } from "../types";
+import { useAppTheme } from "../theme/AppTheme";
 
 type SaleEditNoticeProps = {
   sourceTicket?: Sale;
@@ -10,6 +11,7 @@ type SaleEditNoticeProps = {
 };
 
 export function SaleEditNotice({ sourceTicket, sourceProforma, editingSale, onCancel }: SaleEditNoticeProps) {
+  const { theme } = useAppTheme();
   if (!sourceTicket && !sourceProforma && !editingSale) return null;
 
   const title = sourceTicket ? "Modo facturar ticket" : sourceProforma ? "Modo convertir proforma" : "Modo correccion";
@@ -21,11 +23,11 @@ export function SaleEditNotice({ sourceTicket, sourceProforma, editingSale, onCa
   const cancelLabel = sourceTicket ? "Cancelar facturacion" : sourceProforma ? "Cancelar conversion" : "Cancelar correccion";
 
   return (
-    <View style={styles.editNoticeBox}>
-      <Text style={styles.noticeTitle}>{title}</Text>
-      <Text style={styles.noticeText}>{message}</Text>
-      <Pressable style={styles.smallButton} onPress={onCancel}>
-        <Text style={styles.smallButtonText}>{cancelLabel}</Text>
+    <View style={[styles.editNoticeBox, { borderColor: theme.colors.warning, backgroundColor: theme.colors.warningSoft }]}>
+      <Text style={[styles.noticeTitle, { color: theme.colors.warning }]}>{title}</Text>
+      <Text style={[styles.noticeText, { color: theme.colors.text }]}>{message}</Text>
+      <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onCancel}>
+        <Text style={[styles.smallButtonText, { color: theme.colors.primaryStrong }]}>{cancelLabel}</Text>
       </Pressable>
     </View>
   );

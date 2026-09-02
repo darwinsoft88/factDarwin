@@ -6,6 +6,7 @@ import { licensePlanOptions } from "../constants/options";
 import { AppLicense, Issuer } from "../types";
 import { appLicenseStatus, licenseStatusLabel } from "../utils/appAccess";
 import { maxEmissionPointsForLicense, normalizeLicensePlanValue } from "../utils/license";
+import { useAppTheme } from "../theme/AppTheme";
 
 type ActivePlanInfoProps = {
   license: AppLicense;
@@ -84,8 +85,11 @@ function currentPlanDescription(license: AppLicense) {
 }
 
 export function ActivePlanInfo({ license, issuer }: ActivePlanInfoProps) {
+  const { theme } = useAppTheme();
   const status = appLicenseStatus(license);
   const badge = currentStatusBadge(license);
+  const statusColor = badge.tone === "danger" ? theme.colors.danger : badge.tone === "warning" ? theme.colors.warning : theme.colors.success;
+  const statusSoft = badge.tone === "danger" ? theme.colors.dangerSoft : badge.tone === "warning" ? theme.colors.warningSoft : theme.colors.successSoft;
   const issuerName = issuer?.tradeName || issuer?.businessName || "Empresa sin nombre";
   const issuerRuc = issuer?.ruc || "Sin RUC";
 
@@ -112,54 +116,54 @@ export function ActivePlanInfo({ license, issuer }: ActivePlanInfoProps) {
 
   return (
     <View style={styles.stack}>
-      <View style={[styles.currentPlanCard, badge.tone === "warning" && styles.currentPlanSoon, badge.tone === "danger" && styles.currentPlanWarning]}>
+      <View style={[styles.currentPlanCard, { borderColor: statusColor, backgroundColor: statusSoft }]}>
         <View style={styles.currentPlanHeader}>
           <View style={styles.currentPlanCopy}>
-            <Text style={styles.kicker}>Plan actual</Text>
-            <Text style={styles.currentPlanTitle} numberOfLines={2}>{currentPlanLabel(license)}</Text>
-            <Text style={styles.currentPlanExpires} numberOfLines={1}>Vence {license.expiresAt || "sin fecha"} | {Math.max(0, status.daysLeft)} dias</Text>
+            <Text style={[styles.kicker, { color: theme.colors.textMuted }]}>Plan actual</Text>
+            <Text style={[styles.currentPlanTitle, { color: theme.colors.text }]} numberOfLines={2}>{currentPlanLabel(license)}</Text>
+            <Text style={[styles.currentPlanExpires, { color: theme.colors.textMuted }]} numberOfLines={1}>Vence {license.expiresAt || "sin fecha"} | {Math.max(0, status.daysLeft)} dias</Text>
           </View>
-          <View style={[styles.statusPill, badge.tone === "warning" && styles.statusPillWarning, badge.tone === "danger" && styles.statusPillError]}>
-            <Text style={[styles.statusPillText, badge.tone === "warning" && styles.statusPillTextWarning, badge.tone === "danger" && styles.statusPillTextError]}>{badge.label}</Text>
+          <View style={[styles.statusPill, { backgroundColor: theme.colors.surface }]}>
+            <Text style={[styles.statusPillText, { color: statusColor }]}>{badge.label}</Text>
           </View>
         </View>
-        <Text style={styles.currentPlanMeta}>Usuarios {license.maxUsers || 1} | Dispositivos {license.maxDevices || 1} | Puntos {maxEmissionPointsForLicense(license)}</Text>
-        <Text style={styles.currentPlanDescription}>{currentPlanDescription(license)}</Text>
-        <Pressable style={styles.primaryRequestButton} onPress={() => { void requestPlan(currentPlanLabel(license)); }}>
-          <MaterialCommunityIcons name="whatsapp" size={18} color="#ffffff" />
-          <Text style={styles.primaryRequestButtonText}>Activar o renovar plan</Text>
+        <Text style={[styles.currentPlanMeta, { color: theme.colors.textMuted }]}>Usuarios {license.maxUsers || 1} | Dispositivos {license.maxDevices || 1} | Puntos {maxEmissionPointsForLicense(license)}</Text>
+        <Text style={[styles.currentPlanDescription, { color: theme.colors.text }] }>{currentPlanDescription(license)}</Text>
+        <Pressable style={[styles.primaryRequestButton, { backgroundColor: theme.colors.primary }]} onPress={() => { void requestPlan(currentPlanLabel(license)); }}>
+          <MaterialCommunityIcons name="whatsapp" size={18} color={theme.colors.onPrimary} />
+          <Text style={[styles.primaryRequestButtonText, { color: theme.colors.onPrimary }]}>Activar o renovar plan</Text>
         </Pressable>
       </View>
 
-      <Text style={styles.sectionLead}>Planes de lanzamiento</Text>
+      <Text style={[styles.sectionLead, { color: theme.colors.text }]}>Planes de lanzamiento</Text>
       <View style={styles.planGrid}>
         {launchPlans.map((plan) => (
-          <View key={plan.id} style={[styles.planCard, plan.featured && styles.planCardFeatured]}>
+          <View key={plan.id} style={[styles.planCard, { borderColor: plan.featured ? theme.colors.primary : theme.colors.border, backgroundColor: plan.featured ? theme.colors.primarySoft : theme.colors.surfaceMuted }]}>
             <View style={styles.planHeader}>
               <View>
-                <Text style={styles.planName}>{plan.name}</Text>
-                <Text style={styles.planTagline}>{plan.tagline}</Text>
+                <Text style={[styles.planName, { color: theme.colors.text }]}>{plan.name}</Text>
+                <Text style={[styles.planTagline, { color: theme.colors.textMuted }]}>{plan.tagline}</Text>
               </View>
-              <View style={[styles.planBadge, plan.featured && styles.planBadgeFeatured]}>
-                <Text style={[styles.planBadgeText, plan.featured && styles.planBadgeTextFeatured]}>{plan.badge}</Text>
+              <View style={[styles.planBadge, { backgroundColor: plan.featured ? theme.colors.primary : theme.colors.surface }]}>
+                <Text style={[styles.planBadgeText, { color: plan.featured ? theme.colors.onPrimary : theme.colors.textMuted }]}>{plan.badge}</Text>
               </View>
             </View>
             <View style={styles.priceRow}>
-              <Text style={styles.price}>{plan.monthly}</Text>
-              <Text style={styles.priceMeta}>/ mes + IVA</Text>
+              <Text style={[styles.price, { color: theme.colors.primary }]}>{plan.monthly}</Text>
+              <Text style={[styles.priceMeta, { color: theme.colors.textMuted }]}>/ mes + IVA</Text>
             </View>
-            <Text style={styles.annualPrice}>{plan.annual} / ano + IVA</Text>
+            <Text style={[styles.annualPrice, { color: theme.colors.text }]}>{plan.annual} / ano + IVA</Text>
             <View style={styles.features}>
               {plan.features.map(([label, included]) => (
                 <View key={label} style={styles.featureRow}>
-                  <MaterialCommunityIcons name={included ? "check-circle" : "close-circle"} size={17} color={included ? "#16a34a" : "#ef4444"} />
-                  <Text style={[styles.featureText, !included && styles.featureMuted]}>{label}</Text>
+                  <MaterialCommunityIcons name={included ? "check-circle" : "close-circle"} size={17} color={included ? theme.colors.success : theme.colors.danger} />
+                  <Text style={[styles.featureText, { color: included ? theme.colors.text : theme.colors.textMuted }]}>{label}</Text>
                 </View>
               ))}
             </View>
-            <Pressable style={[styles.requestButton, plan.featured && styles.requestButtonFeatured]} onPress={() => { void requestPlan(plan.name); }}>
-              <MaterialCommunityIcons name="whatsapp" size={18} color={plan.featured ? "#ffffff" : "#0f766e"} />
-              <Text style={[styles.requestButtonText, plan.featured && styles.requestButtonTextFeatured]}>Solicitar</Text>
+            <Pressable style={[styles.requestButton, { borderColor: theme.colors.primary, backgroundColor: plan.featured ? theme.colors.primary : theme.colors.primarySoft }]} onPress={() => { void requestPlan(plan.name); }}>
+              <MaterialCommunityIcons name="whatsapp" size={18} color={plan.featured ? theme.colors.onPrimary : theme.colors.primary} />
+              <Text style={[styles.requestButtonText, { color: plan.featured ? theme.colors.onPrimary : theme.colors.primary }]}>Solicitar</Text>
             </Pressable>
           </View>
         ))}

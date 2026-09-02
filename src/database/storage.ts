@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppData, PendingSyncItem, PendingSyncPatch, User } from "../types";
 import { identifyIncrementalPatch, normalizeSyncRequestId, sortPendingSyncFifo } from "../utils/pendingSync";
 import { sanitizeAppData } from "../validation";
+import { clearNativeSessionToken, loadNativeSessionToken, saveNativeSessionToken, usesNativeSecureSessionToken } from "../services/nativeSessionTokenStorage";
 import {
   confirmMainSnapshotMigration,
   readMainSnapshot,
@@ -21,6 +22,7 @@ const localWebBackendUrl = allowLocalBackend && typeof window !== "undefined" &&
   : "";
 // En producción, el backend debe estar desplegado en una URL accesible. Para desarrollo, se puede usar un túnel como ngrok o cloudflare tunnel apuntando al backend local.
 export const PRODUCTION_BACKEND_URL = "https://api.factudarwin.com";
+export const LOCAL_DEVELOPMENT_BACKEND_URL = "http://localhost:4000";
 const DEFAULT_BACKEND_URL =
   process.env.EXPO_PUBLIC_BACKEND_URL ||
   localWebBackendUrl ||
@@ -329,7 +331,8 @@ export const initialData: AppData = {
     clients: [],
     products: [],
     users: [],
-    sales: []
+    sales: [],
+    guides: []
   },
   historyPolicy: {
     mode: "full-local-snapshot"
@@ -415,7 +418,7 @@ export async function loadData() {
       autoBackupLastAt: parsed.autoBackupLastAt || "",
       autoBackupLastError: parsed.autoBackupLastError || "",
       pendingSync,
-      deletedIds: parsed.deletedIds || initialData.deletedIds,
+      deletedIds: { ...(initialData.deletedIds || {}), ...(parsed.deletedIds || {}), guides: parsed.deletedIds?.guides || [] },
       historyPolicy: parsed.historyPolicy || initialData.historyPolicy,
       license: parsed.license || initialData.license,
       issuer: {
@@ -554,8 +557,30 @@ export async function updateStoredData(mutation: AppDataMutation): Promise<AppDa
     if (!lastStoredData) throw new Error("No se pudo inicializar el estado local persistido.");
     const current = cloneAppData(lastStoredData);
     const next = await mutation(current);
-    return persistPreparedData(await prepareAppData(next));
+    return persistPreparedData(await prepareAppData(preserveAuthorizedSaleState(current, next)));
   });
+}
+
+function preserveAuthorizedSaleState(current: AppData, next: AppData): AppData {
+  const currentById = new Map((current.sales || []).filter((sale) => sale?.id).map((sale) => [sale.id, sale]));
+  return {
+    ...next,
+    sales: (next.sales || []).map((sale) => {
+      const previous = currentById.get(sale.id);
+      if (!previous || previous.status !== "AUTORIZADA" || sale.status === "AUTORIZADA") return sale;
+      return {
+        ...sale,
+        status: "AUTORIZADA" as const,
+        accessKey: previous.accessKey || sale.accessKey,
+        authorizationNumber: previous.authorizationNumber || sale.authorizationNumber,
+        authorizationDate: previous.authorizationDate || sale.authorizationDate,
+        sriEnvironment: previous.sriEnvironment || sale.sriEnvironment,
+        sriMessage: previous.sriMessage || sale.sriMessage,
+        signedXml: previous.signedXml || sale.signedXml,
+        authorizedXml: previous.authorizedXml || sale.authorizedXml
+      };
+    })
+  };
 }
 
 
@@ -775,17 +800,68 @@ export async function loadSession() {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as StoredSession;
     if (!parsed?.user?.id || !parsed.user.email) return null;
-    return parsed;
+    const user = sessionSafeUser(parsed.user);
+    let token = parsed.token || "";
+    const nativeSecureToken = usesNativeSecureSessionToken();
+    if (nativeSecureToken) {
+      try {
+        if (token) await saveNativeSessionToken(token);
+        token = await loadNativeSessionToken();
+      } catch {
+        // Never fall back to persistent insecure storage for a native access token.
+      }
+    }
+    if (nativeSecureToken || parsed.passwordHash || parsed.user.passwordHash || parsed.user.password) {
+      await AsyncStorage.setItem(SESSION_KEY, JSON.stringify({
+        user,
+        token: nativeSecureToken ? "" : token,
+        companyRuc: parsed.companyRuc || "",
+        savedAt: parsed.savedAt || new Date().toISOString()
+      }));
+    }
+    return { ...parsed, user, token, passwordHash: undefined };
   } catch {
     await AsyncStorage.removeItem(SESSION_KEY);
+    try {
+      await clearNativeSessionToken();
+    } catch {
+      // The short-lived native token will expire even if the keystore is unavailable.
+    }
     return null;
   }
 }
 
 export async function saveSession(user: User, token = "", passwordHash = "", companyRuc = "") {
-  await AsyncStorage.setItem(SESSION_KEY, JSON.stringify({ user, token, passwordHash, companyRuc, savedAt: new Date().toISOString() }));
+  // passwordHash is accepted temporarily for API compatibility, but is deliberately not persisted.
+  void passwordHash;
+  const nativeSecureToken = usesNativeSecureSessionToken();
+  await AsyncStorage.setItem(SESSION_KEY, JSON.stringify({
+    user: sessionSafeUser(user),
+    token: nativeSecureToken ? "" : token,
+    companyRuc,
+    savedAt: new Date().toISOString()
+  }));
+  if (nativeSecureToken) {
+    try {
+      await saveNativeSessionToken(token);
+    } catch {
+      // The active in-memory session remains valid; no insecure fallback is persisted.
+    }
+  }
+}
+
+function sessionSafeUser(user: User): User {
+  const safeUser = { ...user };
+  delete safeUser.password;
+  delete safeUser.passwordHash;
+  return safeUser;
 }
 
 export async function clearSession() {
   await AsyncStorage.removeItem(SESSION_KEY);
+  try {
+    await clearNativeSessionToken();
+  } catch {
+    // A platform keystore failure must not prevent clearing the visible session.
+  }
 }

@@ -1,18 +1,20 @@
 import { useState } from "react";
 import { Alert } from "react-native";
 import { grossToNetUnitPrice, money } from "../sri";
-import { AppData, DocumentType, Sale, SaleItem } from "../types";
+import { AppData, DocumentType, Sale, SaleItem, SalePriceTier } from "../types";
 import { isInventoryProduct } from "../utils/catalogItems";
 import { getAvailableStockForSale } from "../utils/inventory";
 import { canOverrideLoss, checkSaleItemLoss, confirmLossOverride } from "../utils/lossProtection";
 import { parseDecimal, roundMoney } from "../utils/numbers";
 import { calculateGrossUnitPrice, calculateLineGrossDiscount, formatQuantity } from "../utils/sales";
+import { productPriceForTier, saleItemWithPriceTier } from "../utils/productPrices";
 
 export type LineEditForm = {
   quantity: string;
   unitGrossPrice: string;
   grossDiscount: string;
   discountMode: "amount" | "percent";
+  priceTier?: SalePriceTier;
 };
 
 type UseSaleLineEditorParams = {
@@ -61,7 +63,8 @@ export function useSaleLineEditor({
       quantity: formatQuantity(item.quantity),
       unitGrossPrice: money(calculateGrossUnitPrice(item)),
       grossDiscount: money(calculateLineGrossDiscount(item)),
-      discountMode: "amount"
+      discountMode: "amount",
+      priceTier: item.priceTier
     });
   };
 
@@ -97,7 +100,12 @@ export function useSaleLineEditor({
       Alert.alert("Descuento invalido", "El descuento no puede ser mayor al valor del producto.");
       return;
     }
-    const nextItem = { ...currentItem, quantity: qty, unitPrice, discount };
+    const selectedTier = draft.priceTier;
+    const keepsSelectedTier = selectedTier && Math.abs(productPriceForTier(product, selectedTier) - grossPrice) < 0.005;
+    const updatedValues = { ...currentItem, quantity: qty, unitPrice, discount };
+    const nextItem = keepsSelectedTier && selectedTier
+      ? saleItemWithPriceTier(updatedValues, product, selectedTier)
+      : { ...updatedValues, priceTier: undefined };
     const loss = checkSaleItemLoss(nextItem);
     if (loss.hasLoss && !options?.forceLoss) {
       confirmLossOverride({
@@ -137,8 +145,37 @@ export function useSaleLineEditor({
     setItems((current) => current.map((currentItem, itemIndex) => itemIndex === index ? { ...currentItem, quantity: nextQuantity, discount: nextDiscount } : currentItem));
   };
 
+  const changeLinePriceTier = (index: number, priceTier: SalePriceTier, options?: { forceLoss?: boolean }) => {
+    const currentItem = items[index];
+    if (!currentItem) return false;
+    const product = data.products.find((item) => item.id === currentItem.productId);
+    if (!product) {
+      Alert.alert("Producto no encontrado", "No se pudo cargar el producto de esta línea.");
+      return false;
+    }
+    const nextItem = saleItemWithPriceTier(currentItem, product, priceTier);
+    if (nextItem.discount > nextItem.quantity * nextItem.unitPrice) {
+      Alert.alert("Descuento inválido", "El descuento actual supera el nuevo precio. Ajuste el descuento desde Editar detalle.");
+      return false;
+    }
+    const loss = checkSaleItemLoss(nextItem);
+    if (loss.hasLoss && !options?.forceLoss) {
+      confirmLossOverride({
+        canOverride: canOverrideLoss(userRole),
+        loss,
+        onChangePrice: () => undefined,
+        onContinue: () => changeLinePriceTier(index, priceTier, { forceLoss: true })
+      });
+      return false;
+    }
+    setItems((current) => current.map((item, itemIndex) => itemIndex === index ? nextItem : item));
+    setIssueNotice(`${priceTier.toUpperCase()} aplicado solamente a ${currentItem.name}.`);
+    return true;
+  };
+
   return {
     adjustSaleLineQuantity,
+    changeLinePriceTier,
     closeLineEditor,
     editingLineIndex,
     lineEditForm,

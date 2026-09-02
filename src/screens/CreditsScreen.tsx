@@ -13,7 +13,6 @@ import { LIST_BATCH_SIZE } from "../constants/app";
 import { useCreditReceipts } from "../hooks/useCreditReceipts";
 import { useControlledCreditLedger } from "../hooks/useControlledCreditLedger";
 import type { PersistMutation } from "../hooks/useSyncAndBackup";
-import { restoreAppData } from "../services/backend";
 import { money } from "../sri";
 import { AppData, CreditPayment, PaymentMethod, Sale, User } from "../types";
 import { createCreditOperationId, creditBalance, creditClientSummaries, creditPaymentsForClient, creditSaleScopeText, creditTotals, isCreditOverdue, isCreditPaymentVoided, registerCreditPayment, registerCreditPayments, voidCreditPayment } from "../utils/credit";
@@ -21,7 +20,6 @@ import { CreditScopeFilter, scopeCreditData } from "../utils/creditScope";
 import { activeEstablishment } from "../utils/establishments";
 import { documentNumber } from "../utils/documents";
 import { formatShortDate } from "../utils/format";
-import { mergeAppDataSnapshots } from "../utils/dataMerge";
 import {
   confirmAction,
   showError,
@@ -134,10 +132,12 @@ export function CreditsScreen({
   const totals = useMemo(() => creditTotals(scopedCreditData), [scopedCreditData]);
   const clientSummaries = useMemo(() => creditClientSummaries(scopedCreditData), [scopedCreditData]);
   const receivables = totals.receivables;
-  const selectedSale = receivables.find((sale) => sale.id === paymentSaleId || sale.id === selectedSaleId);
+  const selectedSale = paymentSaleId
+    ? receivables.find((sale) => sale.id === paymentSaleId)
+    : receivables.find((sale) => sale.id === selectedSaleId);
   const selectedClient = selectedSale ? data.clients.find((client) => client.id === selectedSale.clientId) : undefined;
   const creditSales = useMemo(() => (scopedCreditData.sales || []).filter((sale) => sale.paymentCondition === "credito" && (sale.documentType === "factura" || sale.documentType === "nota_venta")), [scopedCreditData.sales]);
-  const pendingCreditSales = creditSales.filter((sale) => creditBalance(sale) > 0 && sale.creditStatus !== "pagado");
+  const pendingCreditSales = receivables;
   const paidCreditSales = creditSales.filter((sale) => creditBalance(sale) <= 0 || sale.creditStatus === "pagado");
   const filteredCreditSales = pendingCreditSales.filter((sale) => {
     const client = data.clients.find((item) => item.id === sale.clientId);
@@ -283,27 +283,6 @@ export function CreditsScreen({
     setBulkSelectedSaleIds((current) => current.includes(saleId) ? current.filter((id) => id !== saleId) : [...current, saleId]);
   };
 
-  const refreshCreditDataFromBackend = async () => {
-    if (!data.backendUrl || !backendToken) return;
-    let remoteData: AppData | undefined;
-    try {
-      const snapshot = await restoreAppData<AppData>(data.backendUrl, backendToken);
-      if (!snapshot?.data) return;
-      remoteData = snapshot.data;
-    } catch {
-      return;
-    }
-    if (!remoteData) return;
-    try {
-      const persisted = await persistMutation((current) => mergeAppDataSnapshots(remoteData, current));
-      setLocalData(persisted);
-      return persisted;
-    } catch (error) {
-      showError("No se pudo actualizar la cartera", error instanceof Error ? error.message : "La informacion remota no pudo guardarse localmente.");
-      throw error;
-    }
-  };
-
   const savePayment = async () => {
     if (paymentIntentInProgressRef.current) return;
     const targetSale = selectedSale;
@@ -322,7 +301,6 @@ export function CreditsScreen({
     paymentIntentInProgressRef.current = true;
 
     try {
-      await refreshCreditDataFromBackend();
       const paymentId = `credit-payment:${operationId}`;
       let auditLogIds: string[] = [];
       const persisted = await persistMutation((current) => {
@@ -354,11 +332,6 @@ export function CreditsScreen({
         auditLogs: persisted.auditLogs.filter((log) => auditLogIds.includes(log.id))
       };
       setLocalData(persisted);
-      try {
-        await syncPatchToBackend(persisted.backendUrl, backendToken, patch, "Abono pendiente de sincronizar", { persistMutation });
-      } catch (syncError) {
-        showWarning("Abono guardado", syncError instanceof Error ? syncError.message : "El abono quedo guardado, pero no pudo prepararse su sincronizacion.");
-      }
       setAmountText("");
       setNote("");
       setPaymentSaleId("");
@@ -373,6 +346,11 @@ export function CreditsScreen({
         payments: [payment],
         data: persisted
       });
+      try {
+        await syncPatchToBackend(persisted.backendUrl, backendToken, patch, "Abono pendiente de sincronizar", { persistMutation });
+      } catch (syncError) {
+        showWarning("Abono guardado", syncError instanceof Error ? syncError.message : "El abono quedo guardado, pero no pudo prepararse su sincronizacion.");
+      }
     } catch (error) {
       showError("Revise el abono", error instanceof Error ? error.message : "No se pudo registrar el abono.");
     } finally {
@@ -394,7 +372,6 @@ export function CreditsScreen({
     bulkPaymentIntentInProgressRef.current = true;
 
     try {
-      await refreshCreditDataFromBackend();
       const selectedIds = [...bulkSelectedSaleIds];
       let paymentIds: string[] = [];
       let updatedSaleIds: string[] = [];
@@ -427,11 +404,6 @@ export function CreditsScreen({
         auditLogs: persisted.auditLogs.filter((log) => auditLogIds.includes(log.id))
       };
       setLocalData(persisted);
-      try {
-        await syncPatchToBackend(persisted.backendUrl, backendToken, patch, "Cobro multiple pendiente de sincronizar", { persistMutation });
-      } catch (syncError) {
-        showWarning("Cobro guardado", syncError instanceof Error ? syncError.message : "El cobro quedo guardado, pero no pudo prepararse su sincronizacion.");
-      }
       closeBulkPayment();
       setReceiptSuccess({
         mode: "bulk",
@@ -440,6 +412,11 @@ export function CreditsScreen({
         payments,
         data: persisted
       });
+      try {
+        await syncPatchToBackend(persisted.backendUrl, backendToken, patch, "Cobro multiple pendiente de sincronizar", { persistMutation });
+      } catch (syncError) {
+        showWarning("Cobro guardado", syncError instanceof Error ? syncError.message : "El cobro quedo guardado, pero no pudo prepararse su sincronizacion.");
+      }
     } catch (error) {
       showError("Revise el cobro", error instanceof Error ? error.message : "No se pudo registrar el cobro multiple.");
     } finally {
@@ -541,17 +518,26 @@ export function CreditsScreen({
       {clientSummaryOpen ? (
         <Section title="Cartera por cliente">
           {clientSummaries.length === 0 ? <Empty text="No hay clientes con credito pendiente." /> : null}
-          {visibleClientSummaries.map((summary) => (
-            <ListItemComponent
-              key={summary.clientId}
-              title={summary.clientName}
-              meta={`${summary.pendingCount} documento(s) | Pendiente $${money(summary.pendingTotal)}${summary.overdueCount > 0 ? ` | Vencido $${money(summary.overdueTotal)}` : ""}${summary.nextDueDate ? ` | proximo ${formatShortDate(summary.nextDueDate)}` : ""}`}
-              badge={summary.overdueCount > 0 ? "VENCIDO" : "AL DIA"}
-              secondaryLabel="Cobrar"
-              onOpen={() => selectClientSummary(summary.clientId)}
-              onSecondary={() => openBulkPayment(summary.clientId)}
-            />
-          ))}
+          {visibleClientSummaries.map((summary) => {
+            const overdue = summary.overdueCount > 0;
+            const dueText = overdue
+              ? `Vencido $${money(summary.overdueTotal)}${summary.nextDueDate ? ` | Proximo ${formatShortDate(summary.nextDueDate)}` : ""}`
+              : summary.nextDueDate
+                ? `Proximo: ${formatShortDate(summary.nextDueDate)}`
+                : "Cartera al dia";
+            return (
+              <CreditAccountCard
+                key={summary.clientId}
+                balanceText={`$${money(summary.pendingTotal)}`}
+                clientName={summary.clientName}
+                documentText={`${summary.pendingCount} documento(s) pendiente(s)`}
+                dueText={dueText}
+                overdue={overdue}
+                onDetail={() => selectClientSummary(summary.clientId)}
+                onPay={() => openBulkPayment(summary.clientId)}
+              />
+            );
+          })}
           <PaginationControls page={clientPagination.currentPage} pageSize={LIST_BATCH_SIZE} totalItems={clientSummaries.length} onPageChange={setClientPage} />
         </Section>
       ) : paidHistoryOpen ? (

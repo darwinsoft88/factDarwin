@@ -16,6 +16,7 @@ async function signInvoice(xml, companyId = "", sriEnv = config.sriEnv) {
 }
 
 async function authorizeInvoice(xml, companyId = "") {
+  validateAccessKeyIssueDate(xml);
   const sriEnv = validateXmlEnvironment(xml);
   const signed = await signInvoice(xml, companyId, sriEnv);
   const documentName = getDocumentName(xml);
@@ -86,6 +87,57 @@ async function authorizeInvoice(xml, companyId = "") {
   };
 }
 
+async function queryInvoiceAuthorization(accessKey, sriEnv = config.sriEnv) {
+  const normalizedAccessKey = String(accessKey || "").trim();
+  if (!/^\d{49}$/.test(normalizedAccessKey)) {
+    const error = new Error("La clave de acceso debe contener exactamente 49 digitos.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const authorization = await askAuthorization(normalizedAccessKey, sriEnv);
+  const authorizationSummary = parseAuthorization(authorization.body);
+  const numberOfDocuments = parseNumberOfDocuments(authorization.body);
+
+  if (numberOfDocuments === 0) {
+    return {
+      ok: true,
+      sent: true,
+      status: "ENVIADA",
+      accessKey: normalizedAccessKey,
+      authorizationPending: true,
+      numberOfDocuments,
+      sriMessage: "El SRI todavia no devuelve una autorizacion para esta clave de acceso.",
+      authorization
+    };
+  }
+
+  return {
+    ok: authorization.ok && authorizationSummary.authorizationStatus !== "NO AUTORIZADO",
+    sent: true,
+    status: authorizationSummary.authorizationStatus || "ENVIADA",
+    accessKey: normalizedAccessKey,
+    authorizationPending: !authorizationSummary.authorizationStatus,
+    numberOfDocuments,
+    ...authorizationSummary,
+    authorization
+  };
+}
+
+function validateAccessKeyIssueDate(xml) {
+  const accessKey = textBetween(xml, "<claveAcceso>", "</claveAcceso>").trim();
+  const issueDate = textBetween(xml, "<fechaEmision>", "</fechaEmision>").trim();
+  const match = issueDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!/^\d{49}$/.test(accessKey) || !match) return;
+  const expectedPrefix = `${match[1]}${match[2]}${match[3]}`;
+  if (accessKey.startsWith(expectedPrefix)) return;
+
+  const error = new Error(`La fecha de la clave de acceso (${accessKey.slice(0, 2)}/${accessKey.slice(2, 4)}/${accessKey.slice(4, 8)}) no coincide con fechaEmision (${issueDate}). No se envio al SRI.`);
+  error.statusCode = 400;
+  error.code = "ACCESS_KEY_ISSUE_DATE_MISMATCH";
+  throw error;
+}
+
 function getDocumentName(xml) {
   if (xml.includes("<notaCredito")) return "Nota de credito";
   if (xml.includes("<guiaRemision")) return "Guia de remision";
@@ -131,6 +183,12 @@ function parseAuthorization(body) {
     sriMessage: [message, additionalInfo].filter(Boolean).join(" - "),
     authorizedXml
   };
+}
+
+function parseNumberOfDocuments(body) {
+  const raw = textBetween(body, "<numeroComprobantes>", "</numeroComprobantes>").trim();
+  if (!/^\d+$/.test(raw)) return undefined;
+  return Number(raw);
 }
 
 function parseReceptionStatus(body) {
@@ -256,4 +314,4 @@ function decodeXmlEntities(value) {
     .replace(/&amp;/g, "&");
 }
 
-module.exports = { authorizeInvoice, signInvoice };
+module.exports = { authorizeInvoice, queryInvoiceAuthorization, signInvoice, validateAccessKeyIssueDate };

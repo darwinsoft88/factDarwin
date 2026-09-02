@@ -11,6 +11,10 @@ const PRODUCT_KEYS = new Set([
   "ivaRate",
   "stock",
   "minStock",
+  "imageKey",
+  "imageVersion",
+  "imageUpdatedAt",
+  "imageMimeType",
   "unitMeasure",
   "active",
   "deleted",
@@ -57,6 +61,10 @@ export interface CanonicalProductRecord {
   ivaRateBasisPoints: number;
   stockMicros: number;
   minStockMicros: number;
+  imageKey: string | null;
+  imageVersion: string | null;
+  imageUpdatedAt: string | null;
+  imageMimeType: string | null;
   unitMeasure: string | null;
   active: boolean;
   deleted: boolean;
@@ -89,6 +97,10 @@ export function canonicalProductRecord(
     ivaRateBasisPoints: taxRateToBasisPoints(product.ivaRate),
     stockMicros: decimalToMicros(product.stock),
     minStockMicros: decimalToMicros(product.minStock),
+    imageKey: product.imageKey ? String(product.imageKey) : null,
+    imageVersion: product.imageVersion ? String(product.imageVersion) : null,
+    imageUpdatedAt: product.imageUpdatedAt ? String(product.imageUpdatedAt) : null,
+    imageMimeType: product.imageMimeType ? String(product.imageMimeType) : null,
     unitMeasure:
       typeof source.unitMeasure === "string" && source.unitMeasure
         ? source.unitMeasure

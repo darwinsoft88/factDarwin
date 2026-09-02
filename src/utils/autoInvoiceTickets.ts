@@ -212,6 +212,8 @@ export async function autoInvoiceOfflineTickets({
       const invoice: Sale = {
         id: invoiceId,
         documentType: "factura",
+        environment: currentIssuer.environment,
+        sriEnvironment: currentIssuer.environment,
         establishment: currentIssuer.establishment,
         emissionPoint: currentIssuer.emissionPoint,
         establishmentName: currentTicket.establishmentName,

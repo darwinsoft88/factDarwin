@@ -7,17 +7,28 @@ import { LIST_BATCH_SIZE } from "../constants/app";
 import { AppData, Client, RemissionGuide, Sale } from "../types";
 import { getRetryInfo, guideNumber, MAX_DAILY_RETRIES } from "../utils/documents";
 import { canRetrySriStatus } from "../utils/invoiceStatus";
+import { useAppTheme } from "../theme/AppTheme";
+import type { AccentCardTone } from "./ThemedAccentCard";
 
 type GuidesListItemProps = {
   title: string;
   meta: string;
   badge?: string;
+  accentTone?: AccentCardTone;
   onOpen?: () => void;
   secondaryLabel?: string;
   onSecondary?: () => void;
   retryLabel?: string;
   onRetry?: () => void;
 };
+
+function guideAccentTone(status: string): AccentCardTone {
+  if (status === "AUTORIZADA") return "success";
+  if (status === "DEVUELTA" || status === "ERROR_SRI") return "danger";
+  if (["FIRMADA", "ENVIADA", "ENVIADA_SRI", "PENDIENTE_SRI", "EN_REVISION_SRI"].includes(status)) return "info";
+  if (status === "ANULADA") return "warning";
+  return "primary";
+}
 
 type GuideListSectionProps = {
   canOpenSensitive: boolean;
@@ -54,14 +65,15 @@ export function GuideListSection({
   onPageChange,
   retryingGuideId
 }: GuideListSectionProps) {
+  const { theme } = useAppTheme();
   return (
     <Section title="">
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Guias emitidas</Text>
+        <Text style={[styles.title, { color: theme.colors.text }]}>Guias emitidas</Text>
         {onCreate ? (
-          <Pressable style={styles.addButton} onPress={onCreate}>
-            <MaterialCommunityIcons name="truck-plus-outline" size={15} color="#ffffff" />
-            <Text style={styles.addButtonText}>Nueva guia</Text>
+          <Pressable style={[styles.addButton, { backgroundColor: theme.colors.primary }]} onPress={onCreate}>
+            <MaterialCommunityIcons name="truck-plus-outline" size={15} color={theme.colors.onPrimary} />
+            <Text style={[styles.addButtonText, { color: theme.colors.onPrimary }]}>Nueva guia</Text>
           </Pressable>
         ) : null}
       </View>
@@ -77,6 +89,7 @@ export function GuideListSection({
             title={`${guideNumber(guide, data.issuer)} - ${guideClient?.name || "Destinatario"}`}
             meta={`${guide.status} | ${guide.plate} | ${guide.route} | ${guide.accessKey}`}
             badge={guide.status}
+            accentTone={guideAccentTone(guide.status)}
             onOpen={canOpenSensitive ? () => onGuideDetail(guide, guideClient, source) : undefined}
             secondaryLabel={guide.status === "AUTORIZADA" ? "PDF guia" : undefined}
             onSecondary={() => guideClient && onGuidePdf(guide, guideClient, source)}

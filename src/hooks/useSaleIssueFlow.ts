@@ -3,6 +3,7 @@ import { useRef } from "react";
 import { Alert } from "react-native";
 import type { PersistMutation } from "./useSyncAndBackup";
 import { authorizeInvoice, getCompanySriEnvironment, reserveDocumentSequence } from "../services/backend";
+import { prefetchDocumentRide, trackDocumentSync } from "../services/documentRideCoordinator";
 import { buildInvoiceXml, createAccessKey, nextSequence } from "../sri";
 import { AdditionalInfoField, AppData, Client, DocumentType, PaymentCondition, PaymentMethod, Sale, SaleItem, SalePaymentSplit, User } from "../types";
 import { appendAudit } from "../utils/audit";
@@ -179,6 +180,8 @@ export function useSaleIssueFlow({
         let sale: Sale = {
           id: saleId,
           documentType: "nota_venta",
+          environment: currentIssuer.environment,
+          sriEnvironment: currentIssuer.environment,
           establishment: currentIssuer.establishment,
           emissionPoint: currentIssuer.emissionPoint,
           establishmentName: currentEstablishment.name,
@@ -324,6 +327,8 @@ export function useSaleIssueFlow({
           const sale: Sale = {
             id: saleId,
             documentType: "proforma",
+            environment: documentIssuer.environment,
+            sriEnvironment: documentIssuer.environment,
             establishment: documentIssuer.establishment,
             emissionPoint: documentIssuer.emissionPoint,
             establishmentName: currentEstablishment.name,
@@ -511,6 +516,8 @@ export function useSaleIssueFlow({
         let saleForRetry: Sale = {
           id: saleId,
           documentType: "factura",
+          environment: currentIssuer.environment,
+          sriEnvironment: currentIssuer.environment,
           establishment: currentIssuer.establishment,
           emissionPoint: currentIssuer.emissionPoint,
           establishmentName: currentEstablishment.name,
@@ -680,24 +687,18 @@ export function useSaleIssueFlow({
       if (!finalSale) throw new Error("La factura no quedo disponible despues de persistir el resultado SRI.");
       const operationMovements = (finalData.inventoryMovements || []).filter((movement) => movement.saleId === saleId && (movement.createdAt === retryAt || movement.createdAt === finalPersistedAt));
       const stockChangedProductIds = new Set(operationMovements.map((movement) => movement.productId));
-      const synced = await syncSalePatchToBackend(backendUrl, backendToken, {
+      const syncPromise = trackDocumentSync(backendUrl, finalSale.id, "factura", syncSalePatchToBackend(backendUrl, backendToken, {
         baseData: finalData,
         issuer: finalData.issuer,
         sales: finalData.sales.filter((item) => [saleId, sourceTicketId, sourceProformaId].filter(Boolean).includes(item.id)),
         products: finalData.products.filter((product) => stockChangedProductIds.has(product.id)),
         inventoryMovements: operationMovements,
         auditLogs: finalData.auditLogs.slice(0, 1)
-      }, { persistMutation });
+      }, { persistMutation }));
       resetCurrentDocumentForm();
       setIssuing(false);
       setProcessingMessage("");
-
-      if (!synced) {
-        setIssueNotice(`Factura ${finalSale.sequence}: resultado SRI pendiente de sincronizar.`);
-        return;
-      }
-
-      setIssueNotice(finalSale.status === "AUTORIZADA" ? "Factura autorizada y guardada." : `Factura guardada con estado ${finalSale.status}.`);
+      setIssueNotice(finalSale.status === "AUTORIZADA" ? "Factura autorizada y guardada. Sincronizando en segundo plano." : `Factura guardada con estado ${finalSale.status}. Sincronizando en segundo plano.`);
 
       if (finalSale.status === "AUTORIZADA") {
         showSuccess(
@@ -719,6 +720,18 @@ export function useSaleIssueFlow({
           `Estado: ${finalSale.status}.`
         );
       }
+      void syncPromise.then((synced) => {
+        if (!synced) {
+          setIssueNotice(`Factura ${finalSale.sequence}: resultado SRI pendiente de sincronizar.`);
+          return;
+        }
+        setIssueNotice(finalSale.status === "AUTORIZADA" ? "Factura autorizada y guardada." : `Factura guardada con estado ${finalSale.status}.`);
+        if (finalSale.status === "AUTORIZADA") {
+          prefetchDocumentRide(backendUrl, { documentId: finalSale.id, documentType: "factura" }, backendToken);
+        }
+      }).catch((error) => {
+        setIssueNotice(`Factura ${finalSale.sequence}: ${userFriendlyActionError(error, "sync")}`);
+      });
 
     } finally {
       issueRunningRef.current = false;

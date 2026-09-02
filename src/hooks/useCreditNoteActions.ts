@@ -244,6 +244,8 @@ export function useCreditNoteActions({
         const creditNote: Sale = {
           id: noteId,
           documentType: "nota_credito",
+          environment: currentIssuer.environment,
+          sriEnvironment: currentIssuer.environment,
           establishment: currentIssuer.establishment,
           emissionPoint: currentIssuer.emissionPoint,
           establishmentName: currentEstablishment.name,

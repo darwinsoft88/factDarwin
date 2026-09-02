@@ -1,6 +1,6 @@
 import { Alert, Platform } from "react-native";
 import { useMemo, useRef } from "react";
-import { loginBackend, registerBackend, requestPasswordReset, restoreAppData, changeBackendPassword } from "../services/backend";
+import { authenticateWithPasskey, loginBackend, registerBackend, requestPasswordReset, restoreAppData, changeBackendPassword } from "../services/backend";
 import { hashPassword } from "../services/security";
 import { upsertOfflineUser } from "../utils/authOffline";
 import { isBackendConnectionError, loginErrorMessage } from "../utils/errors";
@@ -9,13 +9,18 @@ import { showMessage } from "../utils/dialogs";
 import { isSessionTokenExpired } from "../utils/sessionToken";
 import { mergeAppDataSnapshots } from "../utils/dataMerge";
 import { sanitizeAppData, isValidUrl } from "../validation";
-import { clearSession, loadSession, saveData, saveSession, initialData } from "../database";
+import { clearSession, loadSession, saveData, saveSession, initialData, PRODUCTION_BACKEND_URL } from "../database";
 import type { AppData, User, UserRole } from "../types";
 import type { SyncState } from "../utils/support";
 import type { AuthState } from "./useAuthState";
 import type { AppTab } from "../utils/appAccess";
 import toast from "../services/toast";
 import { getIncrementalDeviceId } from "../services/incrementalDeviceIdentity";
+import { clearBiometricCredential, loadBiometricAccountHint, loadLegacyBiometricCredential } from "../services/biometricCredentialStorage";
+import { saveBiometricLockEnabled } from "../services/biometricLockStorage";
+import { markBiometricAuthenticationCompleted } from "../services/biometricAuthenticationSession";
+import { refreshRegisteredDeviceSession, registerCurrentDeviceSession, shouldInvalidateDeviceCredential } from "../services/deviceSessionCoordinator";
+import { loadPasskeyAccountHint } from "../services/passkeyHintStorage";
 
 export type UseAuthActionsParams = {
   authState: AuthState;
@@ -34,6 +39,7 @@ export type UseAuthActionsParams = {
 
 export type AuthActions = {
   login: (companyId?: string) => Promise<void>;
+  loginWithBiometrics: () => Promise<void>;
   registerTenant: () => Promise<void>;
   recoverPassword: () => Promise<void>;
   chooseLoginEstablishment: (establishmentId: string) => Promise<void>;
@@ -44,6 +50,7 @@ export type AuthActions = {
 export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef, setData, setSession, setBackendToken, setSyncState, setAppMenuVisible, setEstablishmentSwitcherVisible, setTab, setOnboardingVisible }: UseAuthActionsParams): AuthActions {
   const choosingLoginEstablishmentRef = useRef(false);
   const loginRunningRef = useRef(false);
+  const registrationRunningRef = useRef(false);
   const authActions = useMemo(() => {
     const enterSession = async (nextData: AppData, nextUser: User, token: string, passwordHash = "", connectionMode: "online" | "offline" = "online"
     ) => {
@@ -60,6 +67,23 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
 
       await saveData(nextData);
       await saveSession(nextUser, sessionToken, passwordHash, nextData.issuer.ruc);
+      if (Platform.OS !== "web" && connectionMode === "online" && sessionToken) {
+        const legacyCredential = await loadLegacyBiometricCredential();
+        if (legacyCredential && legacyCredential.companyId === nextUser.companyId && legacyCredential.userId === nextUser.id) {
+          try {
+            await registerCurrentDeviceSession({
+              backendUrl: nextData.backendUrl,
+              accessToken: sessionToken,
+              companyRuc: nextData.issuer.ruc,
+              establishmentId: nextData.issuer.activeEstablishmentId || "",
+              user: nextUser,
+              platform: Platform.OS
+            });
+          } catch {
+            toast.warning("Biometría pendiente", "Ingresó correctamente, pero falta confirmar la migración biométrica desde Mi perfil.");
+          }
+        }
+      }
       setData(nextData);
       dataRef.current = nextData;
       setBackendToken(sessionToken);
@@ -91,9 +115,124 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
         const establishment = normalizedEstablishments(pendingLogin.data.issuer).find((item) => item.id === establishmentId);
         if (!establishment) return;
         const nextIssuer = issuerWithEstablishment({ ...pendingLogin.data.issuer, activeEstablishmentId: establishment.id }, establishment);
+        if (pendingLogin.authenticationMethod === "biometric") {
+          markBiometricAuthenticationCompleted(pendingLogin.user.companyId || pendingLogin.data.issuer.ruc, pendingLogin.user.id);
+        }
         await enterSession({ ...pendingLogin.data, issuer: nextIssuer }, pendingLogin.user, pendingLogin.token, pendingLogin.passwordHash || "");
       } finally {
         choosingLoginEstablishmentRef.current = false;
+      }
+    };
+
+    const loginWithBiometrics = async () => {
+      if (loginRunningRef.current) return;
+      loginRunningRef.current = true;
+      authState.setLoggingIn(true);
+      authState.setLoginStatus({ tone: "info", message: "Confirmando identidad..." });
+      authState.setLoginErrorModalMessage("");
+      try {
+        if (Platform.OS === "web") {
+          const hint = await loadPasskeyAccountHint();
+          if (!hint) throw new Error("Active primero Face ID desde Mi perfil.");
+          const result = await authenticateWithPasskey(hint.backendUrl);
+          if (!result.user || !result.token) throw new Error("El servidor no devolvio una sesion valida.");
+          if (result.user.id !== hint.userId || result.user.companyId !== hint.companyId) {
+            throw new Error("La Passkey pertenece a una cuenta diferente.");
+          }
+          const snapshot = await restoreAppData<AppData>(hint.backendUrl, result.token);
+          if (!snapshot?.data) throw new Error("El servidor no devolvio los datos de la empresa.");
+          const remoteRuc = String(snapshot.data.issuer?.ruc || "").replace(/\D/g, "");
+          if (!remoteRuc || remoteRuc !== hint.companyRuc.replace(/\D/g, "")) {
+            throw new Error("La empresa recibida no coincide con la Passkey.");
+          }
+          const remoteUser = {
+            id: result.user.id,
+            companyId: result.user.companyId,
+            name: result.user.name,
+            email: result.user.email,
+            role: (result.user.role || "vendedor") as User["role"],
+            mustChangePassword: Boolean(result.user.mustChangePassword),
+            supportAccess: Boolean(result.user.supportAccess)
+          } as User;
+          const restoredBase = {
+            ...snapshot.data,
+            backendUrl: hint.backendUrl,
+            autoBackupEnabled: true,
+            autoBackupLastAt: snapshot.updatedAt,
+            autoBackupLastError: ""
+          };
+          const localBeforeLogin = dataRef.current;
+          const sameCompany = String(localBeforeLogin.issuer?.ruc || "").replace(/\D/g, "") === remoteRuc;
+          const restored = sanitizeAppData(sameCompany
+            ? { ...mergeAppDataSnapshots(restoredBase, localBeforeLogin), backendUrl: hint.backendUrl, autoBackupEnabled: true }
+            : restoredBase);
+          const establishments = normalizedEstablishments(restored.issuer).filter((item) => item.active !== false);
+          if (establishments.length > 1) {
+            authState.setPendingLogin({ data: restored, user: remoteUser, token: result.token, authenticationMethod: "passkey" });
+            authState.setEstablishmentOptionsVisible(true);
+            authState.setLoginStatus(null);
+            return;
+          }
+          await enterSession(restored, remoteUser, result.token);
+          return;
+        }
+        const accountHint = await loadBiometricAccountHint();
+        if (accountHint?.version === 1) {
+          throw new Error("Actualice su acceso biométrico ingresando una última vez con su contraseña.");
+        }
+        const renewed = await refreshRegisteredDeviceSession();
+        const credential = renewed.credential;
+        const snapshot = await restoreAppData<AppData>(credential.backendUrl, renewed.token);
+        if (!snapshot?.data) throw new Error("El servidor no devolvió los datos de la empresa.");
+        const remoteRuc = String(snapshot.data.issuer?.ruc || "").replace(/\D/g, "");
+        const expectedRuc = credential.companyRuc.replace(/\D/g, "");
+        if (!remoteRuc || remoteRuc !== expectedRuc) {
+          throw new Error("La empresa recibida no coincide con la cuenta biométrica protegida.");
+        }
+        const establishments = normalizedEstablishments(snapshot.data.issuer);
+        const remembered = establishments.find((item) => item.id === credential.establishmentId && item.active !== false);
+        const issuer = remembered
+          ? issuerWithEstablishment({ ...snapshot.data.issuer, activeEstablishmentId: remembered.id }, remembered)
+          : snapshot.data.issuer;
+        const restoredBase = {
+          ...snapshot.data,
+          issuer,
+          backendUrl: credential.backendUrl,
+          autoBackupEnabled: true,
+          autoBackupLastAt: snapshot.updatedAt,
+          autoBackupLastError: ""
+        };
+        const localBeforeLogin = dataRef.current;
+        const sameCompany = String(localBeforeLogin.issuer?.ruc || "").replace(/\D/g, "") === expectedRuc;
+        const restored = sanitizeAppData(sameCompany
+          ? { ...mergeAppDataSnapshots(restoredBase, localBeforeLogin), backendUrl: credential.backendUrl, autoBackupEnabled: true }
+          : restoredBase);
+        const activeEstablishments = normalizedEstablishments(restored.issuer).filter((item) => item.active !== false);
+        if (activeEstablishments.length > 1) {
+          authState.setPendingLogin({
+            data: restored,
+            user: credential.user,
+            token: renewed.token,
+            authenticationMethod: "biometric"
+          });
+          authState.setEstablishmentOptionsVisible(true);
+          authState.setLoginStatus(null);
+          return;
+        }
+        markBiometricAuthenticationCompleted(credential.companyId, credential.userId);
+        await enterSession(restored, renewed.user, renewed.token);
+      } catch (error) {
+        if (shouldInvalidateDeviceCredential(error)) {
+          const accountHint = await loadBiometricAccountHint();
+          await clearBiometricCredential();
+          if (accountHint) await saveBiometricLockEnabled(accountHint.companyId, accountHint.userId, false);
+        }
+        const message = error instanceof Error ? error.message : "No se pudo iniciar con biometría.";
+        authState.setLoginStatus({ tone: "error", message });
+        authState.setLoginErrorModalMessage(message);
+      } finally {
+        loginRunningRef.current = false;
+        authState.setLoggingIn(false);
       }
     };
 
@@ -323,7 +462,8 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
     };
 
     const registerTenant = async () => {
-      if (authState.registering) return;
+      if (registrationRunningRef.current) return;
+      registrationRunningRef.current = true;
       authState.setRegisterStatus(null);
       const backendUrl = authState.authBackendUrl.trim();
       const form = {
@@ -334,24 +474,35 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
         adminName: authState.registerForm.adminName.trim(),
         email: authState.registerForm.email.trim().toLowerCase()
       };
+      if (__DEV__ && Platform.OS === "web" && backendUrl === PRODUCTION_BACKEND_URL) {
+        const message = "Registro bloqueado: una prueba local no puede crear empresas en el servidor de produccion.";
+        authState.setRegisterStatus({ tone: "error", message });
+        Alert.alert("Servidor de produccion bloqueado", "Use http://localhost:4000 para realizar pruebas locales.");
+        registrationRunningRef.current = false;
+        return;
+      }
       if (!form.ruc || !form.businessName || !form.adminName || !form.email || !form.password) {
         authState.setRegisterStatus({ tone: "error", message: "Complete RUC, negocio, administrador, correo y contrasena." });
         Alert.alert("Datos incompletos", "Ingrese RUC, nombre del negocio, nombre del administrador, correo y contrasena.");
+        registrationRunningRef.current = false;
         return;
       }
       if (!isValidUrl(backendUrl)) {
         authState.setRegisterStatus({ tone: "error", message: "Ingrese una URL valida del servidor." });
         Alert.alert("URL del servidor", "Ingrese una URL valida del servidor para crear la cuenta.");
+        registrationRunningRef.current = false;
         return;
       }
       if (form.password.length < 8) {
         authState.setRegisterStatus({ tone: "error", message: "La contrasena debe tener al menos 8 caracteres." });
         Alert.alert("Contrasena corta", "Use al menos 8 caracteres para proteger la cuenta.");
+        registrationRunningRef.current = false;
         return;
       }
       if (form.password !== form.confirmPassword) {
         authState.setRegisterStatus({ tone: "error", message: "Las contrasenas no coinciden." });
         Alert.alert("Contrasenas distintas", "Confirme la misma contrasena.");
+        registrationRunningRef.current = false;
         return;
       }
 
@@ -422,9 +573,11 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
         showMessage("Cuenta creada", "Demo activa por 3 meses. Ya puede configurar su empresa y empezar a vender.");
       } catch (error) {
         const message = error instanceof Error ? error.message : "Revise los datos e intente nuevamente.";
-        authState.setRegistering(false);
         authState.setRegisterStatus({ tone: "error", message });
         Alert.alert("No se pudo crear la cuenta", message);
+      } finally {
+        registrationRunningRef.current = false;
+        authState.setRegistering(false);
       }
     };
 
@@ -541,6 +694,7 @@ export function useAuthActions({ authState, dataRef, sessionRef, backendTokenRef
 
     return {
       login,
+      loginWithBiometrics,
       registerTenant,
       recoverPassword,
       chooseLoginEstablishment,

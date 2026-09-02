@@ -37,8 +37,8 @@ export type AuthState = {
   setEstablishmentOptionsVisible: React.Dispatch<React.SetStateAction<boolean>>;
   establishmentSwitcherVisible: boolean;
   setEstablishmentSwitcherVisible: React.Dispatch<React.SetStateAction<boolean>>;
-  pendingLogin: { data: AppData; user: User; token: string; passwordHash?: string } | null;
-  setPendingLogin: React.Dispatch<React.SetStateAction<{ data: AppData; user: User; token: string; passwordHash?: string } | null>>;
+  pendingLogin: { data: AppData; user: User; token: string; passwordHash?: string; authenticationMethod?: "password" | "biometric" | "passkey" } | null;
+  setPendingLogin: React.Dispatch<React.SetStateAction<{ data: AppData; user: User; token: string; passwordHash?: string; authenticationMethod?: "password" | "biometric" | "passkey" } | null>>;
   email: string;
   setEmail: React.Dispatch<React.SetStateAction<string>>;
   username: string;
@@ -97,7 +97,7 @@ export function useAuthState(initialBackendUrl: string): AuthState {
   const [companyOptions, setCompanyOptions] = useState<BackendCompanyOption[]>([]);
   const [establishmentOptionsVisible, setEstablishmentOptionsVisible] = useState(false);
   const [establishmentSwitcherVisible, setEstablishmentSwitcherVisible] = useState(false);
-  const [pendingLogin, setPendingLogin] = useState<{ data: AppData; user: User; token: string; passwordHash?: string } | null>(null);
+  const [pendingLogin, setPendingLogin] = useState<{ data: AppData; user: User; token: string; passwordHash?: string; authenticationMethod?: "password" | "biometric" | "passkey" } | null>(null);
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");

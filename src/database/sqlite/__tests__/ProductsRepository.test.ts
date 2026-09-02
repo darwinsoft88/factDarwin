@@ -25,6 +25,10 @@ interface StoredProduct {
   tax_rate_basis_points: number;
   stock_micros: number;
   min_stock_micros: number;
+  image_key: string | null;
+  image_version: string | null;
+  image_updated_at: string | null;
+  image_mime_type: string | null;
   unit_measure: string | null;
   active: number;
   deleted: number;
@@ -61,12 +65,16 @@ class ProductsDatabase implements SQLiteConnection {
         tax_rate_basis_points: Number(params[8]),
         stock_micros: Number(params[9]),
         min_stock_micros: Number(params[10]),
-        unit_measure: params[11] === null ? null : String(params[11]),
-        active: Number(params[12]),
-        deleted: Number(params[13]),
-        updated_at: params[14] === null ? null : String(params[14]),
-        compatibility_json: String(params[15]),
-        record_hash: String(params[16]),
+        image_key: params[11] === null ? null : String(params[11]),
+        image_version: params[12] === null ? null : String(params[12]),
+        image_updated_at: params[13] === null ? null : String(params[13]),
+        image_mime_type: params[14] === null ? null : String(params[14]),
+        unit_measure: params[15] === null ? null : String(params[15]),
+        active: Number(params[16]),
+        deleted: Number(params[17]),
+        updated_at: params[18] === null ? null : String(params[18]),
+        compatibility_json: String(params[19]),
+        record_hash: String(params[20]),
       });
     }
     return { changes: 1, lastInsertRowId: 0 };
@@ -133,6 +141,10 @@ const products: Product[] = [
     ivaRate: 0.15,
     stock: 2.75,
     minStock: 0.5,
+    imageKey: "product-decimal/image.webp",
+    imageVersion: "abc123",
+    imageUpdatedAt: "2026-07-28T09:59:00.000Z",
+    imageMimeType: "image/webp",
     updatedAt: "2026-07-28T10:00:00.000Z",
   },
   {
@@ -268,6 +280,10 @@ describe("ProductsRepository", () => {
       tax_rate_basis_points: 0,
       stock_micros: 0,
       min_stock_micros: 0,
+      image_key: null,
+      image_version: null,
+      image_updated_at: null,
+      image_mime_type: null,
       unit_measure: null,
       active: 1,
       deleted: 0,

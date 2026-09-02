@@ -2,7 +2,6 @@ import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Modal, Platform, Pressable, StatusBar as NativeStatusBar, StyleSheet, Text, View } from "react-native";
 import { MenuAction } from "./MenuAction";
-import { AppToast } from "./AppToast";
 
 type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -53,7 +52,6 @@ export function AppMenuModal({
           <MenuAction icon={<MenuGlyph name="logout" tone="danger" />} label="Salir" tone="danger" onPress={onLogout} />
         </Pressable>
       </Pressable>
-      <AppToast />
     </Modal>
   );
 }

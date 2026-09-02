@@ -48,6 +48,14 @@ describe("durable incremental sync", () => {
     expect(result).toBe(true);
     expect(events).toEqual(["persist", "post", "remove"]);
     expect(durable.current().pendingSync).toEqual([]);
+    expect(durable.writer).toHaveBeenNthCalledWith(1, expect.any(Function), {
+      skipAutoBackup: true,
+      syncState: "pending"
+    });
+    expect(durable.writer).toHaveBeenNthCalledWith(2, expect.any(Function), {
+      skipAutoBackup: true,
+      syncState: "synced"
+    });
   });
 
   it("keeps one pending with the same identity after timeout and reuses it", async () => {
@@ -57,6 +65,10 @@ describe("durable incremental sync", () => {
     const pendingPatch = durable.current().pendingSync?.[0]?.patch as Record<string, unknown>;
     expect(durable.current().pendingSync).toHaveLength(1);
     expect(pendingPatch.requestId).toBe("sync_timeout");
+    expect(durable.writer).toHaveBeenLastCalledWith(expect.any(Function), {
+      skipAutoBackup: true,
+      syncState: "pending"
+    });
 
     mergeMock.mockResolvedValueOnce({ ok: true });
     await syncPatchToBackend("https://backend.test", "token", { baseData: initialData, ...pendingPatch } as never, { persistMutation: durable.writer });

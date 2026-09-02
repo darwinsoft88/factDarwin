@@ -3,6 +3,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { PaymentCondition } from "../types";
 import { Input } from "./common";
+import { useAppTheme } from "../theme/AppTheme";
 
 type CreditTermsPickerProps = {
   value: PaymentCondition;
@@ -12,11 +13,12 @@ type CreditTermsPickerProps = {
 };
 
 export function CreditTermsPicker({ value, dueDate, onChange, onDueDateChange }: CreditTermsPickerProps) {
+  const { theme } = useAppTheme();
   const creditSelected = value === "credito";
 
   return (
     <View style={styles.box}>
-      <Text style={styles.title}>Forma de pago</Text>
+      <Text style={[styles.title, { color: theme.colors.text }]}>Forma de pago</Text>
       <View style={styles.row}>
         <CreditChoice
           icon="cash-check"
@@ -39,7 +41,7 @@ export function CreditTermsPicker({ value, dueDate, onChange, onDueDateChange }:
             onChangeText={onDueDateChange}
             placeholder="AAAA-MM-DD"
           />
-          <Text style={styles.note}>Se registra como cuenta por cobrar. Para el SRI se informa como 20 - otros sistema financiero.</Text>
+          <Text style={[styles.note, { color: theme.colors.textMuted }]}>Se registra como cuenta por cobrar. Para el SRI se informa como 20 - otros sistema financiero.</Text>
         </View>
       ) : null}
     </View>
@@ -57,13 +59,14 @@ function CreditChoice({
   active: boolean;
   onPress: () => void;
 }) {
+  const { theme } = useAppTheme();
   return (
-    <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} style={[styles.choice, active && styles.choiceActive]} onPress={onPress}>
-      <View style={[styles.iconBox, active && styles.iconBoxActive]}>
-        <MaterialCommunityIcons name={icon} size={17} color={active ? "#ffffff" : "#0f766e"} />
+    <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} style={[styles.choice, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, active && { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onPress}>
+      <View style={[styles.iconBox, { backgroundColor: active ? theme.colors.primary : theme.colors.primarySoft }]}>
+        <MaterialCommunityIcons name={icon} size={17} color={active ? theme.colors.onPrimary : theme.colors.primary} />
       </View>
-      <Text style={[styles.choiceText, active && styles.choiceTextActive]}>{label}</Text>
-      {active ? <MaterialCommunityIcons name="check-circle" size={18} color="#0f766e" /> : null}
+      <Text style={[styles.choiceText, { color: active ? theme.colors.primary : theme.colors.textMuted }]}>{label}</Text>
+      {active ? <MaterialCommunityIcons name="check-circle" size={18} color={theme.colors.primary} /> : null}
     </Pressable>
   );
 }

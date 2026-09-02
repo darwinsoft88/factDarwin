@@ -37,8 +37,13 @@ function scheduleNextBackup() {
   nextBackupAt = calculateNextRun(config.backups.time);
   const delay = Math.max(1000, nextBackupAt.getTime() - Date.now());
   schedulerTimer = setTimeout(async () => {
-    await runPostgresBackup("scheduled");
-    scheduleNextBackup();
+    try {
+      await runPostgresBackup("scheduled");
+    } catch (error) {
+      console.error("El respaldo PostgreSQL programado fallo:", error.message);
+    } finally {
+      scheduleNextBackup();
+    }
   }, delay);
 }
 
@@ -54,11 +59,16 @@ async function runPostgresBackup(reason = "manual") {
   const startedAt = new Date();
   const fileName = `factudarwin-${formatStamp(startedAt)}.dump`;
   const filePath = path.join(config.backups.dir, fileName);
+  const temporaryPath = `${filePath}.partial`;
+  let releaseProcessLock = null;
 
   try {
     await fs.mkdir(config.backups.dir, { recursive: true });
-    await executePgDump(filePath);
-    const restoreTest = await verifyPostgresRestore(filePath);
+    releaseProcessLock = await acquireProcessLock();
+    await assertFreeDiskSpace();
+    await executePgDump(temporaryPath);
+    const restoreTest = await verifyPostgresRestore(temporaryPath);
+    await fs.rename(temporaryPath, filePath);
     const stats = await fs.stat(filePath);
     await pruneOldBackups();
     lastBackup = {
@@ -72,6 +82,7 @@ async function runPostgresBackup(reason = "manual") {
     };
     return lastBackup;
   } catch (error) {
+    await fs.rm(temporaryPath, { force: true }).catch(() => {});
     lastBackup = {
       ok: false,
       reason,
@@ -81,7 +92,66 @@ async function runPostgresBackup(reason = "manual") {
     };
     throw error;
   } finally {
+    if (releaseProcessLock) await releaseProcessLock();
     backupRunning = false;
+  }
+}
+
+async function acquireProcessLock() {
+  const lockPath = path.join(config.backups.dir, ".postgres-backup.lock");
+  const create = async () => {
+    const handle = await fs.open(lockPath, "wx");
+    await handle.writeFile(JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+    await handle.close();
+  };
+  try {
+    await create();
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    const owner = await readLockOwner(lockPath);
+    const recentUnknownOwner = !owner.pid && owner.modifiedAt && Date.now() - owner.modifiedAt < 12 * 60 * 60 * 1000;
+    if ((owner.pid && processIsRunning(owner.pid)) || recentUnknownOwner) {
+      throw new Error(owner.pid
+        ? `Ya hay un respaldo PostgreSQL en ejecucion (PID ${owner.pid}).`
+        : "Ya hay un bloqueo reciente de respaldo PostgreSQL; no se eliminara automaticamente.");
+    }
+    await fs.unlink(lockPath);
+    await create();
+  }
+  return async () => {
+    const owner = await readLockOwner(lockPath);
+    if (owner.pid === process.pid) await fs.unlink(lockPath).catch(() => {});
+  };
+}
+
+async function readLockOwner(lockPath) {
+  try {
+    const [raw, stats] = await Promise.all([fs.readFile(lockPath, "utf8"), fs.stat(lockPath)]);
+    const value = JSON.parse(raw);
+    return { pid: Number(value.pid || 0), startedAt: value.startedAt || "", modifiedAt: stats.mtimeMs };
+  } catch {
+    const stats = await fs.stat(lockPath).catch(() => null);
+    return { pid: 0, startedAt: "", modifiedAt: stats?.mtimeMs || 0 };
+  }
+}
+
+function processIsRunning(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+async function assertFreeDiskSpace() {
+  if (typeof fs.statfs !== "function") return;
+  const stats = await fs.statfs(config.backups.dir);
+  const freeBytes = Number(stats.bavail) * Number(stats.bsize);
+  const requiredBytes = Math.max(1, Number(config.backups.minFreeBytes || 536870912));
+  if (!Number.isFinite(freeBytes) || freeBytes < requiredBytes) {
+    throw new Error(`Espacio insuficiente para el respaldo: libres ${freeBytes} bytes, minimo ${requiredBytes} bytes.`);
   }
 }
 

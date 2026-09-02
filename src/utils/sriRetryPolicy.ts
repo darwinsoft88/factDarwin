@@ -4,6 +4,11 @@ import { dateKey } from "./format";
 import { isCreditNoteSale, isInvoiceSale, uniquePendingOfficialInvoices } from "./sales";
 
 const sriPendingSendStatuses = new Set<Sale["status"]>(["FIRMADA", "ENVIADA", "PENDIENTE_SRI", "ENVIADA_SRI"]);
+const sriAuthorizationQueryStatuses = new Set<Sale["status"]>(["ENVIADA", "ENVIADA_SRI"]);
+
+export function isSriAuthorizationQueryDocument(sale: Sale) {
+  return (isInvoiceSale(sale) || isCreditNoteSale(sale)) && sriAuthorizationQueryStatuses.has(sale.status);
+}
 
 export function isTransientSriIssue(message = "") {
   const text = message.toLowerCase();
@@ -61,7 +66,7 @@ export function isSriSendPendingDocument(sale: Sale) {
 }
 
 export function isStaleSriPendingDocument(sale: Sale, now = new Date()) {
-  return isSriSendPendingDocument(sale) && !isSriDocumentSameDayForSending(sale, now);
+  return isSriSendPendingDocument(sale) && !isSriAuthorizationQueryDocument(sale) && !isSriDocumentSameDayForSending(sale, now);
 }
 
 export function staleSriPendingMessage(sale: Sale) {
@@ -86,8 +91,9 @@ export function sriPendingSendSummary(data: AppData, now = new Date()) {
 export function shouldAutoRetrySriDocument(sale: Sale, now = new Date()) {
   if (!(isInvoiceSale(sale) || isCreditNoteSale(sale))) return false;
   if (sale.status === "AUTORIZADA" || sale.status === "ANULADA" || sale.status === "CONVERTIDA" || sale.status === "DEVUELTA") return false;
+  if (isSriAuthorizationQueryDocument(sale)) return true;
   if (isStaleSriPendingDocument(sale, now)) return false;
-  if (getRetryInfo(sale).today >= MAX_DAILY_RETRIES) return false;
+  if (getRetryInfo(sale, now).today >= MAX_DAILY_RETRIES) return false;
 
   if (sale.status === "FIRMADA" || sale.status === "ENVIADA" || sale.status === "PENDIENTE_SRI" || sale.status === "ENVIADA_SRI") return true;
   if (sale.status === "ERROR_SRI") return isTransientSriIssue(sale.sriMessage || "") && !isDocumentCorrectionIssue(sale.sriMessage || "");

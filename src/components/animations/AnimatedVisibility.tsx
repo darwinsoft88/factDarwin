@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Easing,
-  View,
   StyleProp,
   ViewStyle,
 } from "react-native";
@@ -61,7 +60,7 @@ export function AnimatedVisibility({
         setRender(false);
       });
     }
-  }, [visible]);
+  }, [duration, opacity, translateY, visible]);
 
   if (!render) {
     return null;

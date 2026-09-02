@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Animated, BackHandler, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Animated, BackHandler, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { useKeyboardInset } from "../hooks/useKeyboardInset";
 import { AppOverlayPortal } from "./AppToast";
+import { useAppTheme } from "../theme/AppTheme";
 
 type EntityEditModalProps = {
   visible: boolean;
@@ -13,6 +15,7 @@ type EntityEditModalProps = {
   cancelLabel?: string;
   closeLabel?: string;
   confirming?: boolean;
+  adaptiveViewport?: boolean;
   children: React.ReactNode;
   onClosed?: () => void;
   onClose: () => void;
@@ -27,13 +30,21 @@ export function EntityEditModal({
   cancelLabel = "Cancelar",
   closeLabel = "Cerrar",
   confirming = false,
+  adaptiveViewport = false,
   children,
   onClosed,
   onClose,
   onConfirm
 }: EntityEditModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const keyboardInset = useKeyboardInset();
   const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const usesAdaptiveNativeViewport = adaptiveViewport && Platform.OS !== "web";
+  const safeTopPadding = usesAdaptiveNativeViewport ? Math.max(insets.top, MODAL_EDGE_PADDING) : MODAL_EDGE_PADDING;
+  const safeBottomPadding = usesAdaptiveNativeViewport ? Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING) : MODAL_SAFE_BOTTOM_PADDING;
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
   const [rendered, setRendered] = useState(visible);
   const opacity = useRef(new Animated.Value(visible ? 1 : 0)).current;
   const wasVisible = useRef(visible);
@@ -76,16 +87,23 @@ export function EntityEditModal({
     <AppOverlayPortal>
       <Animated.View accessibilityViewIsModal style={[styles.portalModal, { opacity }]}>
         <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-        <View style={[styles.backdrop, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_SAFE_BOTTOM_PADDING }]}>
-          <View style={styles.modal}>
-            <View style={styles.header}>
+        <View
+          style={[
+            styles.backdrop,
+            { backgroundColor: theme.colors.backdrop },
+            usesAdaptiveNativeViewport && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding },
+            androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }
+          ]}
+        >
+          <View style={[styles.modal, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, usesAdaptiveNativeViewport && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+            <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
               <View style={styles.titleBlock}>
-                <Text style={styles.title}>{title}</Text>
-                {subtitle ? <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text> : null}
+                <Text style={[styles.title, { color: theme.colors.text }]}>{title}</Text>
+                {subtitle ? <Text style={[styles.subtitle, { color: theme.colors.textMuted }]} numberOfLines={1}>{subtitle}</Text> : null}
               </View>
-              <Pressable style={styles.closeButton} onPress={onClose}>
-                <MaterialCommunityIcons name="close" size={15} color="#0f766e" />
-                <Text style={styles.closeText}>{closeLabel}</Text>
+              <Pressable style={[styles.closeButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+                <MaterialCommunityIcons name="close" size={15} color={theme.colors.primary} />
+                <Text style={[styles.closeText, { color: theme.colors.primary }]}>{closeLabel}</Text>
               </Pressable>
             </View>
             <ScrollView
@@ -95,13 +113,13 @@ export function EntityEditModal({
             >
               {children}
               <View style={styles.actions}>
-                <Pressable style={styles.cancelButton} onPress={onClose}>
-                  <MaterialCommunityIcons name="arrow-left" size={16} color="#334155" />
-                  <Text style={styles.cancelText}>{cancelLabel}</Text>
+                <Pressable style={[styles.cancelButton, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.surface }]} onPress={onClose}>
+                  <MaterialCommunityIcons name="arrow-left" size={16} color={theme.colors.textMuted} />
+                  <Text style={[styles.cancelText, { color: theme.colors.textMuted }]}>{cancelLabel}</Text>
                 </Pressable>
-                <Pressable disabled={confirming} style={[styles.confirmButton, confirming && styles.confirmButtonDisabled]} onPress={onConfirm}>
-                  <MaterialCommunityIcons name="content-save-outline" size={17} color="#ffffff" />
-                  <Text style={styles.confirmText}>{confirming ? "Guardando..." : confirmLabel}</Text>
+                <Pressable disabled={confirming} style={[styles.confirmButton, { backgroundColor: theme.colors.primary }, confirming && styles.confirmButtonDisabled]} onPress={onConfirm}>
+                  <MaterialCommunityIcons name="content-save-outline" size={17} color={theme.colors.onPrimary} />
+                  <Text style={[styles.confirmText, { color: theme.colors.onPrimary }]}>{confirming ? "Guardando..." : confirmLabel}</Text>
                 </Pressable>
               </View>
             </ScrollView>

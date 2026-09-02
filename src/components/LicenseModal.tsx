@@ -1,7 +1,10 @@
 import React from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { AppLicense, Issuer } from "../types";
 import { ActivePlanInfo } from "./ActivePlanInfo";
+import { useAppTheme } from "../theme/AppTheme";
 
 type LicenseModalProps = {
   visible: boolean;
@@ -11,17 +14,24 @@ type LicenseModalProps = {
 };
 
 export function LicenseModal({ visible, license, issuer, onClose }: LicenseModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 12 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? 12 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.modal}>
-          <View style={styles.header}>
+      <View style={[styles.backdrop, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
+        <View style={[styles.modal, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <View style={[styles.header, { borderBottomColor: theme.colors.border }]}>
             <View style={styles.flex}>
-              <Text style={styles.title}>Licencia</Text>
-              <Text style={styles.meta}>Planes, renovacion y activacion comercial.</Text>
+              <Text style={[styles.title, { color: theme.colors.text }]}>Licencia</Text>
+              <Text style={[styles.meta, { color: theme.colors.textMuted }]}>Planes, renovacion y activacion comercial.</Text>
             </View>
-            <Pressable style={styles.closeButton} onPress={onClose}>
-              <Text style={styles.closeButtonText}>Cerrar</Text>
+            <Pressable style={[styles.closeButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+              <Text style={[styles.closeButtonText, { color: theme.colors.primary }]}>Cerrar</Text>
             </Pressable>
           </View>
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator>

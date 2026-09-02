@@ -2,7 +2,7 @@
   "expo": {
     "name": "FactuDarwin",
     "slug": "factura-sri-mobile",
-    "version": "1.0.11",
+    "version": "1.0.12",
     "icon": "./assets/icon.png",
     "scheme": "factudarwin",
     "userInterfaceStyle": "light",
@@ -48,9 +48,24 @@
           "recordAudioAndroid": false
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "FactuDarwin usa sus fotos solo para asignar una imagen al producto.",
+          "cameraPermission": "FactuDarwin usa la camara para tomar la foto del producto.",
+          "microphonePermission": false
+        }
+      ],
       "expo-sharing",
       "expo-audio",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Permita que FactuDarwin use Face ID para proteger el acceso a su cuenta."
+        }
+      ],
+      "expo-secure-store"
     ],
     "web": {
       "favicon": "./assets/icon.png",

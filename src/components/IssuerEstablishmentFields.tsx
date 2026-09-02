@@ -1,7 +1,8 @@
-import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, { useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Issuer, IssuerEstablishment } from "../types";
 import { sanitizeIntegerInput } from "../utils/numbers";
+import { useAppTheme } from "../theme/AppTheme";
 import { Input, Select } from "./common";
 
 type IssuerEstablishmentFieldsProps = {
@@ -43,9 +44,11 @@ export function IssuerEstablishmentFields({
   onRemissionSequentialChange,
   onCreditNoteSequentialChange
 }: IssuerEstablishmentFieldsProps) {
+  const { theme } = useAppTheme();
+  const [advancedVisible, setAdvancedVisible] = useState(false);
   return (
     <>
-      <Text style={styles.groupTitle}>Establecimiento activo</Text>
+      <Text style={[styles.groupTitle, { color: theme.colors.primary }]}>Establecimiento activo</Text>
       <Select
         label="Sucursal / punto de emision"
         value={selectedEstablishment.id}
@@ -62,9 +65,17 @@ export function IssuerEstablishmentFields({
         </View>
       </View>
       <Input label="Direccion establecimiento" value={selectedEstablishment.address || issuer.address} onChangeText={(address) => onEstablishmentPatch({ address })} />
-      <Input label="Siguiente secuencial" value={sequentialText} onChangeText={(value) => onSequentialChange(sanitizeIntegerInput(value))} keyboardType="number-pad" />
-      <Input label="Siguiente secuencial guia" value={remissionSequentialText} onChangeText={(value) => onRemissionSequentialChange(sanitizeIntegerInput(value))} keyboardType="number-pad" />
-      <Input label="Siguiente secuencial nota credito" value={creditNoteSequentialText} onChangeText={(value) => onCreditNoteSequentialChange(sanitizeIntegerInput(value))} keyboardType="number-pad" />
+      <Pressable onPress={() => setAdvancedVisible((visible) => !visible)} style={[styles.advancedToggle, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.surfaceMuted }]}>
+        <Text style={[styles.advancedToggleText, { color: theme.colors.text }]}>{advancedVisible ? "Ocultar configuración avanzada" : "Configuración avanzada · Secuenciales"}</Text>
+      </Pressable>
+      {advancedVisible ? (
+        <View style={styles.advancedFields}>
+          <Text style={[styles.advancedHint, { color: theme.colors.textMuted }]}>Estos valores controlan la numeración fiscal. Modifícalos únicamente con información verificada o asistencia de soporte.</Text>
+          <Input label="Siguiente secuencial" value={sequentialText} onChangeText={(value) => onSequentialChange(sanitizeIntegerInput(value))} keyboardType="number-pad" />
+          <Input label="Siguiente secuencial guía" value={remissionSequentialText} onChangeText={(value) => onRemissionSequentialChange(sanitizeIntegerInput(value))} keyboardType="number-pad" />
+          <Input label="Siguiente secuencial nota de crédito" value={creditNoteSequentialText} onChangeText={(value) => onCreditNoteSequentialChange(sanitizeIntegerInput(value))} keyboardType="number-pad" />
+        </View>
+      ) : null}
     </>
   );
 }
@@ -85,5 +96,9 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
     minWidth: 130
-  }
+  },
+  advancedToggle: { alignItems: "center", borderRadius: 10, borderWidth: 1, padding: 11 },
+  advancedToggleText: { fontSize: 12, fontWeight: "900" },
+  advancedFields: { gap: 10 },
+  advancedHint: { fontSize: 12, lineHeight: 18 }
 });

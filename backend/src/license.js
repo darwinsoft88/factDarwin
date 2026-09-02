@@ -1,7 +1,14 @@
 const DEFAULT_FEATURES = {
   sales: true,
+  documents: true,
+  clients: true,
+  products: true,
   sri: true,
   inventory: true,
+  cash: true,
+  credits: true,
+  guides: true,
+  users: true,
   reports: true,
   multiDevice: true,
   multiEmissionPoint: false
@@ -41,11 +48,9 @@ function normalizeLicense(license) {
   const openAllModules = normalized.plan === "trial";
   const proPlan = isProPlan(normalized.plan);
   const premiumPlan = isPremiumPlan(normalized.plan);
-  normalized.features.sales = openAllModules || normalized.features.sales !== false;
-  normalized.features.sri = openAllModules || normalized.features.sri !== false;
-  normalized.features.inventory = openAllModules || normalized.features.inventory !== false;
-  normalized.features.reports = openAllModules || normalized.features.reports !== false;
-  normalized.features.multiDevice = openAllModules || normalized.features.multiDevice !== false;
+  for (const feature of ["sales", "documents", "clients", "products", "sri", "inventory", "cash", "credits", "guides", "users", "reports", "multiDevice"]) {
+    normalized.features[feature] = normalized.features[feature] !== false;
+  }
   normalized.features.multiEmissionPoint = openAllModules || proPlan || premiumPlan;
   normalized.maxEmissionPoints = normalized.features.multiEmissionPoint
     ? safePositiveInteger(normalized.maxEmissionPoints, openAllModules ? 3 : 999)
@@ -115,6 +120,37 @@ function requireActiveLicense(getSnapshot, feature = "sales") {
   };
 }
 
+function requireLicenseFeatures(getSnapshot, resolveFeatures) {
+  return async (req, res, next) => {
+    try {
+      const snapshot = await getSnapshot(req.user?.companyId);
+      const status = licenseStatus(snapshot?.data || {});
+      if (!status.active) {
+        const error = new Error(status.effectiveStatus === "suspended"
+          ? "Licencia suspendida. Contacte soporte para reactivar la cuenta."
+          : "Licencia vencida. Renueve el plan para continuar.");
+        error.statusCode = 402;
+        error.license = status;
+        throw error;
+      }
+      const required = Array.from(new Set(resolveFeatures(req) || []));
+      const blocked = required.find((feature) => status.features?.[feature] === false);
+      if (blocked) {
+        const error = new Error("El modulo solicitado esta desactivado para esta empresa.");
+        error.statusCode = 403;
+        error.code = "MODULE_DISABLED";
+        error.feature = blocked;
+        error.license = status;
+        throw error;
+      }
+      req.license = status;
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
 function safePositiveInteger(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -139,5 +175,6 @@ module.exports = {
   defaultLicense,
   licenseStatus,
   normalizeLicense,
-  requireActiveLicense
+  requireActiveLicense,
+  requireLicenseFeatures
 };

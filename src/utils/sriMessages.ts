@@ -72,13 +72,21 @@ export function formatSriResult(result: AuthorizationResponse) {
 
 export function explainSriResult(result: AuthorizationResponse) {
   const raw = sanitizeSriRaw(`${result.error || ""} ${result.message || ""} ${result.status || ""} ${result.authorizationStatus || ""} ${result.sriMessage || ""} ${JSON.stringify(result.reception || {})} ${JSON.stringify(result.authorization || {})}`).toUpperCase();
-  const text = shortText([result.error, result.message, result.sriMessage].filter(Boolean).join(" | "), 260);
+  const text = shortText(sanitizeSriRaw([result.error, result.message, result.sriMessage].filter(Boolean).join(" | ")), 260);
 
-  if (raw.includes("RUCERTIFICADO") || raw.includes("FIRMA INVALIDA")) {
+  if (raw.includes("RUCCERTIFICADO") || raw.includes("RUCERTIFICADO") || raw.includes("RUC CERTIFICADO")) {
     return {
-      title: "Problema de firma electronica",
-      detail: "No se encontro la firma .p12 de la empresa activa. Revise que la empresa haya cargado su certificado .p12 y la contrasena correcta.",
-      action: "Suba el .p12 correcto y su clave en configuracion de la empresa activa."
+      title: "El certificado no corresponde al comprobante",
+      detail: text || "El RUC del certificado electronico no coincide con el RUC del comprobante.",
+      action: "Confirme la empresa activa y cargue el certificado emitido para el mismo RUC. No reintente hasta corregirlo."
+    };
+  }
+
+  if (raw.includes("FIRMA INVALIDA")) {
+    return {
+      title: "Firma electronica invalida",
+      detail: text || "El certificado fue encontrado, pero la firma generada no fue aceptada.",
+      action: "Revise la vigencia, contrasena y titular del certificado antes de reintentar."
     };
   }
 

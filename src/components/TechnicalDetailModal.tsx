@@ -1,5 +1,7 @@
 import React from "react";
-import { Platform, Pressable, SafeAreaView, ScrollView, StatusBar as NativeStatusBar, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAppTheme } from "../theme/AppTheme";
 
 type TechnicalDetailModalProps = {
   value: string;
@@ -7,22 +9,23 @@ type TechnicalDetailModalProps = {
 };
 
 export function TechnicalDetailModal({ value, onClose }: TechnicalDetailModalProps) {
-  const headerTopPadding = Platform.OS === "android" ? (NativeStatusBar.currentHeight || 0) + 6 : 12;
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <View style={[styles.header, styles.xmlModalHeader, { paddingTop: headerTopPadding }]}>
-        <Text style={styles.title}>Detalle tecnico</Text>
-        <Pressable style={styles.smallButton} onPress={onClose}>
-          <Text style={styles.smallButtonText}>Cerrar</Text>
+    <View style={[styles.screen, { paddingBottom: insets.bottom, backgroundColor: theme.colors.background }]}>
+      <View style={[styles.header, styles.xmlModalHeader, { paddingTop: Math.max(insets.top, 6), backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+        <Text style={[styles.title, { color: theme.colors.text }]}>Detalle tecnico</Text>
+        <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+          <Text style={[styles.smallButtonText, { color: theme.colors.primaryStrong }]}>Cerrar</Text>
         </Pressable>
       </View>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text selectable style={styles.xml}>
+        <Text selectable style={[styles.xml, { color: theme.colors.text, backgroundColor: theme.colors.surface }]}>
           {value}
         </Text>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

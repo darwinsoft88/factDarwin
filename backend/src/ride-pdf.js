@@ -1,4 +1,5 @@
 const PDFDocument = require("pdfkit");
+const { DOMParser } = require("@xmldom/xmldom");
 
 const PAGE = { margin: 32, width: 595.28, height: 841.89 };
 const COLORS = { text: "#111111", muted: "#4b5563", line: "#111111", fill: "#f3f4f6" };
@@ -222,7 +223,10 @@ function drawDetails(doc, context, x, y, width) {
 }
 
 function drawBottomPanels(doc, context, x, y, width) {
-  const required = 235;
+  const leftWidth = width * 0.58;
+  const additionalLayout = additionalInfoLayout(doc, context, leftWidth);
+  const paymentHeight = 16 * (paymentsFor(context.document).length + 1);
+  const required = Math.max(235, additionalLayout.height + 8 + paymentHeight + 24);
   let currentY = y;
   if (currentY + required > PAGE.height - PAGE.margin) {
     doc.addPage();
@@ -230,40 +234,105 @@ function drawBottomPanels(doc, context, x, y, width) {
     drawContinuationTitle(doc, context, x, currentY, width);
     currentY += 32;
   }
-  const leftWidth = width * 0.58;
   const gap = 8;
   const rightX = x + leftWidth + gap;
   const rightWidth = width - leftWidth - gap;
 
-  drawAdditionalInfo(doc, context, x, currentY, leftWidth);
+  drawAdditionalInfo(doc, additionalLayout, x, currentY, leftWidth);
   const totalsHeight = drawTotals(doc, context.documentType, context.document, rightX, currentY, rightWidth);
-  drawPayments(doc, context.document, x, currentY + 82, leftWidth);
+  const paymentY = currentY + additionalLayout.height + 8;
+  drawPayments(doc, context.document, x, paymentY, leftWidth);
   doc.font("Helvetica").fontSize(6.8).fillColor(COLORS.muted)
     .text(
       "Representacion impresa de documento electronico autorizado. La clave de acceso corresponde al numero de autorizacion.",
       x,
-      currentY + Math.max(140, totalsHeight + 8),
+      currentY + Math.max(totalsHeight, additionalLayout.height + 8 + paymentHeight) + 10,
       { width }
     );
+
+  if (additionalLayout.overflow) {
+    drawAdditionalInfoContinuation(doc, context, x, width, additionalLayout.text);
+  }
 }
 
-function drawAdditionalInfo(doc, context, x, y, width) {
-  box(doc, x, y, width, 74, 4);
-  doc.font("Helvetica-Bold").fontSize(8).fillColor(COLORS.text)
-    .text("INFORMACION ADICIONAL", x + 7, y + 7);
-  const fields = [
+function additionalInfoFields(context) {
+  return [
     ["Telefono", context.client.phone],
     ["Email", context.client.email],
+    ...authorizedAdditionalInfo(context.document.authorizedXml),
     ...(Array.isArray(context.document.additionalInfo)
       ? context.document.additionalInfo.map((field) => [field.name || field.label, field.value])
       : [])
-  ].filter((field) => clean(field[1]));
-  if (!fields.length) {
+  ].filter((field, index, all) => clean(field[1]) && all.findIndex((candidate) => clean(candidate[0]).toLowerCase() === clean(field[0]).toLowerCase()) === index);
+}
+
+function additionalInfoLayout(doc, context, width) {
+  const fields = additionalInfoFields(context);
+  const text = fields.map(([name, value]) => `${clean(name)}: ${clean(value)}`).join("\n");
+  doc.font("Helvetica").fontSize(7);
+  const textHeight = text ? doc.heightOfString(text, { width: width - 14, lineGap: 2 }) : 12;
+  const naturalHeight = Math.ceil(30 + textHeight);
+  return {
+    fields,
+    text,
+    height: Math.max(74, Math.min(160, naturalHeight)),
+    overflow: naturalHeight > 160
+  };
+}
+
+function drawAdditionalInfo(doc, layout, x, y, width) {
+  box(doc, x, y, width, layout.height, 4);
+  doc.font("Helvetica-Bold").fontSize(8).fillColor(COLORS.text)
+    .text("INFORMACION ADICIONAL", x + 7, y + 7);
+  if (!layout.fields.length) {
     doc.font("Helvetica").fontSize(7).fillColor(COLORS.muted).text("Sin informacion adicional", x + 7, y + 23);
     return;
   }
   doc.font("Helvetica").fontSize(7).fillColor(COLORS.text)
-    .text(fields.slice(0, 6).map(([name, value]) => `${clean(name)}: ${clean(value)}`).join("\n"), x + 7, y + 22, { width: width - 14, lineGap: 2 });
+    .text(layout.text, x + 7, y + 22, {
+      width: width - 14,
+      height: layout.height - 28,
+      lineGap: 2,
+      ellipsis: true
+    });
+}
+
+function drawAdditionalInfoContinuation(doc, context, x, width, text) {
+  doc.addPage();
+  let y = PAGE.margin;
+  drawContinuationTitle(doc, context, x, y, width);
+  y += 30;
+  doc.font("Helvetica-Bold").fontSize(9).fillColor(COLORS.text)
+    .text("INFORMACION ADICIONAL - CONTINUACION", x, y, { width });
+  doc.font("Helvetica").fontSize(7).fillColor(COLORS.text)
+    .text(text, x, y + 18, {
+      width,
+      lineGap: 3
+    });
+}
+
+function authorizedAdditionalInfo(xml) {
+  const source = String(xml || "").trim();
+  if (!source) return [];
+  try {
+    const parsed = new DOMParser().parseFromString(source, "application/xml");
+    return Array.from(parsed.getElementsByTagName("campoAdicional"))
+      .map((node) => [
+        String(node.getAttribute("nombre") || "").trim(),
+        String(node.textContent || "").trim()
+      ])
+      .filter(([name, value]) => name && value && normalizeAdditionalInfoName(name) !== "obligado a llevar contabilidad");
+  } catch {
+    return [];
+  }
+}
+
+function normalizeAdditionalInfoName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
 }
 
 function drawPayments(doc, document, x, y, width) {

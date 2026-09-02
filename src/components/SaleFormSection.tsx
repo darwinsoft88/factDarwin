@@ -1,17 +1,21 @@
 import React, { useEffect, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { LIST_BATCH_SIZE } from "../constants/app";
 import {
+  KEYBOARD_AVOIDING_BEHAVIOR,
   MODAL_EDGE_PADDING,
+  MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING,
   MODAL_SAFE_BOTTOM_PADDING
 } from "../constants/layout";
-import { AdditionalInfoField, Client, DocumentType, PaymentMethod, Product, Sale, SaleItem, SalePaymentSplit } from "../types";
+import { useKeyboardInset } from "../hooks/useKeyboardInset";
+import { AdditionalInfoField, Client, DocumentType, PaymentMethod, Product, Sale, SaleItem, SalePaymentSplit, SalePriceTier } from "../types";
 import { PaymentCondition } from "../types";
 import { money } from "../sri";
 import { toInputDate } from "../utils/format";
 import { documentTypeLabel } from "../utils/sales";
 import { documentCollectsPayment } from "../utils/documentWorkflow";
+import { showWarning } from "../utils/dialogs";
 import { isConsumerFinalClient } from "../validation";
 import { useFloatingOverlay } from "../context/FloatingOverlayContext";
 import {
@@ -35,6 +39,7 @@ import { SaleSubmitButton } from "./SaleSubmitButton";
 import { SaleTotalsBox } from "./SaleTotalsBox";
 import { CalendarDateInput } from "./CalendarDateInput";
 import { Input, Section } from "./common";
+import { useAppTheme } from "../theme/AppTheme";
 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -69,10 +74,13 @@ function normalizePaymentAmountInput(rawValue: string) {
 }
 
 type SaleFormSectionProps = {
-  addProductById: (productId: string) => void;
+  backendUrl: string;
+  backendToken: string;
+  addProductById: (productId: string) => boolean;
   addProductSearchSubmit: () => void;
   additionalInfo: AdditionalInfoField[];
   adjustSaleLineQuantity: (index: number, delta: number) => void;
+  changeLinePriceTier: (index: number, tier: SalePriceTier) => boolean;
   cancelEdit: () => void;
   clientId: string;
   clientSearch: string;
@@ -97,10 +105,11 @@ type SaleFormSectionProps = {
   projectedStock: number;
   saleSummaryTotals: { subtotal: number; discount: number; tax: number; total: number };
   selectClientForSale: (nextClientId: string, nextClient?: Client) => void;
-  selectProductForSale: (nextProductId: string) => void;
   selectedClient?: Client;
   selectedProduct?: Product;
   selectedProductLowStock: boolean;
+  salePriceTier: SalePriceTier;
+  onSalePriceTierChange: (tier: SalePriceTier) => void;
   salePayments: SalePaymentSplit[];
   setClientSearch: React.Dispatch<React.SetStateAction<string>>;
   setDocumentType: React.Dispatch<React.SetStateAction<DocumentType>>;
@@ -119,13 +128,17 @@ type SaleFormSectionProps = {
   filteredProductsForSale?: Product[];
   visibleClientsForSale: Client[];
   visibleProductsForSale: Product[];
+  products: Product[];
 };
 
 export function SaleFormSection({
+  backendUrl,
+  backendToken,
   addProductById,
   addProductSearchSubmit,
   additionalInfo,
   adjustSaleLineQuantity,
+  changeLinePriceTier,
   cancelEdit,
   clientId,
   clientSearch,
@@ -150,10 +163,11 @@ export function SaleFormSection({
   projectedStock,
   saleSummaryTotals,
   selectClientForSale,
-  selectProductForSale,
   selectedClient,
   selectedProduct,
   selectedProductLowStock,
+  salePriceTier,
+  onSalePriceTierChange,
   salePayments,
   setClientSearch,
   setDocumentType,
@@ -171,8 +185,10 @@ export function SaleFormSection({
   sourceTicket,
   filteredProductsForSale: _filteredProductsForSale,
   visibleClientsForSale,
-  visibleProductsForSale
+  visibleProductsForSale,
+  products
 }: SaleFormSectionProps) {
+  const { theme } = useAppTheme();
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [checkoutSummaryOpen, setCheckoutSummaryOpen] = useState(false);
   const { setOverlay } = useFloatingOverlay();
@@ -182,7 +198,7 @@ export function SaleFormSection({
   const collectsPayment = documentCollectsPayment(effectiveDocumentType);
   const itemCount = items.length;
   const unitCount = items.reduce((sum, item) => sum + item.quantity, 0);
-  const openPaymentModal = () => {
+  const openPaymentModal = React.useCallback(() => {
     if (issuing) return;
     if (!collectsPayment) {
       issue();
@@ -194,7 +210,13 @@ export function SaleFormSection({
         : normalizeSalePayments(current, paymentMethod, saleSummaryTotals.total)
     );
     setPaymentModalVisible(true);
-  };
+  }, [collectsPayment, issue, issuing, paymentCondition, paymentMethod, saleSummaryTotals.total, setSalePayments]);
+  const showCreditClientRequired = React.useCallback(() => {
+    setPaymentModalVisible(false);
+    setTimeout(() => {
+      showWarning("Cliente requerido para crédito", "Para vender a crédito, seleccione o agregue un cliente identificado. Consumidor Final no puede utilizar esta forma de pago.");
+    }, 100);
+  }, []);
   const confirmPayment = () => {
     const resolvedPayments =
       paymentCondition === "credito"
@@ -204,7 +226,7 @@ export function SaleFormSection({
 
     if (paymentCondition === "credito") {
       if (!creditAllowed) {
-        Alert.alert("Cliente requerido", "Para vender a credito seleccione un cliente identificado. No se permite credito a Consumidor Final.");
+        showCreditClientRequired();
         return;
       }
       if (balance < -0.009) {
@@ -248,6 +270,7 @@ export function SaleFormSection({
     effectiveDocumentType,
     issuing,
     itemCount,
+    openPaymentModal,
     saleSummaryTotals.discount,
     saleSummaryTotals.subtotal,
     saleSummaryTotals.tax,
@@ -261,7 +284,7 @@ export function SaleFormSection({
   return (
     <Section title={sourceTicket ? `Facturando ticket ${sourceTicket.sequence}` : sourceProforma ? `Convirtiendo proforma ${sourceProforma.sequence}` : editingSale ? `Corrigiendo ${documentTypeLabel(editingSale)} ${editingSale.sequence}` : "Nueva venta"}>
       <SaleEditNotice sourceTicket={sourceTicket} sourceProforma={sourceProforma} editingSale={editingSale} onCancel={cancelEdit} />
-      <View style={styles.saleGroupCompact}>
+      <View style={[styles.saleGroupCompact, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
         <DocumentTypeSelector
           value={documentType}
           editingSale={editingSale}
@@ -271,7 +294,7 @@ export function SaleFormSection({
           onChange={setDocumentType}
         />
       </View>
-      <View style={styles.saleGroup}>
+      <View style={[styles.saleGroup, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
         <SaleClientPicker
           search={clientSearch}
           selectedClientId={clientId}
@@ -287,19 +310,22 @@ export function SaleFormSection({
         />
       </View>
 
-      <View style={styles.saleGroup}>
+      <View style={[styles.saleGroup, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
         <SaleProductPicker
+          backendUrl={backendUrl}
+          backendToken={backendToken}
           search={productSearch}
           selectedProductId={productId}
           visibleProducts={visibleProductsForSale}
           filteredProductCount={filteredProductCount}
           canLoadMore={visibleProductsForSale.length < filteredProductCount}
           onSearchChange={setProductSearch}
-          onProductChange={selectProductForSale}
           onSearchSubmit={addProductSearchSubmit}
           onOpenScanner={onOpenScanner}
           onLoadMore={() => setVisibleProductCount((count) => count + LIST_BATCH_SIZE)}
           onAddProduct={addProductById}
+          priceTier={salePriceTier}
+          onPriceTierChange={onSalePriceTierChange}
         />
         <SaleProductControls
           product={selectedProduct}
@@ -309,8 +335,12 @@ export function SaleFormSection({
       </View>
 
       <SaleItemsList
+        backendUrl={backendUrl}
+        backendToken={backendToken}
         items={items}
+        products={products}
         onAdjustQuantity={adjustSaleLineQuantity}
+        onChangePriceTier={changeLinePriceTier}
         onEdit={openLineEditor}
         onDelete={(index) => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}
       />
@@ -334,6 +364,7 @@ export function SaleFormSection({
         issuing={issuing}
         onClose={() => setPaymentModalVisible(false)}
         onConfirm={confirmPayment}
+        onCreditClientRequired={showCreditClientRequired}
         onCreditDueDateChange={setCreditDueDate}
         onPaymentConditionChange={setPaymentCondition}
         onPaymentMethodChange={setPaymentMethod}
@@ -355,6 +386,7 @@ type SalePaymentModalProps = {
   issuing: boolean;
   onClose: () => void;
   onConfirm: () => void;
+  onCreditClientRequired: () => void;
   onCreditDueDateChange: (value: string) => void;
   onPaymentConditionChange: (value: PaymentCondition) => void;
   onPaymentMethodChange: (value: PaymentMethod) => void;
@@ -374,6 +406,7 @@ function SalePaymentModal({
   issuing,
   onClose,
   onConfirm,
+  onCreditClientRequired,
   onCreditDueDateChange,
   onPaymentConditionChange,
   onPaymentMethodChange,
@@ -384,6 +417,15 @@ function SalePaymentModal({
   total,
   visible
 }: SalePaymentModalProps) {
+  const { theme } = useAppTheme();
+  const [cashShortfall, setCashShortfall] = useState(0);
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardInset = useKeyboardInset();
+  const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
   const isInvoice = documentType === "factura";
   const helperText = isInvoice
     ? "Se autoriza en el SRI al confirmar."
@@ -402,52 +444,67 @@ function SalePaymentModal({
     onPaymentMethodChange(immediateMethod);
     onSalePaymentsChange((current) => normalizeSalePayments(current, immediateMethod, total));
   };
+  const confirmWithCashValidation = () => {
+    if (cashShortfall > 0.009) {
+      Alert.alert("Efectivo insuficiente", `Faltan $${money(cashShortfall)} del efectivo aplicado.`);
+      return;
+    }
+    onConfirm();
+  };
+
+  useEffect(() => {
+    if (!visible) setCashShortfall(0);
+  }, [visible]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.paymentBackdrop}>
-        <View style={styles.paymentSheet}>
-          <View style={styles.sheetHandle} />
+      <KeyboardAvoidingView style={styles.paymentKeyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
+      <View style={[styles.paymentBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }]}>
+        <View style={[styles.paymentSheet, { backgroundColor: theme.colors.surface, shadowColor: theme.colors.shadow }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+          <View style={[styles.sheetHandle, { backgroundColor: theme.colors.borderStrong }]} />
           <View style={styles.paymentHeader}>
             <View style={styles.paymentTitleBlock}>
-              <Text style={styles.paymentTitle}>Cobro de la venta</Text>
-              <Text style={styles.paymentSubtitle}>{documentLabel(documentType)}</Text>
+              <Text style={[styles.paymentTitle, { color: theme.colors.text }]}>Cobro de la venta</Text>
+              <Text style={[styles.paymentSubtitle, { color: theme.colors.textMuted }]}>{documentLabel(documentType)}</Text>
             </View>
-            <Pressable style={styles.roundCloseButton} onPress={onClose}>
-              <MaterialCommunityIcons name="close" size={22} color="#475569" />
+            <Pressable style={[styles.roundCloseButton, { backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+              <MaterialCommunityIcons name="close" size={22} color={theme.colors.textMuted} />
             </Pressable>
           </View>
-          <ScrollView contentContainerStyle={styles.paymentContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-            <View style={styles.amountHero}>
-              <Text style={styles.amountHeroLabel}>Total a cobrar</Text>
-              <Text style={styles.amountHeroValue}>${money(total)}</Text>
+          <ScrollView contentContainerStyle={[styles.paymentContent, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING }]} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"} showsVerticalScrollIndicator={false}>
+            <View style={[styles.amountHero, { backgroundColor: theme.colors.successSoft }]}>
+              <Text style={[styles.amountHeroLabel, { color: theme.colors.success }]}>Total a cobrar</Text>
+              <Text style={[styles.amountHeroValue, { color: theme.colors.success }]}>${money(total)}</Text>
             </View>
             <SaleSplitPaymentsEditor
               creditAllowed={creditAllowed}
               creditDueDate={creditDueDate}
               fallbackMethod={paymentMethod}
               onChange={onSalePaymentsChange}
+              onCreditClientRequired={onCreditClientRequired}
               onCreditDueDateChange={onCreditDueDateChange}
               onPaymentConditionChange={handlePaymentConditionChange}
               onPrimaryMethodChange={onPaymentMethodChange}
+              onCashShortfallChange={setCashShortfall}
               paymentCondition={paymentCondition}
               payments={salePayments}
               total={total}
             />
             <View style={styles.paymentHint}>
-              <MaterialCommunityIcons name={isInvoice ? "shield-check-outline" : "file-check-outline"} size={18} color="#0f766e" />
-              <Text style={styles.paymentHintText}>{helperText}</Text>
+              <MaterialCommunityIcons name={isInvoice ? "shield-check-outline" : "file-check-outline"} size={18} color={theme.colors.primary} />
+              <Text style={[styles.paymentHintText, { color: theme.colors.textMuted }]}>{helperText}</Text>
             </View>
             <SaleSubmitButton
               issuing={issuing}
               documentType={documentType}
               total={total}
               labelOverride={actionLabel}
-              onSubmit={onConfirm}
+              onSubmit={confirmWithCashValidation}
             />
           </ScrollView>
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -478,6 +535,7 @@ function SaleCheckoutDock({
   unitCount: number;
 }) {
   const insets = useSafeAreaInsets();
+  const { theme } = useAppTheme();
 
   return (
     <View
@@ -491,24 +549,27 @@ function SaleCheckoutDock({
 >
 
       {expanded ? (
-        <View style={styles.checkoutBreakdown}>
+        <View style={[styles.checkoutBreakdown, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface, shadowColor: theme.colors.shadow }]}>
           <View style={styles.checkoutBreakdownHeader}>
-            <Text style={styles.checkoutBreakdownTitle}>Desglose</Text>
-            <Pressable style={styles.checkoutSmallToggle} onPress={onToggle}>
-              <MaterialCommunityIcons name="chevron-down" size={20} color="#0f766e" />
+            <View>
+              <Text style={[styles.checkoutBreakdownTitle, { color: theme.colors.text }]}>Desglose</Text>
+              <Text style={[styles.checkoutBreakdownMeta, { color: theme.colors.textMuted }]}>{itemCount} líneas | {unitCount} unidades</Text>
+            </View>
+            <Pressable style={[styles.checkoutSmallToggle, { backgroundColor: theme.colors.primarySoft }]} onPress={onToggle}>
+              <MaterialCommunityIcons name="chevron-down" size={20} color={theme.colors.primary} />
             </Pressable>
           </View>
           <View style={styles.checkoutRow}>
-            <Text style={styles.checkoutRowLabel}>Subtotal</Text>
-            <Text style={styles.checkoutRowValue}>${money(subtotal)}</Text>
+            <Text style={[styles.checkoutRowLabel, { color: theme.colors.textMuted }]}>Subtotal</Text>
+            <Text style={[styles.checkoutRowValue, { color: theme.colors.text }]}>${money(subtotal)}</Text>
           </View>
           <View style={styles.checkoutRow}>
-            <Text style={styles.checkoutRowLabel}>Descuento</Text>
-            <Text style={[styles.checkoutRowValue, discount > 0 && styles.checkoutDiscountValue]}>${money(discount)}</Text>
+            <Text style={[styles.checkoutRowLabel, { color: theme.colors.textMuted }]}>Descuento</Text>
+            <Text style={[styles.checkoutRowValue, { color: discount > 0 ? theme.colors.success : theme.colors.text }]}>${money(discount)}</Text>
           </View>
           <View style={styles.checkoutRow}>
-            <Text style={styles.checkoutRowLabel}>IVA</Text>
-            <Text style={styles.checkoutRowValue}>${money(tax)}</Text>
+            <Text style={[styles.checkoutRowLabel, { color: theme.colors.textMuted }]}>IVA</Text>
+            <Text style={[styles.checkoutRowValue, { color: theme.colors.text }]}>${money(tax)}</Text>
           </View>
         </View>
       ) : null}
@@ -519,7 +580,6 @@ function SaleCheckoutDock({
         <View style={styles.checkoutTotalBlock}>
           <Text style={styles.checkoutLabel}>{proformaMode ? "Total proforma" : "Total a cobrar"}</Text>
           <Text style={styles.checkoutTotal}>${money(total)}</Text>
-          <Text style={styles.checkoutMeta}>{itemCount} lineas | {unitCount} unidades</Text>
         </View>
         <Pressable style={[styles.checkoutPayButton, issuing && styles.checkoutPayButtonDisabled]} onPress={issuing ? undefined : onSubmit}>
           <MaterialCommunityIcons name={proformaMode ? "file-document-check-outline" : "wallet-outline"} size={21} color="#ffffff" />
@@ -538,9 +598,11 @@ function SaleSplitPaymentsEditor({
   creditDueDate,
   fallbackMethod,
   onChange,
+  onCreditClientRequired,
   onCreditDueDateChange,
   onPaymentConditionChange,
   onPrimaryMethodChange,
+  onCashShortfallChange,
   paymentCondition,
   payments,
   total
@@ -549,17 +611,27 @@ function SaleSplitPaymentsEditor({
   creditDueDate: string;
   fallbackMethod: PaymentMethod;
   onChange: React.Dispatch<React.SetStateAction<SalePaymentSplit[]>>;
+  onCreditClientRequired: () => void;
   onCreditDueDateChange: (value: string) => void;
   onPaymentConditionChange: (value: PaymentCondition) => void;
   onPrimaryMethodChange?: (method: PaymentMethod) => void;
+  onCashShortfallChange: (value: number) => void;
   paymentCondition: PaymentCondition;
   payments: SalePaymentSplit[];
   total: number;
 }) {
+  const { theme } = useAppTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const stackedPaymentLayout = windowWidth < 520;
   const [openBankPickerId, setOpenBankPickerId] = useState<string | null>(null);
   const [openMethodPickerId, setOpenMethodPickerId] = useState<string | null>(null);
   const [creditTermExpanded, setCreditTermExpanded] = useState(false);
+  const creditTermTriggerRef = React.useRef<View | null>(null);
+  const [creditTermAnchor, setCreditTermAnchor] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const creditTermMenuWidth = Math.min(220, windowWidth - 16);
+  const [expandedTransferReferences, setExpandedTransferReferences] = useState<Record<string, boolean>>({});
   const [amountDrafts, setAmountDrafts] = useState<Record<string, string>>({});
+  const [cashTenderDrafts, setCashTenderDrafts] = useState<Record<string, string>>({});
   const [manualPaymentAmounts, setManualPaymentAmounts] = useState<Record<string, boolean>>({});
   const isCredit = paymentCondition === "credito";
   const cashFallbackMethod: PaymentMethod = fallbackMethod === "20" ? "01" : fallbackMethod;
@@ -573,6 +645,8 @@ function SaleSplitPaymentsEditor({
   const normalizedPayments = isCredit
     ? normalizeCreditEditorPayments(payments)
     : normalizeSalePayments(payments, fallbackMethod, total);
+  const usedPaymentMethods = new Set(normalizedPayments.map((payment) => payment.paymentMethod));
+  const nextAvailablePaymentMethod = SPLIT_PAYMENT_METHOD_OPTIONS.find((option) => !usedPaymentMethods.has(option.value))?.value;
   const paidNowAmount = salePaymentTotal(normalizedPayments);
   const balance = salePaymentBalance(total, normalizedPayments);
   const creditAmount = isCredit ? Math.max(0, balance) : 0;
@@ -583,7 +657,7 @@ function SaleSplitPaymentsEditor({
   const hasPaidPaymentLine = normalizedPayments.some((payment) => parsePaymentAmount(payment.amount) > 0.009);
   const canAddEmptySplitPayment = !isCredit && !hasEmptyPaymentLine && hasPaidPaymentLine;
   const canAddPayment =
-    total > 0.009 && !overpaid && (isCredit ? creditAmount > 0.009 : balance > 0.009 || canAddEmptySplitPayment);
+    total > 0.009 && !overpaid && Boolean(nextAvailablePaymentMethod) && (isCredit ? creditAmount > 0.009 : balance > 0.009 || canAddEmptySplitPayment);
   const statusLabel = overpaid
     ? "Excedido"
     : isCredit
@@ -598,6 +672,16 @@ function SaleSplitPaymentsEditor({
   const shouldSyncSingleCashPayment = !isCredit && singlePayment?.paymentMethod === "01";
   const singlePaymentWasEdited = singlePayment ? manualPaymentAmounts[singlePayment.id] : false;
   const showCreditPayment = isCredit && (creditAmount > 0.009 || !displayedPayments.length);
+  const cashShortfall = displayedPayments.reduce((sum, payment) => {
+    if (payment.paymentMethod !== "01") return sum;
+    const applied = parsePaymentAmount(payment.amount);
+    const tendered = parsePaymentAmount(cashTenderDrafts[payment.id] ?? applied);
+    return sum + Math.max(0, applied - tendered);
+  }, 0);
+
+  useEffect(() => {
+    onCashShortfallChange(cashShortfall);
+  }, [cashShortfall, onCashShortfallChange]);
 
   const dateForCreditTerm = (days: number) => {
     const dueDate = new Date();
@@ -665,9 +749,11 @@ function SaleSplitPaymentsEditor({
         return source;
       }
       if (isCredit) {
-        return [...source, createSalePayment(cashFallbackMethod, 0)];
+        if (!nextAvailablePaymentMethod) return source;
+        return [...source, createSalePayment(nextAvailablePaymentMethod, 0)];
       }
-      return [...source, createSalePayment(fallbackMethod || "01", pending)];
+      if (!nextAvailablePaymentMethod) return source;
+      return [...source, createSalePayment(nextAvailablePaymentMethod, pending)];
     });
   };
 
@@ -678,11 +764,16 @@ function SaleSplitPaymentsEditor({
     updatePayment(payment.id, { amount: parsePaymentAmount(sanitized) });
   };
 
+  const updateCashTendered = (paymentId: string, rawValue: string) => {
+    const sanitized = normalizePaymentAmountInput(rawValue);
+    setCashTenderDrafts((current) => ({ ...current, [paymentId]: sanitized }));
+  };
+
   const selectPaymentMethod = (payment: SalePaymentSplit, index: number, method: PaymentChoice) => {
     if (method === "credito") {
       if (!creditAllowed) {
-        Alert.alert("Cliente requerido", "Para vender a credito seleccione un cliente identificado. No se permite credito a Consumidor Final.");
         setOpenMethodPickerId(null);
+        onCreditClientRequired();
         return;
       }
       const remainingPayments = normalizePartialSalePayments(
@@ -732,6 +823,16 @@ function SaleSplitPaymentsEditor({
       delete next[id];
       return next;
     });
+    setCashTenderDrafts((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
+    setExpandedTransferReferences((current) => {
+      const next = { ...current };
+      delete next[id];
+      return next;
+    });
     onChange((current) => {
       const next = current.filter((payment) => payment.id !== id);
       return isCredit ? normalizePartialSalePayments(next, cashFallbackMethod) : normalizeSalePayments(next, fallbackMethod, total);
@@ -745,68 +846,160 @@ function SaleSplitPaymentsEditor({
   };
 
   return (
-    <View style={styles.splitBox}>
+    <View style={[styles.splitBox, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
       <View style={styles.splitHeader}>
         <View>
-          <Text style={styles.splitTitle}>Metodos de pago</Text>
-          <Text style={styles.splitHelp}>Distribuye el total entre uno o varios metodos.</Text>
+          <Text style={[styles.splitTitle, { color: theme.colors.text }]}>Metodos de pago</Text>
+          <Text style={[styles.splitHelp, { color: theme.colors.textMuted }]}>Distribuye el total entre uno o varios metodos.</Text>
         </View>
-        <Text style={[styles.splitStatus, balanced ? styles.splitStatusBalanced : styles.splitStatusWarning]}>{statusLabel}</Text>
+        <Text style={[styles.splitStatus, { backgroundColor: balanced ? theme.colors.successSoft : theme.colors.warningSoft, color: balanced ? theme.colors.success : theme.colors.warning }]}>{statusLabel}</Text>
       </View>
 
       {displayedPayments.map((payment, index) => {
         const selectedChoice: PaymentChoice = payment.paymentMethod;
         const isTransfer = payment.paymentMethod === "20";
+        const isCash = payment.paymentMethod === "01";
+        const appliedAmount = parsePaymentAmount(payment.amount);
+        const cashTenderedValue = cashTenderDrafts[payment.id] ?? (appliedAmount ? money(appliedAmount) : "");
+        const cashTenderedAmount = parsePaymentAmount(cashTenderedValue);
+        const cashChange = Math.max(0, cashTenderedAmount - appliedAmount);
+        const transferReferenceVisible = Boolean(payment.reference) || Boolean(expandedTransferReferences[payment.id]);
+        const amountInput = (
+          <TextInput
+            style={[styles.paymentAmountInput, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface, color: theme.colors.text }, stackedPaymentLayout && styles.paymentAmountInputStacked]}
+            value={amountDrafts[payment.id] ?? (payment.amount ? String(payment.amount) : "")}
+            onChangeText={(value) => updatePaymentAmount(payment, value)}
+            keyboardType="decimal-pad"
+            placeholder="0.00"
+            placeholderTextColor={theme.colors.textSubtle}
+            selectTextOnFocus
+          />
+        );
         return (
-          <View key={payment.id} style={styles.paymentCompactCard}>
-            <View style={styles.paymentCompactRow}>
-              <View style={styles.paymentRowNumber}>
-                <Text style={styles.paymentRowNumberText}>{index + 1}</Text>
+          <View key={payment.id} style={[styles.paymentCompactCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+            <View style={[styles.paymentCompactRow, stackedPaymentLayout && styles.paymentCompactRowStacked]}>
+              <View style={[styles.paymentRowNumber, { backgroundColor: theme.colors.primarySoft }]}>
+                <Text style={[styles.paymentRowNumberText, { color: theme.colors.primary }]}>{index + 1}</Text>
               </View>
               <View style={styles.paymentRowMethod}>
                 <PaymentMethodDropdown
                   compact
                   expanded={openMethodPickerId === payment.id}
+                  excludedMethods={[
+                    ...displayedPayments.filter((item) => item.id !== payment.id).map((item) => item.paymentMethod),
+                    ...(isCredit ? ["credito" as const] : [])
+                  ]}
                   includeCredit
                   method={selectedChoice}
                   onSelect={(method) => selectPaymentMethod(payment, index, method)}
                   onToggle={() => setOpenMethodPickerId((current) => (current === payment.id ? null : payment.id))}
                 />
               </View>
-              <TextInput
-                style={styles.paymentAmountInput}
-                value={amountDrafts[payment.id] ?? (payment.amount ? String(payment.amount) : "")}
-                onChangeText={(value) => updatePaymentAmount(payment, value)}
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-                placeholderTextColor="#94a3b8"
-                selectTextOnFocus
-              />
+              {!stackedPaymentLayout ? amountInput : null}
               {displayedPayments.length > 1 || isCredit ? (
-                <Pressable style={styles.paymentRowRemove} onPress={() => removePayment(payment.id)}>
-                  <MaterialCommunityIcons name="trash-can-outline" size={17} color="#991b1b" />
+                <Pressable style={[styles.paymentRowRemove, { backgroundColor: theme.colors.dangerSoft }]} onPress={() => removePayment(payment.id)}>
+                  <MaterialCommunityIcons name="trash-can-outline" size={17} color={theme.colors.danger} />
                 </Pressable>
               ) : (
                 <View style={styles.paymentRowSpacer} />
               )}
             </View>
+            {stackedPaymentLayout ? (
+              isCash ? (
+                <View style={styles.cashPaymentSummaryRow}>
+                  <View style={styles.cashPaymentColumn}>
+                    <Text style={[styles.cashPaymentLabel, { color: theme.colors.textMuted }]}>Aplicado</Text>
+                    {amountInput}
+                  </View>
+                  <View style={styles.cashPaymentColumn}>
+                    <Text style={[styles.cashPaymentLabel, { color: theme.colors.textMuted }]}>Cliente entrega</Text>
+                    <TextInput
+                      style={[styles.paymentAmountInput, styles.paymentAmountInputStacked, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface, color: theme.colors.text }]}
+                      value={cashTenderedValue}
+                      onChangeText={(value) => updateCashTendered(payment.id, value)}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor={theme.colors.textSubtle}
+                      selectTextOnFocus
+                    />
+                  </View>
+                  <View style={styles.cashChangeColumn}>
+                    <Text style={[styles.cashPaymentLabel, { color: theme.colors.textMuted }]}>{cashTenderedAmount + 0.009 < appliedAmount ? "Falta" : "Cambio"}</Text>
+                    <Text style={[styles.cashChangeValue, { color: theme.colors.success }, cashTenderedAmount + 0.009 < appliedAmount && { color: theme.colors.danger }]}>
+                      ${money(cashTenderedAmount + 0.009 < appliedAmount ? appliedAmount - cashTenderedAmount : cashChange)}
+                    </Text>
+                  </View>
+                </View>
+              ) : isTransfer ? null : (
+                <View style={styles.paymentAmountRow}>
+                  <Text style={styles.paymentAmountLabel}>Valor a cobrar</Text>
+                  {amountInput}
+                </View>
+              )
+            ) : null}
+            {!stackedPaymentLayout && isCash ? (
+              <View style={styles.cashWideRow}>
+                <Text style={styles.paymentAmountLabel}>Cliente entrega</Text>
+                <TextInput
+                  style={styles.paymentAmountInput}
+                  value={cashTenderedValue}
+                  onChangeText={(value) => updateCashTendered(payment.id, value)}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor="#94a3b8"
+                  selectTextOnFocus
+                />
+                <Text style={styles.cashWideChange}>{cashTenderedAmount + 0.009 < appliedAmount ? "Falta" : "Cambio"} ${money(cashTenderedAmount + 0.009 < appliedAmount ? appliedAmount - cashTenderedAmount : cashChange)}</Text>
+              </View>
+            ) : null}
             {isTransfer ? (
               <View style={styles.paymentCompactExtra}>
-                <BankDropdown
-                  bank={payment.bank}
-                  expanded={openBankPickerId === payment.id}
-                  onToggle={() => setOpenBankPickerId((current) => (current === payment.id ? null : payment.id))}
-                  onSelect={(bank) => {
-                    updatePayment(payment.id, { bank });
-                    setOpenBankPickerId(null);
-                  }}
-                />
-                <Input
-                  label="Referencia bancaria (opcional)"
-                  value={payment.reference || ""}
-                  onChangeText={(value) => updatePayment(payment.id, { reference: value })}
-                  placeholder="Ej. comprobante, banco o numero"
-                />
+                <View style={stackedPaymentLayout ? styles.paymentCompactExtraInline : undefined}>
+                  {stackedPaymentLayout ? (
+                    <View style={[styles.paymentExtraField, styles.paymentAppliedField]}>
+                      <Text style={styles.bankLabel}>Aplicado</Text>
+                      {amountInput}
+                    </View>
+                  ) : null}
+                  <View style={styles.paymentExtraField}>
+                    <BankDropdown
+                      bank={payment.bank}
+                      expanded={openBankPickerId === payment.id}
+                      onToggle={() => setOpenBankPickerId((current) => (current === payment.id ? null : payment.id))}
+                      onSelect={(bank) => {
+                        updatePayment(payment.id, { bank });
+                        setOpenBankPickerId(null);
+                      }}
+                    />
+                  </View>
+                  {!stackedPaymentLayout ? (
+                    <View style={styles.paymentExtraField}>
+                      <Input
+                        label="Referencia (opcional)"
+                        value={payment.reference || ""}
+                        onChangeText={(value) => updatePayment(payment.id, { reference: value })}
+                        placeholder="Comprobante"
+                      />
+                    </View>
+                  ) : null}
+                </View>
+                {stackedPaymentLayout && transferReferenceVisible ? (
+                  <Input
+                    label="Referencia (opcional)"
+                    value={payment.reference || ""}
+                    onChangeText={(value) => updatePayment(payment.id, { reference: value })}
+                    placeholder="Numero de comprobante"
+                  />
+                ) : null}
+                {stackedPaymentLayout && !payment.reference ? (
+                  <Pressable
+                    style={styles.transferReferenceToggle}
+                    onPress={() => setExpandedTransferReferences((current) => ({ ...current, [payment.id]: !current[payment.id] }))}
+                  >
+                    <MaterialCommunityIcons name={transferReferenceVisible ? "chevron-up" : "plus"} size={15} color="#0f766e" />
+                    <Text style={styles.transferReferenceToggleText}>{transferReferenceVisible ? "Ocultar referencia" : "Agregar referencia"}</Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : null}
           </View>
@@ -835,8 +1028,18 @@ function SaleSplitPaymentsEditor({
             <View style={styles.creditTermColumn}>
               <Text style={styles.creditTermLabel}>Plazo</Text>
               <Pressable
+                ref={creditTermTriggerRef}
                 style={[styles.creditTermSelect, creditTermExpanded && styles.creditTermSelectActive]}
-                onPress={() => setCreditTermExpanded((current) => !current)}
+                onPress={() => {
+                  if (creditTermExpanded) {
+                    setCreditTermExpanded(false);
+                    return;
+                  }
+                  creditTermTriggerRef.current?.measureInWindow((x, y, width, height) => {
+                    setCreditTermAnchor({ x, y, width, height });
+                    setCreditTermExpanded(true);
+                  });
+                }}
               >
                 <Text style={styles.creditTermSelectText} numberOfLines={1}>
                   {creditTermLabel}
@@ -844,21 +1047,21 @@ function SaleSplitPaymentsEditor({
                 <MaterialCommunityIcons name={creditTermExpanded ? "chevron-up" : "chevron-down"} size={18} color="#475569" />
               </Pressable>
               {creditTermExpanded ? (
-                <View style={styles.creditTermMenu}>
-                  {CREDIT_TERM_OPTIONS.map((option) => {
-                    const selected = selectedCreditTerm?.days === option.days;
-                    return (
-                      <Pressable
-                        key={option.days}
-                        style={styles.creditTermOption}
-                        onPress={() => changeCreditDueDate(dateForCreditTerm(option.days))}
-                      >
-                        <Text style={[styles.creditTermOptionText, selected && styles.creditTermOptionTextActive]}>{option.label}</Text>
-                        {selected ? <MaterialCommunityIcons name="check" size={17} color="#0f766e" /> : null}
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                <Modal transparent animationType="fade" visible onRequestClose={() => setCreditTermExpanded(false)}>
+                  <Pressable style={styles.paymentMethodBackdrop} onPress={() => setCreditTermExpanded(false)}>
+                    <Pressable style={[styles.paymentMethodFloatingMenu, { width: creditTermMenuWidth, left: Math.max(8, Math.min(creditTermAnchor.x, windowWidth - creditTermMenuWidth - 8)), top: creditTermAnchor.y + creditTermAnchor.height + 4, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated }]} onPress={(event) => event.stopPropagation()}>
+                      {CREDIT_TERM_OPTIONS.map((option) => {
+                        const selected = selectedCreditTerm?.days === option.days;
+                        return (
+                          <Pressable key={option.days} accessibilityRole="button" accessibilityState={{ selected }} style={[styles.creditTermOption, selected && { backgroundColor: theme.colors.primarySoft }]} onPress={() => changeCreditDueDate(dateForCreditTerm(option.days))}>
+                            <Text style={[styles.creditTermOptionText, selected && styles.creditTermOptionTextActive]}>{option.label}</Text>
+                            {selected ? <MaterialCommunityIcons name="check" size={17} color="#0f766e" /> : null}
+                          </Pressable>
+                        );
+                      })}
+                    </Pressable>
+                  </Pressable>
+                </Modal>
               ) : null}
             </View>
             <View style={styles.creditDateBox}>
@@ -907,6 +1110,7 @@ function SaleSplitPaymentsEditor({
 function PaymentMethodDropdown({
   compact,
   expanded,
+  excludedMethods = [],
   includeCredit = true,
   method,
   onSelect,
@@ -914,12 +1118,22 @@ function PaymentMethodDropdown({
 }: {
   compact?: boolean;
   expanded: boolean;
+  excludedMethods?: PaymentChoice[];
   includeCredit?: boolean;
   method: PaymentChoice;
   onSelect: (method: PaymentChoice) => void;
   onToggle: () => void;
 }) {
-  const options = includeCredit ? PAYMENT_CHOICE_OPTIONS : PAYMENT_CHOICE_OPTIONS.filter((option) => option.value !== "credito");
+  const { theme } = useAppTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const triggerRef = React.useRef<View | null>(null);
+  const [anchor, setAnchor] = React.useState({ x: 0, y: 0, width: 0, height: 0 });
+  const menuWidth = Math.min(240, windowWidth - 16);
+  const options = PAYMENT_CHOICE_OPTIONS.filter(
+    (option) =>
+      (includeCredit || option.value !== "credito") &&
+      (option.value === method || !excludedMethods.includes(option.value))
+  );
   const selectedOption =
     options.find((option) => option.value === method) ||
     PAYMENT_CHOICE_OPTIONS.find((option) => option.value === method) ||
@@ -927,38 +1141,50 @@ function PaymentMethodDropdown({
   if (!selectedOption) {
     return null;
   }
+  const toggle = () => {
+    if (expanded) {
+      onToggle();
+      return;
+    }
+    triggerRef.current?.measureInWindow((x, y, width, height) => {
+      setAnchor({ x, y, width, height });
+      onToggle();
+    });
+  };
 
   return (
     <View style={[styles.paymentMethodDropdownBox, compact && styles.paymentMethodDropdownCompact]}>
-      {compact ? null : <Text style={styles.bankLabel}>Forma de pago</Text>}
-      <Pressable style={[styles.paymentMethodSelect, compact && styles.paymentMethodSelectCompact, expanded && styles.bankSelectActive]} onPress={onToggle}>
-        <MaterialCommunityIcons name={selectedOption.icon as MaterialIconName} size={18} color="#0f766e" />
+      {compact ? null : <Text style={[styles.bankLabel, { color: theme.colors.textMuted }]}>Forma de pago</Text>}
+      <Pressable ref={triggerRef} style={[styles.paymentMethodSelect, compact && styles.paymentMethodSelectCompact, { borderColor: expanded ? theme.colors.primary : theme.colors.border, backgroundColor: theme.colors.surface }]} onPress={toggle}>
+        <MaterialCommunityIcons name={selectedOption.icon as MaterialIconName} size={18} color={theme.colors.primary} />
         <View style={styles.paymentMethodText}>
-          <Text style={styles.paymentMethodTitle} numberOfLines={1}>
+          <Text style={[styles.paymentMethodTitle, { color: theme.colors.text }]} numberOfLines={1}>
             {selectedOption.title}
           </Text>
-          <Text style={styles.paymentMethodDetail}>{selectedOption.detail}</Text>
+          <Text style={[styles.paymentMethodDetail, { color: theme.colors.textMuted }]}>{selectedOption.detail}</Text>
         </View>
-        <MaterialCommunityIcons name={expanded ? "chevron-up" : "chevron-down"} size={20} color="#475569" />
+        <MaterialCommunityIcons name={expanded ? "chevron-up" : "chevron-down"} size={20} color={theme.colors.textMuted} />
       </Pressable>
       {expanded ? (
-        <View style={styles.bankDropdownMenu}>
-          {options.map((option) => {
-            const selected = option.value === method;
-            return (
-              <Pressable key={option.value} style={styles.bankDropdownOption} onPress={() => onSelect(option.value)}>
-                <MaterialCommunityIcons name={option.icon} size={17} color={selected ? "#0f766e" : "#64748b"} />
-                <View style={styles.paymentMethodText}>
-                  <Text style={[styles.bankDropdownOptionText, selected && styles.bankDropdownOptionTextActive]} numberOfLines={1}>
-                    {option.title}
-                  </Text>
-                  <Text style={styles.paymentMethodDetail}>{option.detail}</Text>
-                </View>
-                {selected ? <MaterialCommunityIcons name="check" size={18} color="#0f766e" /> : null}
-              </Pressable>
-            );
-          })}
-        </View>
+        <Modal transparent animationType="fade" visible onRequestClose={onToggle}>
+          <Pressable style={styles.paymentMethodBackdrop} onPress={onToggle}>
+            <Pressable style={[styles.paymentMethodFloatingMenu, { width: menuWidth, left: Math.max(8, Math.min(anchor.x, windowWidth - menuWidth - 8)), top: anchor.y + anchor.height + 4, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated }]} onPress={(event) => event.stopPropagation()}>
+              {options.map((option) => {
+                const selected = option.value === method;
+                return (
+                  <Pressable key={option.value} accessibilityRole="button" accessibilityState={{ selected }} style={[styles.bankDropdownOption, { borderBottomColor: theme.colors.border }, selected && { backgroundColor: theme.colors.primarySoft }]} onPress={() => onSelect(option.value)}>
+                    <MaterialCommunityIcons name={option.icon} size={17} color={selected ? theme.colors.primary : theme.colors.textMuted} />
+                    <View style={styles.paymentMethodText}>
+                      <Text style={[styles.bankDropdownOptionText, { color: selected ? theme.colors.primary : theme.colors.text }]} numberOfLines={1}>{option.title}</Text>
+                      <Text style={[styles.paymentMethodDetail, { color: theme.colors.textMuted }]}>{option.detail}</Text>
+                    </View>
+                    {selected ? <MaterialCommunityIcons name="check" size={18} color={theme.colors.primary} /> : null}
+                  </Pressable>
+                );
+              })}
+            </Pressable>
+          </Pressable>
+        </Modal>
       ) : null}
     </View>
   );
@@ -975,27 +1201,46 @@ function BankDropdown({
   onSelect: (bank: string) => void;
   onToggle: () => void;
 }) {
+  const { theme } = useAppTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const triggerRef = React.useRef<View | null>(null);
+  const [anchor, setAnchor] = React.useState({ x: 0, y: 0, width: 0, height: 0 });
+  const menuWidth = Math.min(220, windowWidth - 16);
+  const toggle = () => {
+    if (expanded) {
+      onToggle();
+      return;
+    }
+    triggerRef.current?.measureInWindow((x, y, width, height) => {
+      setAnchor({ x, y, width, height });
+      onToggle();
+    });
+  };
   return (
     <View style={styles.bankDropdownBox}>
-      <Text style={styles.bankLabel}>Banco</Text>
-      <Pressable style={[styles.bankSelect, expanded && styles.bankSelectActive]} onPress={onToggle}>
-        <Text style={[styles.bankSelectText, !bank && styles.bankSelectPlaceholder]} numberOfLines={1}>
+      <Text style={[styles.bankLabel, { color: theme.colors.textMuted }]}>Banco</Text>
+      <Pressable ref={triggerRef} style={[styles.bankSelect, { borderColor: expanded ? theme.colors.primary : theme.colors.border, backgroundColor: theme.colors.surface }]} onPress={toggle}>
+        <Text style={[styles.bankSelectText, { color: bank ? theme.colors.text : theme.colors.textSubtle }]} numberOfLines={1}>
           {bank || "Selecciona un banco..."}
         </Text>
-        <MaterialCommunityIcons name={expanded ? "chevron-up" : "chevron-down"} size={20} color="#475569" />
+        <MaterialCommunityIcons name={expanded ? "chevron-up" : "chevron-down"} size={20} color={theme.colors.textMuted} />
       </Pressable>
       {expanded ? (
-        <View style={styles.bankDropdownMenu}>
-          {TRANSFER_BANK_OPTIONS.map((option) => {
-            const selected = bank === option;
-            return (
-              <Pressable key={option} style={styles.bankDropdownOption} onPress={() => onSelect(option)}>
-                <Text style={[styles.bankDropdownOptionText, selected && styles.bankDropdownOptionTextActive]}>{option}</Text>
-                {selected ? <MaterialCommunityIcons name="check" size={18} color="#0f766e" /> : null}
-              </Pressable>
-            );
-          })}
-        </View>
+        <Modal transparent animationType="fade" visible onRequestClose={onToggle}>
+          <Pressable style={styles.paymentMethodBackdrop} onPress={onToggle}>
+            <Pressable style={[styles.paymentMethodFloatingMenu, { width: menuWidth, left: Math.max(8, Math.min(anchor.x, windowWidth - menuWidth - 8)), top: anchor.y + anchor.height + 4, borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceElevated }]} onPress={(event) => event.stopPropagation()}>
+              {TRANSFER_BANK_OPTIONS.map((option) => {
+                const selected = bank === option;
+                return (
+                  <Pressable key={option} accessibilityRole="button" accessibilityState={{ selected }} style={[styles.bankDropdownOption, { borderBottomColor: theme.colors.border }, selected && { backgroundColor: theme.colors.primarySoft }]} onPress={() => onSelect(option)}>
+                    <Text style={[styles.bankDropdownOptionText, { color: selected ? theme.colors.primary : theme.colors.text }]}>{option}</Text>
+                    {selected ? <MaterialCommunityIcons name="check" size={18} color={theme.colors.primary} /> : null}
+                  </Pressable>
+                );
+              })}
+            </Pressable>
+          </Pressable>
+        </Modal>
       ) : null}
     </View>
   );
@@ -1017,6 +1262,9 @@ function documentLabel(documentType: DocumentType) {
 }
 
 const styles = StyleSheet.create({
+  paymentKeyboardAvoiding: {
+    flex: 1
+  },
   saleGroup: {
     borderWidth: 1,
     borderColor: "#e2e7f0",
@@ -1064,6 +1312,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900"
   },
+  checkoutBreakdownMeta: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 2
+  },
   checkoutSmallToggle: {
     width: 34,
     height: 34,
@@ -1092,13 +1346,14 @@ const styles = StyleSheet.create({
     color: "#047857"
   },
   checkoutDock: {
-    minHeight: 72,
+    minHeight: 62,
     borderRadius: 14,
     backgroundColor: "#0f766e",
-    padding: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
     shadowColor: "#0f172a",
     shadowOpacity: 0.18,
     shadowRadius: 14,
@@ -1106,9 +1361,9 @@ const styles = StyleSheet.create({
     elevation: 6
   },
   checkoutToggle: {
-    width: 44,
-    height: 52,
-    borderRadius: 12,
+    width: 42,
+    height: 46,
+    borderRadius: 11,
     backgroundColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center"
@@ -1119,29 +1374,24 @@ const styles = StyleSheet.create({
   },
   checkoutLabel: {
     color: "#d1fae5",
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "900"
   },
   checkoutTotal: {
     color: "#ffffff",
-    fontSize: 26,
+    fontSize: 23,
     fontWeight: "900"
   },
-  checkoutMeta: {
-    color: "#d1fae5",
-    fontSize: 11,
-    fontWeight: "800"
-  },
   checkoutPayButton: {
-    minWidth: 130,
-    minHeight: 54,
-    borderRadius: 12,
+    minWidth: 120,
+    minHeight: 46,
+    borderRadius: 11,
     backgroundColor: "#059669",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    paddingHorizontal: 12
+    gap: 7,
+    paddingHorizontal: 10
   },
   checkoutPayButtonDisabled: {
     opacity: 0.7
@@ -1151,12 +1401,12 @@ const styles = StyleSheet.create({
   },
   checkoutPayTitle: {
     color: "#ffffff",
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "900"
   },
   checkoutPayAmount: {
     color: "#d1fae5",
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "900"
   },
   paymentBackdrop: {
@@ -1381,12 +1631,16 @@ const styles = StyleSheet.create({
     overflow: "visible"
   },
   paymentCompactRow: {
-    minHeight: 58,
+    minHeight: 52,
     paddingHorizontal: 7,
-    paddingVertical: 8,
+    paddingVertical: 6,
     flexDirection: "row",
     alignItems: "center",
     gap: 5
+  },
+  paymentCompactRowStacked: {
+    alignItems: "flex-start",
+    paddingBottom: 5
   },
   paymentRowNumber: {
     width: 26,
@@ -1418,6 +1672,84 @@ const styles = StyleSheet.create({
     textAlign: "right",
     backgroundColor: "#ffffff"
   },
+  paymentAmountInputStacked: {
+    width: "auto",
+    flex: 1,
+    minHeight: 44,
+    fontSize: 15,
+    paddingHorizontal: 12
+  },
+  paymentAmountRow: {
+    minHeight: 48,
+    borderTopWidth: 1,
+    borderTopColor: "#eef2f7",
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12
+  },
+  paymentAmountLabel: {
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "800"
+  },
+  cashPaymentSummaryRow: {
+    borderTopWidth: 1,
+    borderTopColor: "#eef2f7",
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 6
+  },
+  cashPaymentColumn: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3
+  },
+  cashChangeColumn: {
+    width: 72,
+    minHeight: 44,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 3,
+    borderRadius: 9,
+    backgroundColor: "#f0fdfa",
+    paddingHorizontal: 5,
+    marginLeft: 2
+  },
+  cashPaymentLabel: {
+    color: "#64748b",
+    fontSize: 9,
+    fontWeight: "800"
+  },
+  cashChangeValue: {
+    color: "#047857",
+    fontSize: 13,
+    fontWeight: "900",
+    textAlign: "center"
+  },
+  cashShortfallValue: {
+    color: "#b45309"
+  },
+  cashWideRow: {
+    minHeight: 48,
+    borderTopWidth: 1,
+    borderTopColor: "#eef2f7",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10
+  },
+  cashWideChange: {
+    minWidth: 105,
+    color: "#047857",
+    fontSize: 12,
+    fontWeight: "900",
+    textAlign: "right"
+  },
   paymentRowRemove: {
     width: 30,
     height: 38,
@@ -1435,6 +1767,33 @@ const styles = StyleSheet.create({
     borderTopColor: "#eef2f7",
     padding: 8,
     gap: 8
+  },
+  paymentCompactExtraInline: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 7
+  },
+  paymentExtraField: {
+    flex: 1,
+    minWidth: 0
+  },
+  paymentAppliedField: {
+    gap: 5
+  },
+  transferReferenceToggle: {
+    alignSelf: "flex-start",
+    minHeight: 28,
+    borderRadius: 8,
+    backgroundColor: "#f0fdfa",
+    paddingHorizontal: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4
+  },
+  transferReferenceToggleText: {
+    color: "#0f766e",
+    fontSize: 10,
+    fontWeight: "800"
   },
   splitMethodGrid: {
     flexDirection: "row",
@@ -1534,6 +1893,21 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0
   },
+  paymentMethodBackdrop: {
+    backgroundColor: "transparent",
+    flex: 1
+  },
+  paymentMethodFloatingMenu: {
+    borderRadius: 10,
+    borderWidth: 1,
+    elevation: 10,
+    overflow: "hidden",
+    position: "absolute",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10
+  },
   paymentMethodSelect: {
     minHeight: 48,
     borderWidth: 1,
@@ -1546,9 +1920,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff"
   },
   paymentMethodSelectCompact: {
-    minHeight: 40,
-    paddingHorizontal: 7,
-    gap: 5,
+    minHeight: 46,
+    paddingHorizontal: 9,
+    gap: 7,
     borderColor: "#dbe4f0",
     backgroundColor: "#f8fafc"
   },
@@ -1558,13 +1932,13 @@ const styles = StyleSheet.create({
   },
   paymentMethodTitle: {
     color: "#334155",
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: "900"
   },
   paymentMethodDetail: {
     marginTop: 1,
     color: "#64748b",
-    fontSize: 8,
+    fontSize: 9,
     fontWeight: "800"
   },
   bankLabel: {
@@ -1603,7 +1977,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff"
   },
   bankDropdownOption: {
-    minHeight: 42,
+    minHeight: 46,
     paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",

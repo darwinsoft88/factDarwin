@@ -427,3 +427,59 @@ test("a durable sales tombstone prevents an old device from reviving a removed s
   assert.deepEqual(merged.sales.map((item) => item.id), ["sale-kept"]);
   assert.deepEqual(merged.deletedIds.sales, ["sale-1"]);
 });
+
+test("a stale snapshot cannot degrade an authorized fiscal document", () => {
+  const authorized = sale({
+    authorizationNumber: "authorization-341",
+    authorizedXml: "<autorizacion />",
+    sriMessage: "AUTORIZADO"
+  });
+  const stale = sale({
+    status: "ENVIADA",
+    authorizationNumber: "",
+    authorizedXml: "",
+    sriMessage: ""
+  });
+
+  const merged = applySnapshotPatch(baseData({ sales: [authorized] }), { sales: [stale] });
+
+  assert.equal(merged.sales[0].status, "AUTORIZADA");
+  assert.equal(merged.sales[0].authorizationNumber, "authorization-341");
+  assert.equal(merged.sales[0].authorizedXml, "<autorizacion />");
+});
+
+test("an authorized response can promote a pending fiscal document", () => {
+  const pending = sale({ status: "ENVIADA", authorizationNumber: "", authorizedXml: "" });
+  const authorized = sale({ authorizationNumber: "authorization-341", authorizedXml: "<autorizacion />" });
+
+  const merged = applySnapshotPatch(baseData({ sales: [pending] }), { sales: [authorized] });
+
+  assert.equal(merged.sales[0].status, "AUTORIZADA");
+  assert.equal(merged.sales[0].authorizationNumber, "authorization-341");
+});
+
+test("a stale error cannot resurrect a voided fiscal document", () => {
+  const voided = sale({
+    status: "ANULADA",
+    voidedAt: "2026-08-18T15:00:00.000Z",
+    voidReason: "Anulada localmente",
+    inventoryState: "REVERSED"
+  });
+  const stale = sale({ status: "ERROR_SRI", sriMessage: "Firma no encontrada" });
+
+  const merged = applySnapshotPatch(baseData({ sales: [voided] }), { sales: [stale] });
+
+  assert.equal(merged.sales[0].status, "ANULADA");
+  assert.equal(merged.sales[0].voidedAt, "2026-08-18T15:00:00.000Z");
+  assert.equal(merged.sales[0].inventoryState, "REVERSED");
+});
+
+test("an SRI authorization has priority over a local voided state", () => {
+  const voided = sale({ status: "ANULADA", voidedAt: "2026-08-18T15:00:00.000Z" });
+  const authorized = sale({ authorizationNumber: "authorization-363", authorizedXml: "<autorizacion />" });
+
+  const merged = applySnapshotPatch(baseData({ sales: [voided] }), { sales: [authorized] });
+
+  assert.equal(merged.sales[0].status, "AUTORIZADA");
+  assert.equal(merged.sales[0].authorizationNumber, "authorization-363");
+});

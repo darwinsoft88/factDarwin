@@ -9,6 +9,7 @@ import { documentTypeLabel } from "../utils/sales";
 import { money } from "../sri";
 import { Empty, Input, PrimaryButton, Section, Select } from "./common";
 import { PaginationControls } from "./PaginationControls";
+import { useAppTheme } from "../theme/AppTheme";
 
 type CalendarDateInputProps = {
   label: string;
@@ -92,6 +93,7 @@ export function GuideFormSection({
   onTransporterNameChange,
   onTransporterTypeChange
 }: GuideFormSectionProps) {
+  const { theme } = useAppTheme();
   const [documentPickerVisible, setDocumentPickerVisible] = React.useState(false);
   const [documentPage, setDocumentPage] = React.useState(1);
   const documentTotalPages = Math.max(1, Math.ceil(filteredMovableDocuments.length / LIST_BATCH_SIZE));
@@ -114,52 +116,52 @@ export function GuideFormSection({
 
   const content = (
     <>
-      <Text style={styles.paragraph}>Comprobante SRI tipo 06 para traslado de mercaderia. No mueve inventario; documenta transporte.</Text>
+      <Text style={[styles.paragraph, { color: theme.colors.textMuted }]}>Comprobante SRI tipo 06 para traslado de mercaderia. No mueve inventario; documenta transporte.</Text>
       {movableDocuments.length === 0 ? <Empty text="No hay facturas, notas o proformas disponibles para trasladar." /> : null}
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Documento origen</Text>
-        <Pressable style={styles.documentSelectButton} onPress={() => setDocumentPickerVisible(true)}>
-          <View style={styles.documentIcon}>
-            <MaterialCommunityIcons name="file-document-outline" size={16} color="#047857" />
+        <Text style={[styles.label, { color: theme.colors.textMuted }]}>Documento origen</Text>
+        <Pressable style={[styles.documentSelectButton, { borderColor: theme.colors.success, backgroundColor: theme.colors.successSoft }]} onPress={() => setDocumentPickerVisible(true)}>
+          <View style={[styles.documentIcon, { backgroundColor: theme.colors.successSoft }]}>
+            <MaterialCommunityIcons name="file-document-outline" size={16} color={theme.colors.success} />
           </View>
           <View style={styles.flex}>
-            <Text style={styles.documentSelectTitle} numberOfLines={1}>
+            <Text style={[styles.documentSelectTitle, { color: theme.colors.text }]} numberOfLines={1}>
               {sourceSale ? `${documentTypeLabel(sourceSale)} ${documentNumber(sourceSale, data.issuer)}` : "Buscar documento origen"}
             </Text>
-            <Text style={styles.documentSelectMeta} numberOfLines={1}>
+            <Text style={[styles.documentSelectMeta, { color: theme.colors.textMuted }]} numberOfLines={1}>
               {sourceSale && client ? `${client.name} | ${sourceSale.items.length} producto(s) | $${money(sourceSale.total)}` : "Factura, nota o proforma disponible"}
             </Text>
           </View>
-          <MaterialCommunityIcons name="magnify" size={20} color="#0f766e" />
+          <MaterialCommunityIcons name="magnify" size={20} color={theme.colors.primary} />
         </Pressable>
       </View>
       {documentPickerVisible ? (
-        <View style={styles.pickerPanel}>
+        <View style={[styles.pickerPanel, { backgroundColor: theme.colors.surface, borderColor: theme.colors.borderStrong }]}>
           <View style={styles.modalHeader}>
             <View style={styles.flex}>
-              <Text style={styles.modalTitle}>Buscar documento origen</Text>
-              <Text style={styles.modalMeta}>Seleccione el documento que se va a trasladar</Text>
+              <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Buscar documento origen</Text>
+              <Text style={[styles.modalMeta, { color: theme.colors.textMuted }]}>Seleccione el documento que se va a trasladar</Text>
             </View>
-            <Pressable style={styles.closeButton} onPress={() => setDocumentPickerVisible(false)}>
-              <Text style={styles.closeButtonText}>Cerrar</Text>
+            <Pressable style={[styles.closeButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={() => setDocumentPickerVisible(false)}>
+              <Text style={[styles.closeButtonText, { color: theme.colors.primaryStrong }]}>Cerrar</Text>
             </Pressable>
           </View>
           <Input label="" value={documentSearch} onChangeText={onDocumentSearchChange} placeholder="Cliente, cedula/RUC, numero o clave" autoCapitalize="none" />
           <View style={styles.resultHeader}>
-            <Text style={styles.resultLabel}>Documentos encontrados</Text>
-            <Text style={styles.resultCount}>{filteredMovableDocuments.length} registro(s)</Text>
+            <Text style={[styles.resultLabel, { color: theme.colors.textMuted }]}>Documentos encontrados</Text>
+            <Text style={[styles.resultCount, { color: theme.colors.primary }]}>{filteredMovableDocuments.length} registro(s)</Text>
           </View>
-          <ScrollView style={styles.resultsBox} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+          <ScrollView style={[styles.resultsBox, { borderColor: theme.colors.border }]} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
             {pageDocuments.map((sale) => {
               const saleClient = clientsById.get(sale.clientId);
               const selected = sale.id === sourceSaleId;
               return (
-                <Pressable key={sale.id} style={[styles.documentRow, selected && styles.documentRowSelected]} onPress={() => selectDocument(sale.id)}>
+                <Pressable key={sale.id} style={[styles.documentRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }, selected && [styles.documentRowSelected, { borderColor: theme.colors.success, backgroundColor: theme.colors.successSoft }]]} onPress={() => selectDocument(sale.id)}>
                   <View style={styles.flex}>
-                    <Text style={[styles.documentName, selected && styles.documentNameSelected]} numberOfLines={1}>{documentTypeLabel(sale)} {documentNumber(sale, data.issuer)} - {saleClient?.name || "Cliente"}</Text>
-                    <Text style={styles.documentMeta} numberOfLines={1}>{sale.status} | {sale.items.length} producto(s) | ${money(sale.total)}</Text>
+                    <Text style={[styles.documentName, { color: theme.colors.text }, selected && [styles.documentNameSelected, { color: theme.colors.success }]]} numberOfLines={1}>{documentTypeLabel(sale)} {documentNumber(sale, data.issuer)} - {saleClient?.name || "Cliente"}</Text>
+                    <Text style={[styles.documentMeta, { color: theme.colors.textMuted }]} numberOfLines={1}>{sale.status} | {sale.items.length} producto(s) | ${money(sale.total)}</Text>
                   </View>
-                  {selected ? <MaterialCommunityIcons name="check-circle" size={22} color="#047857" /> : <MaterialCommunityIcons name="chevron-right" size={22} color="#64748b" />}
+                  {selected ? <MaterialCommunityIcons name="check-circle" size={22} color={theme.colors.success} /> : <MaterialCommunityIcons name="chevron-right" size={22} color={theme.colors.textMuted} />}
                 </Pressable>
               );
             })}
@@ -168,7 +170,7 @@ export function GuideFormSection({
           <PaginationControls page={currentDocumentPage} pageSize={LIST_BATCH_SIZE} totalItems={filteredMovableDocuments.length} onPageChange={setDocumentPage} />
         </View>
       ) : null}
-      {sourceSale && client ? <Text style={styles.inlineInfo}>Destino: {client.name} | Productos: {sourceSale.items.length}</Text> : null}
+      {sourceSale && client ? <Text style={[styles.inlineInfo, { color: theme.colors.textMuted }]}>Destino: {client.name} | Productos: {sourceSale.items.length}</Text> : null}
       <Input label="Transportista / razon social" value={transporterName} onChangeText={onTransporterNameChange} />
       <Select label="Tipo identificacion transportista" value={transporterType} onChange={(value) => onTransporterTypeChange(value as GuideTransporterType)} options={[{ label: "Cedula", value: "05" }, { label: "RUC", value: "04" }, { label: "Pasaporte", value: "06" }]} />
       <Input label="Identificacion transportista" value={transporterIdentification} onChangeText={onTransporterIdentificationChange} keyboardType="number-pad" />

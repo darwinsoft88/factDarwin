@@ -1,6 +1,15 @@
 import { initialData } from "../../database";
+import { authorizeInvoice, queryInvoiceAuthorization } from "../../services/backend";
 import { Sale, User } from "../../types";
-import { expireStaleSriPendingDocuments, pendingAutoRetrySriDocuments } from "../autoRetrySriDocuments";
+import { autoRetrySriDocuments, expireStaleSriPendingDocuments, pendingAutoRetrySriDocuments } from "../autoRetrySriDocuments";
+
+jest.mock("../../services/backend", () => ({
+  authorizeInvoice: jest.fn(),
+  queryInvoiceAuthorization: jest.fn()
+}));
+
+const authorizeInvoiceMock = authorizeInvoice as jest.MockedFunction<typeof authorizeInvoice>;
+const queryInvoiceAuthorizationMock = queryInvoiceAuthorization as jest.MockedFunction<typeof queryInvoiceAuthorization>;
 
 const baseSale = {
   id: "s1",
@@ -54,5 +63,93 @@ describe("autoRetrySriDocuments", () => {
     const expiredSale = result.data.sales[0] as Sale;
     expect(expiredSale.status).toBe("ANULADA");
     expect(expiredSale.voidReason).toContain("fuera del dia");
+  });
+
+  it("consulta una factura ENVIADA sin reconstruirla, reenviarla ni tocar inventario", async () => {
+    const sentSale = {
+      ...baseSale,
+      status: "ENVIADA" as const,
+      accessKey: "1808202601172377209900110020100000003711234567811",
+      inventoryState: "APPLIED" as const,
+      inventoryOperationId: "inventory-371",
+      signedXml: "<factura>firmada-original</factura>",
+      retryHistory: ["2026-06-01T08:00:00.000Z"]
+    };
+    let current: typeof initialData = { ...initialData, backendUrl: "https://api.test", sales: [sentSale] };
+    queryInvoiceAuthorizationMock.mockResolvedValue({
+      ok: true,
+      sent: true,
+      status: "ENVIADA",
+      accessKey: sentSale.accessKey,
+      authorizationPending: true,
+      numberOfDocuments: 0,
+      sriMessage: "Pendiente de autorizacion"
+    });
+
+    const result = await autoRetrySriDocuments({
+      backendToken: "token",
+      initialData: current,
+      getCurrentData: () => current,
+      persistMutation: async (mutation) => {
+        current = typeof mutation === "function" ? await mutation(current) : current;
+        return current;
+      },
+      user: testUser,
+      authorizationQueriesOnly: true
+    });
+
+    expect(queryInvoiceAuthorizationMock).toHaveBeenCalledWith("https://api.test", sentSale.accessKey, "token");
+    expect(authorizeInvoiceMock).not.toHaveBeenCalled();
+    expect(current.sales[0]).toMatchObject({
+      status: "ENVIADA",
+      inventoryState: "APPLIED",
+      inventoryOperationId: "inventory-371",
+      signedXml: "<factura>firmada-original</factura>",
+      retryHistory: ["2026-06-01T08:00:00.000Z"]
+    });
+    expect(result.authorized).toBe(0);
+  });
+
+  it("promueve una factura ENVIADA a AUTORIZADA usando solo la consulta", async () => {
+    const sentSale = {
+      ...baseSale,
+      status: "ENVIADA" as const,
+      accessKey: "1808202601172377209900110020100000003711234567811",
+      inventoryState: "APPLIED" as const,
+      inventoryOperationId: "inventory-371",
+      signedXml: "<factura>firmada-original</factura>"
+    };
+    let current: typeof initialData = { ...initialData, backendUrl: "https://api.test", sales: [sentSale] };
+    queryInvoiceAuthorizationMock.mockResolvedValue({
+      ok: true,
+      sent: true,
+      accessKey: sentSale.accessKey,
+      authorizationStatus: "AUTORIZADO",
+      authorizationNumber: sentSale.accessKey,
+      authorizationDate: "2026-08-18T22:13:00-05:00",
+      authorizedXml: "<factura>autorizada</factura>",
+      sriMessage: "AUTORIZADO"
+    });
+
+    const result = await autoRetrySriDocuments({
+      backendToken: "token",
+      initialData: current,
+      getCurrentData: () => current,
+      persistMutation: async (mutation) => {
+        current = typeof mutation === "function" ? await mutation(current) : current;
+        return current;
+      },
+      user: testUser,
+      authorizationQueriesOnly: true
+    });
+
+    expect(authorizeInvoiceMock).not.toHaveBeenCalled();
+    expect(current.sales[0]).toMatchObject({
+      status: "AUTORIZADA",
+      inventoryState: "APPLIED",
+      signedXml: "<factura>firmada-original</factura>",
+      authorizedXml: "<factura>autorizada</factura>"
+    });
+    expect(result.authorized).toBe(1);
   });
 });

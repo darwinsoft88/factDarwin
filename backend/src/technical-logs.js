@@ -2,7 +2,15 @@ const fs = require("node:fs");
 const path = require("node:path");
 const config = require("./config");
 
-const SENSITIVE_KEYS = new Set(["password", "pass", "token", "authorization", "jwt", "certPassword"]);
+const SENSITIVE_KEYS = new Set([
+  "password",
+  "pass",
+  "token",
+  "authorization",
+  "jwt",
+  "certpassword",
+  "base64"
+]);
 
 function logTechnical(level, event, details = {}) {
   if (!config.technicalLogs.enabled) return;
@@ -197,5 +205,6 @@ module.exports = {
   errorLogger,
   listTechnicalLogs,
   logTechnical,
-  requestLogger
+  requestLogger,
+  summarizeBody
 };

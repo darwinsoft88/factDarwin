@@ -1,5 +1,6 @@
 import React from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Input, PrimaryButton, Select } from "./common";
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { paymentOptions } from "../constants/options";
@@ -10,7 +11,7 @@ import { creditBalance } from "../utils/credit";
 import { documentNumber } from "../utils/documents";
 import { formatShortDate } from "../utils/format";
 import { sanitizeDecimalInput } from "../utils/numbers";
-import { AppToast } from "./AppToast";
+import { useAppTheme } from "../theme/AppTheme";
 
 type CreditPaymentModalProps = {
   amountText: string;
@@ -41,21 +42,27 @@ export function CreditPaymentModal({
   selectedSale,
   submitting = false
 }: CreditPaymentModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const keyboardInset = useKeyboardInset();
   const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? MODAL_SAFE_BOTTOM_PADDING : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
 
   return (
     <Modal visible={Boolean(selectedSale)} transparent animationType="fade" onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-        <View style={[styles.modalBackdrop, androidKeyboardInset > 0 && styles.modalBackdropWithKeyboard, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_SAFE_BOTTOM_PADDING }]}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
+        <View style={[styles.modalBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, androidKeyboardInset > 0 && styles.modalBackdropWithKeyboard, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }]}>
+          <View style={[styles.modalCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+            <View style={[styles.modalHeader, { borderColor: theme.colors.border }]}>
               <View style={styles.headerText}>
-                <Text style={styles.modalTitle}>Registrar abono</Text>
-                <Text style={styles.selectedMeta}>{selectedSale ? documentNumber(selectedSale, issuer) : ""}</Text>
+                <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Registrar abono</Text>
+                <Text style={[styles.selectedMeta, { color: theme.colors.textMuted }]}>{selectedSale ? documentNumber(selectedSale, issuer) : ""}</Text>
               </View>
-              <Pressable style={styles.closeButton} onPress={onClose}>
-                <Text style={styles.closeText}>Cerrar</Text>
+              <Pressable style={[styles.closeButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+                <Text style={[styles.closeText, { color: theme.colors.primary }]}>Cerrar</Text>
               </Pressable>
             </View>
             {selectedSale ? (
@@ -64,9 +71,9 @@ export function CreditPaymentModal({
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
               >
-                <View style={styles.selectedBox}>
-                  <Text style={styles.selectedTitle}>{selectedClient?.name || "Cliente"}</Text>
-                  <Text style={styles.selectedMeta}>
+                <View style={[styles.selectedBox, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.primarySoft }]}>
+                  <Text style={[styles.selectedTitle, { color: theme.colors.text }]}>{selectedClient?.name || "Cliente"}</Text>
+                  <Text style={[styles.selectedMeta, { color: theme.colors.textMuted }]}>
                     Saldo pendiente $${money(creditBalance(selectedSale))}
                     {selectedSale.creditDueDate ? ` | vence ${formatShortDate(selectedSale.creditDueDate)}` : ""}
                   </Text>
@@ -85,7 +92,6 @@ export function CreditPaymentModal({
           </View>
         </View>
       </KeyboardAvoidingView>
-      <AppToast global />
     </Modal>
   );
 }

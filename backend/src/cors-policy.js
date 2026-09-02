@@ -22,6 +22,15 @@ function requestOrigin(req) {
   return host ? safeOrigin(`${protocol}://${host}`) : "";
 }
 
+function isLoopbackOrigin(origin) {
+  try {
+    const hostname = new URL(origin).hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
 function isCorsOriginAllowed(origin, req, options = {}) {
   if (!origin) return true;
 
@@ -33,11 +42,13 @@ function isCorsOriginAllowed(origin, req, options = {}) {
     : [];
   const publicOrigin = safeOrigin(options.publicUrl);
   const sameOrigin = requestOrigin(req);
+  const isLocalDevelopmentRequest = isLoopbackOrigin(normalizedOrigin) && isLoopbackOrigin(sameOrigin);
 
   if (
     allowedOrigins.includes(normalizedOrigin) ||
     (publicOrigin && normalizedOrigin === publicOrigin) ||
     (sameOrigin && normalizedOrigin === sameOrigin) ||
+    isLocalDevelopmentRequest ||
     isAllowedPagesPreview(normalizedOrigin)
   ) {
     return true;
@@ -62,6 +73,7 @@ function createCorsOptions(req, options = {}) {
 module.exports = {
   createCorsOptions,
   isCorsOriginAllowed,
+  isLoopbackOrigin,
   requestOrigin,
   safeOrigin
 };

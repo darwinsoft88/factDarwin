@@ -14,12 +14,20 @@ import { movementReason, movementTypeLabel } from "../utils/inventory";
 import { sanitizeDecimalInput } from "../utils/numbers";
 import { PaginationResult } from "../utils/pagination";
 import { formatAuditDate } from "../utils/support";
+import { useAppTheme } from "../theme/AppTheme";
 
 export type InventoryListItemProps = {
   title: string;
   meta: string;
   badge?: string;
+  accentTone?: "primary" | "success" | "warning" | "danger" | "info";
 };
+
+function movementAccentTone(type: InventoryMovementType): InventoryListItemProps["accentTone"] {
+  if (type === "entrada") return "success";
+  if (type === "salida") return "danger";
+  return "info";
+}
 
 type InventoryMovementSectionProps = {
   framed?: boolean;
@@ -60,6 +68,7 @@ export function InventoryMovementSection({
   selectedProduct,
   type
 }: InventoryMovementSectionProps) {
+  const { theme } = useAppTheme();
   const [productPage, setProductPage] = React.useState(1);
   const productPagination = React.useMemo(() => {
     const totalPages = Math.max(1, Math.ceil(filteredProducts.length / LIST_BATCH_SIZE));
@@ -83,16 +92,16 @@ export function InventoryMovementSection({
   const content = (
     <>
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>Producto</Text>
-        <Pressable style={styles.productSelectButton} onPress={() => onProductPickerVisibleChange(true)}>
-          <View style={styles.productIcon}>
-            <MaterialCommunityIcons name="package-variant-closed" size={16} color="#047857" />
+        <Text style={[styles.label, { color: theme.colors.textMuted }]}>Producto</Text>
+        <Pressable style={[styles.productSelectButton, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.primarySoft }]} onPress={() => onProductPickerVisibleChange(true)}>
+          <View style={[styles.productIcon, { backgroundColor: theme.colors.surface }] }>
+            <MaterialCommunityIcons name="package-variant-closed" size={16} color={theme.colors.primary} />
           </View>
           <View style={styles.flex}>
-            <Text style={styles.productSelectTitle} numberOfLines={1}>{selectedProduct ? `${selectedProduct.code} - ${selectedProduct.name}` : "Buscar producto"}</Text>
-            <Text style={styles.productSelectMeta} numberOfLines={1}>{selectedProduct ? `Stock ${selectedProduct.stock} | Costo $${money(productCost(selectedProduct))}` : "Busque por codigo o nombre"}</Text>
+            <Text style={[styles.productSelectTitle, { color: theme.colors.text }]} numberOfLines={1}>{selectedProduct ? `${selectedProduct.code} - ${selectedProduct.name}` : "Buscar producto"}</Text>
+            <Text style={[styles.productSelectMeta, { color: theme.colors.textMuted }]} numberOfLines={1}>{selectedProduct ? `Stock ${selectedProduct.stock} | Costo $${money(productCost(selectedProduct))}` : "Busque por codigo o nombre"}</Text>
           </View>
-          <MaterialCommunityIcons name="magnify" size={20} color="#0f766e" />
+          <MaterialCommunityIcons name="magnify" size={20} color={theme.colors.primary} />
         </Pressable>
       </View>
       <InventoryProductPickerModal
@@ -116,7 +125,7 @@ export function InventoryMovementSection({
           { label: "Ajuste", value: "ajuste" }
         ]}
       />
-      {selectedProduct ? <Text style={styles.paragraph}>Stock actual: {selectedProduct.stock} | Minimo: {productMinStock(selectedProduct)} | Costo promedio: ${money(productCost(selectedProduct))}</Text> : null}
+      {selectedProduct ? <Text style={[styles.paragraph, { color: theme.colors.textMuted }]}>Stock actual: {selectedProduct.stock} | Minimo: {productMinStock(selectedProduct)} | Costo promedio: ${money(productCost(selectedProduct))}</Text> : null}
       <Input label={type === "ajuste" ? "Nuevo stock" : "Cantidad"} value={quantity} onChangeText={(value) => onQuantityChange(sanitizeDecimalInput(value))} keyboardType="decimal-pad" />
       <Input label="Motivo" value={reason} onChangeText={onReasonChange} placeholder={movementReason(type)} />
       {showSaveButton ? <PrimaryButton label="Guardar movimiento" onPress={onSave} /> : null}
@@ -145,20 +154,21 @@ export function InventoryStockSection({
   products: Product[];
   setProductPage: (page: number) => void;
 }) {
+  const { theme } = useAppTheme();
   return (
     <Section title="">
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Stock actual</Text>
+        <Text style={[styles.title, { color: theme.colors.text }]}>Stock actual</Text>
         {onCreateMovement ? (
-          <Pressable style={styles.addButton} onPress={onCreateMovement}>
-            <MaterialCommunityIcons name="swap-horizontal-bold" size={15} color="#ffffff" />
-            <Text style={styles.addButtonText}>Movimiento</Text>
+          <Pressable style={[styles.addButton, { backgroundColor: theme.colors.primary }]} onPress={onCreateMovement}>
+            <MaterialCommunityIcons name="swap-horizontal-bold" size={15} color={theme.colors.onPrimary} />
+            <Text style={[styles.addButtonText, { color: theme.colors.onPrimary }]}>Movimiento</Text>
           </Pressable>
         ) : null}
       </View>
       {products.length === 0 ? <Empty text="Aun no hay productos." /> : null}
       {productPagination.items.map((product) => (
-        <ListItemComponent key={product.id} title={`${product.code} - ${product.name}`} meta={`Stock ${product.stock}/${productMinStock(product)} | Costo $${money(productCost(product))} | Publico $${money(product.price)} | Util. $${money(grossToNetUnitPrice(product.price, product.ivaRate) - productCost(product))}`} badge={product.stock <= 0 ? "SIN STOCK" : product.stock <= productMinStock(product) ? "BAJO" : undefined} />
+        <ListItemComponent key={product.id} title={`${product.code} - ${product.name}`} meta={`Stock ${product.stock}/${productMinStock(product)} | Costo $${money(productCost(product))} | Publico $${money(product.price)} | Util. $${money(grossToNetUnitPrice(product.price, product.ivaRate) - productCost(product))}`} badge={product.stock <= 0 ? "SIN STOCK" : product.stock <= productMinStock(product) ? "BAJO" : undefined} accentTone={product.stock <= 0 ? "danger" : product.stock <= productMinStock(product) ? "warning" : "success"} />
       ))}
       <PaginationControls page={productPagination.currentPage} pageSize={LIST_BATCH_SIZE} totalItems={products.length} onPageChange={setProductPage} />
     </Section>
@@ -198,7 +208,7 @@ export function InventoryKardexSection({
       ) : null}
       {productKardex.length === 0 ? <Empty text="No hay movimientos para este producto." /> : null}
       {visibleKardex.map((movement) => (
-        <ListItemComponent key={movement.id} title={`${movementTypeLabel(movement.type)} - ${movement.productName}`} meta={`${formatAuditDate(movement.createdAt)} | Cant. ${movement.quantity} | ${movement.stockBefore} -> ${movement.stockAfter} | ${movement.reason}${movement.reference ? ` | Ref. ${movement.reference}` : ""}`} />
+        <ListItemComponent key={movement.id} title={`${movementTypeLabel(movement.type)} - ${movement.productName}`} meta={`${formatAuditDate(movement.createdAt)} | Cant. ${movement.quantity} | ${movement.stockBefore} -> ${movement.stockAfter} | ${movement.reason}${movement.reference ? ` | Ref. ${movement.reference}` : ""}`} accentTone={movementAccentTone(movement.type)} />
       ))}
       <PaginationControls page={kardexPagination.currentPage} pageSize={LIST_BATCH_SIZE} totalItems={productKardex.length} onPageChange={setKardexPage} />
     </Section>
@@ -230,7 +240,7 @@ export function InventoryMovementsSection({
       {movements.length === 0 ? <Empty text="Aun no hay movimientos de inventario." /> : null}
       {movements.length > 0 && filteredMovements.length === 0 ? <Empty text="No hay movimientos con esa busqueda." /> : null}
       {visibleMovements.map((movement) => (
-        <ListItemComponent key={movement.id} title={`${movementTypeLabel(movement.type)} - ${movement.productName}`} meta={`${formatShortDate(movement.createdAt)} | Cant. ${movement.quantity} | ${movement.stockBefore} -> ${movement.stockAfter} | ${movement.reason}${movement.reference ? ` | Ref. ${movement.reference}` : ""}`} />
+        <ListItemComponent key={movement.id} title={`${movementTypeLabel(movement.type)} - ${movement.productName}`} meta={`${formatShortDate(movement.createdAt)} | Cant. ${movement.quantity} | ${movement.stockBefore} -> ${movement.stockAfter} | ${movement.reason}${movement.reference ? ` | Ref. ${movement.reference}` : ""}`} accentTone={movementAccentTone(movement.type)} />
       ))}
       <PaginationControls page={movementPagination.currentPage} pageSize={LIST_BATCH_SIZE} totalItems={filteredMovements.length} onPageChange={setMovementPage} />
     </Section>

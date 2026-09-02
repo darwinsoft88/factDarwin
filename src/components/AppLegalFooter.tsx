@@ -1,16 +1,18 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { APP_VERSION_LABEL, COPYRIGHT_TEXT } from "../constants/branding";
+import { useAppTheme } from "../theme/AppTheme";
 
 type AppLegalFooterProps = {
   compact?: boolean;
 };
 
 export function AppLegalFooter({ compact = false }: AppLegalFooterProps) {
+  const { theme } = useAppTheme();
   return (
     <View style={[styles.footer, compact && styles.footerCompact]}>
-      <Text style={styles.version}>FactuDarwin {APP_VERSION_LABEL}</Text>
-      <Text style={styles.copyright}>{COPYRIGHT_TEXT}</Text>
+      <Text style={[styles.version, { color: theme.colors.textMuted }]}>FactuDarwin {APP_VERSION_LABEL}</Text>
+      <Text style={[styles.copyright, { color: theme.colors.textSubtle }]}>{COPYRIGHT_TEXT}</Text>
     </View>
   );
 }

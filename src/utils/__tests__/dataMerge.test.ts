@@ -78,6 +78,16 @@ function creditAdjustment(id: string, overrides: Partial<CreditAdjustment> = {})
   };
 }
 
+test("la licencia recibida del backend prevalece sobre la copia local", () => {
+  const remote = structuredClone(initialData);
+  const local = structuredClone(initialData);
+  remote.license = { ...remote.license!, features: { ...remote.license!.features, cash: false, credits: false } };
+  local.license = { ...local.license!, features: { ...local.license!.features, cash: true, credits: true } };
+  const merged = mergeAppDataSnapshots(remote, local);
+  expect(merged.license?.features.cash).toBe(false);
+  expect(merged.license?.features.credits).toBe(false);
+});
+
 describe("dataMerge", () => {
   it("keeps local pending sync while merging remote documents", () => {
     const remote = {
@@ -88,7 +98,14 @@ describe("dataMerge", () => {
     const local = {
       ...initialData,
       sales: [sale("local-sale", "000000011", "2026-05-01T00:00:01.000Z")],
-      pendingSync: [{ id: "p1", title: "Pendiente", attempts: 0, createdAt: "2026-05-01T00:00:02.000Z", lastError: "offline", patch: { baseData: initialData } }]
+      pendingSync: [{
+        id: "p1",
+        title: "Pendiente",
+        attempts: 0,
+        createdAt: "2026-05-01T00:00:02.000Z",
+        lastError: "offline",
+        patch: { baseData: initialData }
+      }]
     };
 
     const merged = mergeAppDataSnapshots(remote, local);
@@ -108,7 +125,15 @@ describe("dataMerge", () => {
         emissionPoint: "003",
         activeEstablishmentId: "002-003",
         sequential: 25,
-        establishments: [{ id: "002-003", name: "Matriz", establishment: "002", emissionPoint: "003", address: "B", sequential: 25, active: true }]
+        establishments: [{
+          id: "002-003",
+          name: "Matriz",
+          establishment: "002",
+          emissionPoint: "003",
+          address: "B",
+          sequential: 25,
+          active: true
+        }]
       }
     };
     const local = {
@@ -120,7 +145,15 @@ describe("dataMerge", () => {
         emissionPoint: "003",
         activeEstablishmentId: "002-003",
         sequential: 20,
-        establishments: [{ id: "002-003", name: "Matriz", establishment: "002", emissionPoint: "003", address: "B", sequential: 20, active: true }]
+        establishments: [{
+          id: "002-003",
+          name: "Matriz",
+          establishment: "002",
+          emissionPoint: "003",
+          address: "B",
+          sequential: 20,
+          active: true
+        }]
       }
     };
 
@@ -137,7 +170,15 @@ describe("dataMerge", () => {
         emissionPoint: "001",
         activeEstablishmentId: "001-001",
         sequential: 99,
-        establishments: [{ id: "001-001", name: "Matriz", establishment: "001", emissionPoint: "001", address: "A", sequential: 99, active: true }]
+        establishments: [{
+          id: "001-001",
+          name: "Matriz",
+          establishment: "001",
+          emissionPoint: "001",
+          address: "A",
+          sequential: 99,
+          active: true
+        }]
       }
     };
     const local = {
@@ -149,7 +190,15 @@ describe("dataMerge", () => {
         emissionPoint: "003",
         activeEstablishmentId: "002-003",
         sequential: 20,
-        establishments: [{ id: "002-003", name: "Matriz", establishment: "002", emissionPoint: "003", address: "B", sequential: 20, active: true }]
+        establishments: [{
+          id: "002-003",
+          name: "Matriz",
+          establishment: "002",
+          emissionPoint: "003",
+          address: "B",
+          sequential: 20,
+          active: true
+        }]
       }
     };
 
@@ -163,8 +212,24 @@ describe("dataMerge", () => {
         ...initialData.issuer,
         establishmentsUpdatedAt: "2026-05-01T00:00:00.000Z",
         establishments: [
-          { id: "001-010", name: "Viejo", establishment: "001", emissionPoint: "010", address: "A", sequential: 1, active: true },
-          { id: "002-003", name: "Matriz", establishment: "002", emissionPoint: "003", address: "B", sequential: 18, active: true }
+          {
+            id: "001-010",
+            name: "Viejo",
+            establishment: "001",
+            emissionPoint: "010",
+            address: "A",
+            sequential: 1,
+            active: true
+          },
+          {
+            id: "002-003",
+            name: "Matriz",
+            establishment: "002",
+            emissionPoint: "003",
+            address: "B",
+            sequential: 18,
+            active: true
+          }
         ]
       }
     };
@@ -173,9 +238,15 @@ describe("dataMerge", () => {
       issuer: {
         ...initialData.issuer,
         establishmentsUpdatedAt: "2026-05-02T00:00:00.000Z",
-        establishments: [
-          { id: "002-003", name: "Matriz", establishment: "002", emissionPoint: "003", address: "B", sequential: 18, active: true }
-        ]
+        establishments: [{
+          id: "002-003",
+          name: "Matriz",
+          establishment: "002",
+          emissionPoint: "003",
+          address: "B",
+          sequential: 18,
+          active: true
+        }]
       }
     };
 
@@ -194,8 +265,26 @@ describe("dataMerge", () => {
         activeEstablishmentId: "001-001",
         establishmentsUpdatedAt: "2026-05-01T00:00:00.000Z",
         establishments: [
-          { id: "001-001", name: "Matriz", establishment: "001", emissionPoint: "001", address: "A", sequential: 2, active: true, updatedAt: "2026-05-01T00:00:00.000Z" },
-          { id: "002-010", name: "FacturaCacao", establishment: "002", emissionPoint: "010", address: "B", sequential: 7, active: true, updatedAt: "2026-05-01T00:00:00.000Z" }
+          {
+            id: "001-001",
+            name: "Matriz",
+            establishment: "001",
+            emissionPoint: "001",
+            address: "A",
+            sequential: 2,
+            active: true,
+            updatedAt: "2026-05-01T00:00:00.000Z"
+          },
+          {
+            id: "002-010",
+            name: "FacturaCacao",
+            establishment: "002",
+            emissionPoint: "010",
+            address: "B",
+            sequential: 7,
+            active: true,
+            updatedAt: "2026-05-01T00:00:00.000Z"
+          }
         ]
       }
     };
@@ -208,8 +297,26 @@ describe("dataMerge", () => {
         activeEstablishmentId: "002-010",
         establishmentsUpdatedAt: "2026-05-02T00:00:00.000Z",
         establishments: [
-          { id: "001-001", name: "Matriz", establishment: "001", emissionPoint: "001", address: "A", sequential: 2, active: true, updatedAt: "2026-05-01T00:00:00.000Z" },
-          { id: "002-010", name: "FacturaCacao", establishment: "002", emissionPoint: "010", address: "B", sequential: 7, active: true, updatedAt: "2026-05-02T00:00:00.000Z" }
+          {
+            id: "001-001",
+            name: "Matriz",
+            establishment: "001",
+            emissionPoint: "001",
+            address: "A",
+            sequential: 2,
+            active: true,
+            updatedAt: "2026-05-01T00:00:00.000Z"
+          },
+          {
+            id: "002-010",
+            name: "FacturaCacao",
+            establishment: "002",
+            emissionPoint: "010",
+            address: "B",
+            sequential: 7,
+            active: true,
+            updatedAt: "2026-05-02T00:00:00.000Z"
+          }
         ]
       }
     };
@@ -294,25 +401,79 @@ describe("dataMerge", () => {
     const base = sale("sale-stale", "000000327", "2026-08-01T17:02:00.000Z");
     const remote = {
       ...initialData,
-      sales: [{ ...base, status: "ANULADA" as const, inventoryState: "REVERSED" as const }]
+      sales: [{
+        ...base,
+        status: "ANULADA" as const,
+        inventoryState: "REVERSED" as const
+      }]
     };
     const local = {
       ...initialData,
-      sales: [{ ...base, status: "ERROR_SRI" as const, inventoryState: "REVERSED" as const }],
+      sales: [{
+        ...base,
+        status: "ERROR_SRI" as const,
+        inventoryState: "REVERSED" as const
+      }],
       pendingSync: []
     };
 
     const merged = mergeAppDataSnapshots(remote, local);
 
     expect(merged.sales).toHaveLength(1);
-    expect(merged.sales[0]).toMatchObject({ id: "sale-stale", status: "ANULADA", inventoryState: "REVERSED" });
+    expect(merged.sales[0]).toMatchObject({
+      id: "sale-stale",
+      status: "ANULADA",
+      inventoryState: "REVERSED"
+    });
+  });
+
+  it("does not resurrect a locally voided invoice from a stale remote error", () => {
+    const base = sale("sale-voided", "000000363", "2026-08-18T10:00:00.000Z");
+    const remote = {
+      ...initialData,
+      sales: [{
+        ...base,
+        status: "ERROR_SRI" as const,
+        sriMessage: "Firma no encontrada"
+      }]
+    };
+    const local = {
+      ...initialData,
+      sales: [{
+        ...base,
+        status: "ANULADA" as const,
+        voidedAt: "2026-08-18T11:00:00.000Z",
+        voidReason: "Anulada localmente",
+        inventoryState: "REVERSED" as const
+      }],
+      pendingSync: []
+    };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.sales[0]).toMatchObject({
+      id: "sale-voided",
+      status: "ANULADA",
+      inventoryState: "REVERSED"
+    });
   });
 
   it("keeps a local sale while its exact change remains protected by the outbox", () => {
     const base = sale("sale-pending", "000000328", "2026-08-08T10:00:00.000Z");
-    const remoteSale = { ...base, status: "ERROR_SRI" as const, sriMessage: "estado remoto anterior" };
-    const localSale = { ...base, status: "PENDIENTE_SRI" as const, sriMessage: "cambio local pendiente" };
-    const remote = { ...initialData, sales: [remoteSale] };
+    const remoteSale = {
+      ...base,
+      status: "ERROR_SRI" as const,
+      sriMessage: "estado remoto anterior"
+    };
+    const localSale = {
+      ...base,
+      status: "PENDIENTE_SRI" as const,
+      sriMessage: "cambio local pendiente"
+    };
+    const remote = {
+      ...initialData,
+      sales: [remoteSale]
+    };
     const local = {
       ...initialData,
       sales: [localSale],
@@ -321,7 +482,10 @@ describe("dataMerge", () => {
         title: "Documento pendiente",
         attempts: 1,
         createdAt: "2026-08-08T10:00:01.000Z",
-        patch: { requestId: "sync_sale_pending", sales: [localSale] }
+        patch: {
+          requestId: "sync_sale_pending",
+          sales: [localSale]
+        }
       }]
     };
 
@@ -333,9 +497,21 @@ describe("dataMerge", () => {
 
   it("does not regress a locally authorized retry while its durable sync is pending", () => {
     const base = sale("sale-retry", "000000339", "2026-08-09T23:27:58.289Z");
-    const remoteSale = { ...base, status: "ENVIADA" as const, sriMessage: "En revision SRI" };
-    const localSale = { ...base, status: "AUTORIZADA" as const, authorizationNumber: "authorization-339", authorizedXml: "<autorizado />" };
-    const remote = { ...initialData, sales: [remoteSale] };
+    const remoteSale = {
+      ...base,
+      status: "ENVIADA" as const,
+      sriMessage: "En revision SRI"
+    };
+    const localSale = {
+      ...base,
+      status: "AUTORIZADA" as const,
+      authorizationNumber: "authorization-339",
+      authorizedXml: "<autorizado />"
+    };
+    const remote = {
+      ...initialData,
+      sales: [remoteSale]
+    };
     const local: AppData = {
       ...initialData,
       sales: [localSale],
@@ -344,14 +520,137 @@ describe("dataMerge", () => {
         title: "Documento pendiente",
         attempts: 0,
         createdAt: "2026-08-09T23:30:00.000Z",
-        patch: { requestId: "sync_retry_339", sales: [localSale] }
+        patch: {
+          requestId: "sync_retry_339",
+          sales: [localSale]
+        }
       }]
     };
 
     const merged = mergeAppDataSnapshots(remote, local);
 
-    expect(merged.sales[0]).toMatchObject({ status: "AUTORIZADA", authorizationNumber: "authorization-339" });
+    expect(merged.sales[0]).toMatchObject({
+      status: "AUTORIZADA",
+      authorizationNumber: "authorization-339"
+    });
     expect(merged.pendingSync).toHaveLength(1);
+  });
+
+  it("keeps remote AUTORIZADA even when a stale local ENVIADA is still protected by pendingSync", () => {
+    const base = sale(
+      "sale-remote-authorized",
+      "000000374",
+      "2026-08-19T20:00:00.000Z"
+    );
+
+    const remoteSale = {
+      ...base,
+      status: "AUTORIZADA" as const,
+      authorizationNumber: "authorization-374",
+      authorizationDate: "2026-08-19T20:01:00.000Z",
+      authorizedXml: "<autorizacion><estado>AUTORIZADO</estado></autorizacion>"
+    };
+
+    const localSale = {
+      ...base,
+      status: "ENVIADA" as const,
+      sriMessage: "En revision SRI"
+    };
+
+    const remote: AppData = {
+      ...initialData,
+      sales: [remoteSale],
+      pendingSync: []
+    };
+
+    const local: AppData = {
+      ...initialData,
+      sales: [localSale],
+      pendingSync: [{
+        id: "pending-sale-374",
+        title: "Documento pendiente",
+        attempts: 0,
+        createdAt: "2026-08-19T20:00:30.000Z",
+        patch: {
+          requestId: "sync_sale_374",
+          sales: [localSale]
+        }
+      }]
+    };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.sales[0]).toMatchObject({
+      status: "AUTORIZADA",
+      authorizationNumber: "authorization-374",
+      authorizedXml: remoteSale.authorizedXml
+    });
+
+    expect(merged.pendingSync).toHaveLength(1);
+  });
+
+  it("does not regress a locally authorized invoice after its outbox entry was cleared", () => {
+    const base = sale("sale-authorized", "000000344", "2026-08-11T10:00:00.000Z");
+    const remoteSale = {
+      ...base,
+      status: "ENVIADA" as const,
+      sriMessage: "En revision SRI"
+    };
+    const localSale = {
+      ...base,
+      status: "AUTORIZADA" as const,
+      authorizationNumber: "authorization-344",
+      authorizationDate: "2026-08-11T10:01:00.000Z",
+      authorizedXml: "<autorizacion><estado>AUTORIZADO</estado></autorizacion>"
+    };
+    const remote = {
+      ...initialData,
+      sales: [remoteSale]
+    };
+    const local = {
+      ...initialData,
+      sales: [localSale],
+      pendingSync: []
+    };
+
+    const merged = mergeAppDataSnapshots(remote, local);
+
+    expect(merged.sales[0]).toMatchObject({
+      status: "AUTORIZADA",
+      authorizationNumber: "authorization-344",
+      authorizedXml: localSale.authorizedXml
+    });
+  });
+
+  it("keeps authorization monotonic through repeated stale snapshot downloads", () => {
+    const base = sale("sale-authorized-repeat", "000000344", "2026-08-11T10:00:00.000Z");
+    const staleRemote = {
+      ...initialData,
+      sales: [{
+        ...base,
+        status: "PENDIENTE_SRI" as const,
+        sriMessage: "En revision SRI"
+      }]
+    };
+    const authorizedLocal = {
+      ...initialData,
+      sales: [{
+        ...base,
+        status: "AUTORIZADA" as const,
+        authorizationNumber: "authorization-344",
+        authorizedXml: "<estado>AUTORIZADO</estado>"
+      }],
+      pendingSync: []
+    };
+
+    const first = mergeAppDataSnapshots(staleRemote, authorizedLocal);
+    const second = mergeAppDataSnapshots(staleRemote, first);
+    const third = mergeAppDataSnapshots(staleRemote, second);
+
+    expect(first.sales[0]?.status).toBe("AUTORIZADA");
+    expect(second.sales[0]?.status).toBe("AUTORIZADA");
+    expect(third.sales[0]?.status).toBe("AUTORIZADA");
+    expect(third.sales[0]?.authorizationNumber).toBe("authorization-344");
   });
 
   it("does not revive a sale protected by a durable deletion tombstone", () => {
@@ -359,9 +658,15 @@ describe("dataMerge", () => {
     const remote: AppData = {
       ...initialData,
       sales: [],
-      deletedIds: { ...(initialData.deletedIds || {}), sales: [removedSale.id] }
+      deletedIds: {
+        ...(initialData.deletedIds || {}),
+        sales: [removedSale.id]
+      }
     };
-    const local: AppData = { ...initialData, sales: [removedSale] };
+    const local: AppData = {
+      ...initialData,
+      sales: [removedSale]
+    };
 
     const merged = mergeAppDataSnapshots(remote, local);
 
@@ -375,9 +680,15 @@ describe("dataMerge", () => {
     const remote: AppData = {
       ...initialData,
       sales: [keptSale],
-      deletedIds: { ...(initialData.deletedIds || {}), sales: [removedSale.id] }
+      deletedIds: {
+        ...(initialData.deletedIds || {}),
+        sales: [removedSale.id]
+      }
     };
-    const staleLocal: AppData = { ...initialData, sales: [removedSale, keptSale] };
+    const staleLocal: AppData = {
+      ...initialData,
+      sales: [removedSale, keptSale]
+    };
 
     const firstSync = mergeAppDataSnapshots(remote, staleLocal);
     const secondSync = mergeAppDataSnapshots(remote, firstSync);
@@ -389,16 +700,38 @@ describe("dataMerge", () => {
   });
 
   it("keeps exclusive remote and local adjustments without deduplicating by note or amount", () => {
-    const remote = creditAdjustment("remote", { sourceCreditNoteId: "same-note", amount: 10 });
-    const local = creditAdjustment("local", { sourceCreditNoteId: "same-note", amount: 10 });
-    expect(mergeCreditAdjustments([remote], [local]).map((item) => item.id)).toEqual(["remote", "local"]);
+    const remote = creditAdjustment("remote", {
+      sourceCreditNoteId: "same-note",
+      amount: 10
+    });
+    const local = creditAdjustment("local", {
+      sourceCreditNoteId: "same-note",
+      amount: 10
+    });
+
+    expect(
+      mergeCreditAdjustments([remote], [local]).map((item) => item.id)
+    ).toEqual(["remote", "local"]);
   });
 
   it("merges the same id and operation once while preserving unknown fields", () => {
-    const remote = creditAdjustment("shared", { operationId: "shared-operation", remoteField: true } as Partial<CreditAdjustment>);
-    const local = creditAdjustment("shared", { operationId: "shared-operation", localField: true } as Partial<CreditAdjustment>);
+    const remote = creditAdjustment("shared", {
+      operationId: "shared-operation",
+      remoteField: true
+    } as Partial<CreditAdjustment>);
+    const local = creditAdjustment("shared", {
+      operationId: "shared-operation",
+      localField: true
+    } as Partial<CreditAdjustment>);
+
     const [merged] = mergeCreditAdjustments([remote], [local]);
-    expect(merged).toMatchObject({ id: "shared", operationId: "shared-operation", remoteField: true, localField: true });
+
+    expect(merged).toMatchObject({
+      id: "shared",
+      operationId: "shared-operation",
+      remoteField: true,
+      localField: true
+    });
   });
 
   it("never revives a reversed adjustment with an applied version", () => {
@@ -408,6 +741,7 @@ describe("dataMerge", () => {
       reversedAt: "2026-05-02T00:00:00.000Z"
     });
     const applied = creditAdjustment("shared");
+
     expect(mergeCreditAdjustments([reversed], [applied])[0]).toMatchObject({
       state: "REVERSED",
       reverseOperationId: "reverse-operation:shared",
@@ -417,12 +751,37 @@ describe("dataMerge", () => {
   });
 
   it.each([
-    ["operation conflict", [creditAdjustment("shared", { operationId: "operation-1" })], [creditAdjustment("shared", { operationId: "operation-2" })], "CREDIT_ADJUSTMENT_OPERATION_CONFLICT"],
-    ["operation identity conflict", [creditAdjustment("one", { operationId: "same-operation" })], [creditAdjustment("two", { operationId: "same-operation" })], "CREDIT_ADJUSTMENT_IDENTITY_CONFLICT"],
-    ["reverse conflict", [creditAdjustment("shared", { reverseOperationId: "reverse-1" })], [creditAdjustment("shared", { reverseOperationId: "reverse-2" })], "CREDIT_ADJUSTMENT_REVERSE_OPERATION_CONFLICT"],
-    ["reverse identity conflict", [creditAdjustment("one", { reverseOperationId: "same-reverse" })], [creditAdjustment("two", { reverseOperationId: "same-reverse" })], "CREDIT_ADJUSTMENT_IDENTITY_CONFLICT"]
+    [
+      "operation conflict",
+      [creditAdjustment("shared", { operationId: "operation-1" })],
+      [creditAdjustment("shared", { operationId: "operation-2" })],
+      "CREDIT_ADJUSTMENT_OPERATION_CONFLICT"
+    ],
+    [
+      "operation identity conflict",
+      [creditAdjustment("one", { operationId: "same-operation" })],
+      [creditAdjustment("two", { operationId: "same-operation" })],
+      "CREDIT_ADJUSTMENT_IDENTITY_CONFLICT"
+    ],
+    [
+      "reverse conflict",
+      [creditAdjustment("shared", { reverseOperationId: "reverse-1" })],
+      [creditAdjustment("shared", { reverseOperationId: "reverse-2" })],
+      "CREDIT_ADJUSTMENT_REVERSE_OPERATION_CONFLICT"
+    ],
+    [
+      "reverse identity conflict",
+      [creditAdjustment("one", { reverseOperationId: "same-reverse" })],
+      [creditAdjustment("two", { reverseOperationId: "same-reverse" })],
+      "CREDIT_ADJUSTMENT_IDENTITY_CONFLICT"
+    ]
   ])("rejects %s", (_label, remote, local, code) => {
-    expect(() => mergeCreditAdjustments(remote as CreditAdjustment[], local as CreditAdjustment[])).toThrow(expect.objectContaining({ code }));
+    expect(() =>
+      mergeCreditAdjustments(
+        remote as CreditAdjustment[],
+        local as CreditAdjustment[]
+      )
+    ).toThrow(expect.objectContaining({ code }));
   });
 
   it.each([
@@ -430,29 +789,62 @@ describe("dataMerge", () => {
     ["invalid reverse operation", { reverseOperationId: "" }],
     ["overlong operation", { operationId: "x".repeat(201) }]
   ])("rejects %s without normalizing identities", (_label, overrides) => {
-    expect(() => mergeCreditAdjustments([creditAdjustment("invalid", overrides)], [])).toThrow(CreditAdjustmentMergeError);
+    expect(() =>
+      mergeCreditAdjustments(
+        [creditAdjustment("invalid", overrides)],
+        []
+      )
+    ).toThrow(CreditAdjustmentMergeError);
+
     try {
       mergeCreditAdjustments([creditAdjustment("invalid", overrides)], []);
     } catch (error) {
-      expect(error).toMatchObject({ code: "INVALID_CREDIT_ADJUSTMENT_SNAPSHOT" });
+      expect(error).toMatchObject({
+        code: "INVALID_CREDIT_ADJUSTMENT_SNAPSHOT"
+      });
     }
   });
 
   it("keeps legacy and modern adjustments together in deterministic order", () => {
-    const legacy = creditAdjustment("legacy", { createdAt: "2026-05-02T00:00:00.000Z" } as Partial<CreditAdjustment>);
+    const legacy = creditAdjustment("legacy", {
+      createdAt: "2026-05-02T00:00:00.000Z"
+    } as Partial<CreditAdjustment>);
     delete legacy.operationId;
-    const modern = creditAdjustment("modern", { createdAt: "2026-05-01T00:00:00.000Z" } as Partial<CreditAdjustment>);
-    expect(mergeCreditAdjustments([legacy], [modern]).map((item) => item.id)).toEqual(["modern", "legacy"]);
+
+    const modern = creditAdjustment("modern", {
+      createdAt: "2026-05-01T00:00:00.000Z"
+    } as Partial<CreditAdjustment>);
+
+    expect(
+      mergeCreditAdjustments([legacy], [modern]).map((item) => item.id)
+    ).toEqual(["modern", "legacy"]);
   });
 
   it("preserves adjustments through complete reconstruction and incremental patch typing", () => {
     const remoteAdjustment = creditAdjustment("remote");
     const localAdjustment = creditAdjustment("local");
-    const remote: AppData = { ...initialData, creditAdjustments: [remoteAdjustment] };
-    const local: AppData = { ...initialData, creditAdjustments: [localAdjustment] };
+
+    const remote: AppData = {
+      ...initialData,
+      creditAdjustments: [remoteAdjustment]
+    };
+
+    const local: AppData = {
+      ...initialData,
+      creditAdjustments: [localAdjustment]
+    };
+
     const merged = mergeAppDataSnapshots(remote, local);
-    const patch: IncrementalPatch = { baseData: merged, creditAdjustments: merged.creditAdjustments };
-    expect(merged.creditAdjustments?.map((item) => item.id)).toEqual(["remote", "local"]);
+
+    const patch: IncrementalPatch = {
+      baseData: merged,
+      creditAdjustments: merged.creditAdjustments
+    };
+
+    expect(merged.creditAdjustments?.map((item) => item.id)).toEqual([
+      "remote",
+      "local"
+    ]);
     expect(patch.creditAdjustments).toEqual(merged.creditAdjustments);
   });
 });

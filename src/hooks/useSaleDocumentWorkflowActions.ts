@@ -130,7 +130,8 @@ export function useSaleDocumentWorkflowActions({
       setRetryingSaleId(saleId);
       setProcessingMessage("Reconciliando inventario...");
       try {
-        await persistMutation((current) => {
+        const reconciliationAt = new Date().toISOString();
+        const persisted = await persistMutation((current) => {
           const currentSale = current.sales.find((item) => item.id === saleId);
           if (!currentSale || currentSale.status !== "AUTORIZADA" || resolveSaleInventoryState(currentSale) !== "RECONCILIATION_PENDING") return current;
           const reconciled = reapplyAuthorizedSaleInventoryOnce({
@@ -138,7 +139,7 @@ export function useSaleDocumentWorkflowActions({
             movements: current.inventoryMovements || [],
             sale: currentSale,
             userId: user.id,
-            createdAt: new Date().toISOString(),
+            createdAt: reconciliationAt,
             reason: "Reaplicacion segura despues de autorizacion SRI"
           });
           return appendAudit(
@@ -156,7 +157,38 @@ export function useSaleDocumentWorkflowActions({
             { inventoryOperationId: reconciled.sale.inventoryOperationId }
           );
         });
-        showSuccess("Inventario reconciliado", "La factura ya estaba autorizada y el inventario se actualizo una sola vez.");
+
+        const reconciledSale = persisted.sales.find((item) => item.id === saleId);
+        if (!reconciledSale || resolveSaleInventoryState(reconciledSale) !== "APPLIED") {
+          showWarning("Reconciliacion pendiente", "El inventario no pudo confirmarse como aplicado.");
+          return;
+        }
+
+        const reconciliationMovements = (persisted.inventoryMovements || []).filter(
+          (movement) => movement.saleId === saleId && movement.createdAt === reconciliationAt
+        );
+        const changedProductIds = new Set(reconciliationMovements.map((movement) => movement.productId));
+
+        const synced = await syncSalePatchToBackend(data.backendUrl, backendToken, {
+          baseData: persisted,
+          sales: [reconciledSale],
+          products: persisted.products.filter((product) => changedProductIds.has(product.id)),
+          inventoryMovements: reconciliationMovements,
+          auditLogs: persisted.auditLogs.slice(0, 1)
+        }, { persistMutation });
+
+        if (!synced) {
+          showWarning(
+            "Inventario reconciliado localmente",
+            "El inventario se actualizo en este dispositivo, pero la sincronizacion con el servidor quedo pendiente."
+          );
+          return;
+        }
+
+        showSuccess(
+          "Inventario reconciliado",
+          "La factura ya estaba autorizada y el inventario se actualizo y sincronizo correctamente."
+        );
       } catch (error) {
         showError("Reconciliacion pendiente", error instanceof Error ? error.message : "No se pudo actualizar el inventario de la factura autorizada.");
       } finally {
@@ -433,46 +465,153 @@ export function useSaleDocumentWorkflowActions({
     const defaultReason = isInvoiceSale(sale) ? "Anulada localmente antes de autorizacion" : sale.documentType === "proforma" ? "Proforma anulada localmente" : isCreditNoteSale(sale) ? "Nota de credito anulada localmente" : "Nota de venta anulada localmente";
     const reason = getLocalVoidReason(defaultReason);
     if (!reason) return;
+
     const saleId = sale.id;
+
     try {
       let changed = false;
       let restoredStock = false;
-      await persistMutation((current) => {
+
+      const persisted = await persistMutation((current) => {
         const currentSale = current.sales.find((item) => item.id === saleId);
-        if (!currentSale || currentSale.status === "ANULADA" || currentSale.status === "CONVERTIDA") return current;
-        if (currentSale.status === "AUTORIZADA") throw new Error("Una factura autorizada no puede anularse localmente.");
+
+        if (!currentSale || currentSale.status === "ANULADA" || currentSale.status === "CONVERTIDA") {
+          return current;
+        }
+
+        if (currentSale.status === "AUTORIZADA") {
+          throw new Error("Una factura autorizada no puede anularse localmente.");
+        }
+
         let products = current.products;
         let movements = current.inventoryMovements || [];
         let voidedSale = currentSale;
-        const sourceSale = currentSale.sourceSaleId ? current.sales.find((item) => item.id === currentSale.sourceSaleId) : undefined;
-        const ticketDerived = isInvoiceSale(currentSale) && sourceSale?.documentType === "nota_venta";
-        const inventoryAffectingDocument = isInvoiceSale(currentSale) || currentSale.documentType === "nota_venta";
+
+        const sourceSale = currentSale.sourceSaleId
+          ? current.sales.find((item) => item.id === currentSale.sourceSaleId)
+          : undefined;
+
+        const ticketDerived =
+          isInvoiceSale(currentSale) &&
+          sourceSale?.documentType === "nota_venta";
+
+        const inventoryAffectingDocument =
+          isInvoiceSale(currentSale) ||
+          currentSale.documentType === "nota_venta";
+
         if (inventoryAffectingDocument && !ticketDerived) {
           const inventoryState = resolveSaleInventoryState(currentSale);
-          if (inventoryState === "UNKNOWN") throw inventoryConsistencyError(currentSale);
+
+          if (inventoryState === "UNKNOWN") {
+            throw inventoryConsistencyError(currentSale);
+          }
+
           if (inventoryState === "APPLIED") {
-            const reversed = reverseSaleInventoryOnce({ products, movements, sale: currentSale, operationId: currentSale.inventoryOperationId || currentSale.id, userId: user.id, createdAt: voidedAt, reason });
+            const reversed = reverseSaleInventoryOnce({
+              products,
+              movements,
+              sale: currentSale,
+              operationId: currentSale.inventoryOperationId || currentSale.id,
+              userId: user.id,
+              createdAt: voidedAt,
+              reason
+            });
+
             products = reversed.products;
             movements = reversed.movements;
             voidedSale = reversed.sale;
             restoredStock = reversed.changed;
           }
         }
-        const updatedSale: Sale = { ...voidedSale, status: "ANULADA", voidReason: reason, voidedAt, sriMessage: voidedSale.sriMessage || reason };
+
+        const updatedSale: Sale = {
+          ...voidedSale,
+          status: "ANULADA",
+          voidReason: reason,
+          voidedAt,
+          sriMessage: voidedSale.sriMessage || reason
+        };
+
         changed = true;
-        return appendAudit({ ...current, products, inventoryMovements: movements, sales: current.sales.map((item) => item.id === saleId ? updatedSale : item) }, user, "DOCUMENT_VOIDED", "sale", saleId, `Documento anulado: ${documentTypeLabel(currentSale)} ${currentSale.sequence}`, { reason, restoredStock });
+
+        return appendAudit(
+          {
+            ...current,
+            products,
+            inventoryMovements: movements,
+            sales: current.sales.map((item) =>
+              item.id === saleId ? updatedSale : item
+            )
+          },
+          user,
+          "DOCUMENT_VOIDED",
+          "sale",
+          saleId,
+          `Documento anulado: ${documentTypeLabel(currentSale)} ${currentSale.sequence}`,
+          { reason, restoredStock }
+        );
       });
+
       if (!changed) {
         Alert.alert("Documento cerrado", "El documento ya fue anulado o convertido.");
         return;
       }
-      const message = restoredStock ? "Documento anulado localmente y stock devuelto." : "Documento anulado localmente.";
+
+      const durableSale = persisted.sales.find((item) => item.id === saleId);
+
+      if (!durableSale || durableSale.status !== "ANULADA") {
+        showWarning("Anulacion pendiente", "No se pudo confirmar localmente el estado anulado.");
+        return;
+      }
+
+      const voidMovements = (persisted.inventoryMovements || []).filter(
+        (movement) =>
+          movement.saleId === saleId &&
+          movement.createdAt === voidedAt
+      );
+
+      const changedProductIds = new Set(
+        voidMovements.map((movement) => movement.productId)
+      );
+
+      const synced = await syncSalePatchToBackend(
+        data.backendUrl,
+        backendToken,
+        {
+          baseData: persisted,
+          sales: [durableSale],
+          products: persisted.products.filter((product) =>
+            changedProductIds.has(product.id)
+          ),
+          inventoryMovements: voidMovements,
+          auditLogs: persisted.auditLogs.slice(0, 1)
+        },
+        { persistMutation }
+      );
+
+      if (!synced) {
+        const pendingMessage = restoredStock
+          ? "Documento anulado y stock devuelto localmente, pero la sincronizacion con el servidor quedo pendiente."
+          : "Documento anulado localmente, pero la sincronizacion con el servidor quedo pendiente.";
+
+        setNotice(pendingMessage);
+        showWarning("Anulacion pendiente de sincronizar", pendingMessage);
+        return;
+      }
+
+      const message = restoredStock
+        ? "Documento anulado y stock devuelto correctamente."
+        : "Documento anulado y sincronizado correctamente.";
+
       setNotice(message);
       Alert.alert("Documento anulado", message);
     } catch (error) {
       const message = error instanceof SaleInventoryError
         ? "El inventario del documento requiere reconciliacion antes de anularlo."
-        : error instanceof Error ? error.message : "No se pudo anular el documento.";
+        : error instanceof Error
+          ? error.message
+          : "No se pudo anular el documento.";
+
       setNotice(message);
       Alert.alert("No se pudo anular", message);
     }

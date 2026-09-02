@@ -63,17 +63,22 @@ export function tabsForRole(role: UserRole): AppTab[] {
   return ["dashboard", "ventas", "documentos", "clientes", "productos", "inventario", "caja", "creditos", "guias", "reportes"];
 }
 
-export function filterTabsByLicense(tabs: AppTab[], license: AppLicense | undefined, role: UserRole) {
-  if (role === "admin") return tabs;
+export function filterTabsByLicense(tabs: AppTab[], license: AppLicense | undefined, _role: UserRole) {
   const status = appLicenseStatus(license);
   if (!status.active) return tabs.filter((tab) => ["dashboard", "reportes"].includes(tab));
   const features = license?.features;
   return tabs.filter((tab) => {
     if (tab === "ventas" && features?.sales === false) return false;
-    if (tab === "documentos" && features?.sales === false) return false;
-    if (tab === "guias" && (features?.sales === false || features?.sri === false)) return false;
+    if (tab === "documentos" && (features?.documents === false || features?.sales === false)) return false;
+    if (tab === "clientes" && features?.clients === false) return false;
+    if (tab === "productos" && features?.products === false) return false;
+    if (tab === "guias" && (features?.guides === false || features?.sales === false || features?.sri === false)) return false;
     if (tab === "inventario" && features?.inventory === false) return false;
+    if (tab === "caja" && features?.cash === false) return false;
+    if (tab === "creditos" && features?.credits === false) return false;
+    if (tab === "usuarios" && features?.users === false) return false;
     if (tab === "reportes" && features?.reports === false) return false;
+    if (tab === "sri" && features?.sri === false) return false;
     return true;
   });
 }

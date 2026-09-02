@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from "react-native";
-import { MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
-import { AppToast } from "./AppToast";
+import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useAppTheme } from "../theme/AppTheme";
 
 export type ActionHandler = () => void | Promise<void>;
 type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
@@ -24,6 +25,12 @@ export function ListItemActions({
   actions: ListAction[];
   onProcessingChange?: (processing: boolean) => void;
 }) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const safeTopPadding = Platform.OS === "web" ? 14 : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? MODAL_SAFE_BOTTOM_PADDING + 14 : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(280, windowHeight - safeTopPadding - safeBottomPadding);
   const [actionsVisible, setActionsVisible] = useState(false);
   const [processingActionLabel, setProcessingActionLabel] = useState("");
   const mountedRef = useRef(false);
@@ -31,6 +38,13 @@ export function ListItemActions({
   const isProcessingAction = Boolean(processingActionLabel);
   const isSendingEmail = processingActionLabel === "Email";
   const actionMeta = compactActionMeta(meta);
+  const toneColors = (tone: ActionTone) => {
+    if (tone === "primary") return { accent: theme.colors.primary, soft: theme.colors.primarySoft };
+    if (tone === "success") return { accent: theme.colors.success, soft: theme.colors.successSoft };
+    if (tone === "warning") return { accent: theme.colors.warning, soft: theme.colors.warningSoft };
+    if (tone === "danger") return { accent: theme.colors.danger, soft: theme.colors.dangerSoft };
+    return { accent: theme.colors.info, soft: theme.colors.infoSoft };
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -61,35 +75,37 @@ export function ListItemActions({
   if (compactActions) {
     return (
       <View style={styles.actionGroup}>
-        <Pressable style={[styles.actionsButton, isProcessingAction && styles.disabledActionButton]} onPress={() => setActionsVisible(true)} disabled={isProcessingAction}>
-          <MaterialCommunityIcons name={isProcessingAction ? "progress-clock" : "dots-vertical"} size={17} color="#ffffff" />
-          <Text style={styles.actionsButtonText}>{isProcessingAction ? (isSendingEmail ? "Enviando..." : "Procesando...") : "Acciones"}</Text>
+        <Pressable style={[styles.actionsButton, { backgroundColor: theme.colors.primary }, isProcessingAction && styles.disabledActionButton]} onPress={() => setActionsVisible(true)} disabled={isProcessingAction}>
+          <MaterialCommunityIcons name={isProcessingAction ? "progress-clock" : "dots-vertical"} size={17} color={theme.colors.onPrimary} />
+          <Text style={[styles.actionsButtonText, { color: theme.colors.onPrimary }]}>{isProcessingAction ? (isSendingEmail ? "Enviando..." : "Procesando...") : "Acciones"}</Text>
         </Pressable>
         <Modal visible={actionsVisible} transparent animationType="fade" onRequestClose={() => setActionsVisible(false)}>
-          <View style={styles.actionModalBackdrop}>
+          <View style={[styles.actionModalBackdrop, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }]}>
             <Pressable style={styles.actionModalDismiss} onPress={() => setActionsVisible(false)} />
-            <View style={styles.actionSheet}>
-              <Text style={styles.actionSheetTitle}>{title}</Text>
-              <View style={styles.actionSheetMetaBox}>
-                <Text style={styles.actionSheetMeta} numberOfLines={2}>{actionMeta.summary}</Text>
-                {actionMeta.reference ? <Text style={styles.actionSheetReference} numberOfLines={2}>{actionMeta.reference}</Text> : null}
+            <View style={[styles.actionSheet, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+              <Text style={[styles.actionSheetTitle, { color: theme.colors.text }]}>{title}</Text>
+              <View style={[styles.actionSheetMetaBox, { backgroundColor: theme.colors.surfaceMuted }]}>
+                <Text style={[styles.actionSheetMeta, { color: theme.colors.textMuted }]} numberOfLines={2}>{actionMeta.summary}</Text>
+                {actionMeta.reference ? <Text style={[styles.actionSheetReference, { color: theme.colors.textMuted }]} numberOfLines={2}>{actionMeta.reference}</Text> : null}
               </View>
-              <View style={styles.actionTileGrid}>
-                {actions.map((action) => (
-                  <Pressable key={action.label} style={[styles.actionTile, actionTileStyle(action.tone)]} onPress={() => { void runAction(action.label, action.onPress); }}>
-                    <View style={[styles.actionTileIcon, actionTileMarkStyle(action.tone)]}>
-                      <MaterialCommunityIcons name={action.icon} size={19} color={actionIconColor(action.tone)} />
-                    </View>
-                    <Text style={[styles.actionTileText, action.tone === "danger" && styles.actionSheetDangerText]} numberOfLines={2}>{action.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Pressable style={styles.actionSheetCancel} onPress={() => setActionsVisible(false)}>
-                <Text style={styles.actionSheetCancelText}>Cerrar</Text>
+              <ScrollView style={styles.actionList} contentContainerStyle={styles.actionTileGrid} showsVerticalScrollIndicator>
+                  {actions.map((action) => {
+                    const colors = toneColors(action.tone);
+                    return (
+                    <Pressable key={action.label} style={[styles.actionTile, { borderColor: colors.accent, backgroundColor: colors.soft }]} onPress={() => { void runAction(action.label, action.onPress); }}>
+                      <View style={[styles.actionTileIcon, { backgroundColor: theme.colors.surface }]}>
+                        <MaterialCommunityIcons name={action.icon} size={19} color={colors.accent} />
+                      </View>
+                      <Text style={[styles.actionTileText, { color: action.tone === "danger" ? theme.colors.danger : theme.colors.text }]} numberOfLines={2}>{action.label}</Text>
+                    </Pressable>
+                    );
+                  })}
+              </ScrollView>
+              <Pressable style={[styles.actionSheetCancel, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={() => setActionsVisible(false)}>
+                <Text style={[styles.actionSheetCancelText, { color: theme.colors.primary }]}>Cerrar</Text>
               </Pressable>
             </View>
           </View>
-          <AppToast />
         </Modal>
       </View>
     );
@@ -98,9 +114,9 @@ export function ListItemActions({
   return (
     <View style={styles.actionGroup}>
       {actions.map((action) => (
-        <Pressable key={action.label} style={[actionButtonStyle(action.tone), isProcessingAction && styles.disabledActionButton]} onPress={() => { void runAction(action.label, action.onPress); }} disabled={isProcessingAction}>
-          <MaterialCommunityIcons name={processingActionLabel === action.label || (isSendingEmail && action.label === "Enviando...") ? "progress-clock" : action.icon} size={15} color={actionIconColor(action.tone)} />
-          <Text style={actionButtonTextStyle(action.tone)}>{processingActionLabel === action.label || (isSendingEmail && action.label === "Enviando...") ? (isSendingEmail ? "Enviando..." : "Procesando...") : action.label}</Text>
+        <Pressable key={action.label} style={[styles.inlineActionButton, { backgroundColor: toneColors(action.tone).soft }, isProcessingAction && styles.disabledActionButton]} onPress={() => { void runAction(action.label, action.onPress); }} disabled={isProcessingAction}>
+          <MaterialCommunityIcons name={processingActionLabel === action.label || (isSendingEmail && action.label === "Enviando...") ? "progress-clock" : action.icon} size={15} color={toneColors(action.tone).accent} />
+          <Text style={[styles.inlineActionText, { color: toneColors(action.tone).accent }]}>{processingActionLabel === action.label || (isSendingEmail && action.label === "Enviando...") ? (isSendingEmail ? "Enviando..." : "Procesando...") : action.label}</Text>
         </Pressable>
       ))}
     </View>
@@ -118,46 +134,6 @@ function compactActionMeta(meta: string) {
     summary,
     reference: reference.length > 28 && /^[0-9A-Za-z |]+$/.test(reference) ? reference.replace(/(.{24})/g, "$1 ").trim() : reference
   };
-}
-
-function actionIconColor(tone: ActionTone) {
-  if (tone === "primary") return "#0f766e";
-  if (tone === "success") return "#166534";
-  if (tone === "warning") return "#92400e";
-  if (tone === "danger") return "#991b1b";
-  return "#1d4ed8";
-}
-
-function actionButtonStyle(tone: ActionTone) {
-  if (tone === "primary") return styles.invoiceButton;
-  if (tone === "success") return styles.emailButton;
-  if (tone === "warning") return styles.retryButton;
-  if (tone === "danger") return styles.cancelButton;
-  return styles.rideButton;
-}
-
-function actionButtonTextStyle(tone: ActionTone) {
-  if (tone === "primary") return styles.invoiceButtonText;
-  if (tone === "success") return styles.emailButtonText;
-  if (tone === "warning") return styles.retryButtonText;
-  if (tone === "danger") return styles.cancelButtonText;
-  return styles.rideButtonText;
-}
-
-function actionTileStyle(tone: ActionTone) {
-  if (tone === "primary") return styles.actionTilePrimary;
-  if (tone === "success") return styles.actionTileSuccess;
-  if (tone === "warning") return styles.actionTileWarning;
-  if (tone === "danger") return styles.actionTileDanger;
-  return styles.actionTileInfo;
-}
-
-function actionTileMarkStyle(tone: ActionTone) {
-  if (tone === "primary") return styles.actionTileMarkPrimary;
-  if (tone === "success") return styles.actionTileMarkSuccess;
-  if (tone === "warning") return styles.actionTileMarkWarning;
-  if (tone === "danger") return styles.actionTileMarkDanger;
-  return styles.actionTileMarkInfo;
 }
 
 const styles = StyleSheet.create({
@@ -187,6 +163,18 @@ const styles = StyleSheet.create({
   },
   disabledActionButton: {
     opacity: 0.72
+  },
+  inlineActionButton: {
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4
+  },
+  inlineActionText: {
+    fontWeight: "900",
+    fontSize: 12
   },
   actionModalBackdrop: {
     flex: 1,
@@ -237,6 +225,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8
+  },
+  actionList: {
+    flexShrink: 1
   },
   actionTile: {
     width: "48.6%",

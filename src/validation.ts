@@ -137,16 +137,45 @@ export function validateEmissionPointLicense(data: AppData, documentIssuer: Issu
   }
 }
 
+export type BusinessConfigurationCheck = { label: string; ok: boolean };
+
+/** Fuente única de verdad para decidir si el perfil tributario puede emitir documentos. */
+export function businessConfigurationChecks(issuer: Issuer): BusinessConfigurationCheck[] {
+  const active = (issuer.establishments || []).find((item) => item.id === issuer.activeEstablishmentId && item.active !== false)
+    || (issuer.establishments || []).find((item) => item.active !== false && item.establishment === issuer.establishment && item.emissionPoint === issuer.emissionPoint);
+  const positiveInteger = (value: unknown) => Number.isInteger(Number(value)) && Number(value) > 0;
+
+  return [
+    { label: "RUC y razón social", ok: isValidRuc(issuer.ruc) && issuer.businessName.trim().length >= 3 },
+    { label: "Dirección matriz", ok: Boolean(issuer.address.trim()) },
+    { label: "Tipo de contribuyente", ok: ["natural", "juridica"].includes(issuer.taxpayerType) },
+    { label: "Régimen tributario", ok: ["general", "rimpe_emprendedor", "rimpe_negocio_popular"].includes(String(issuer.taxRegime || "")) },
+    { label: "Obligación de llevar contabilidad", ok: ["SI", "NO"].includes(issuer.accountingRequired) },
+    { label: "Contribuyente especial", ok: ["SI", "NO"].includes(issuer.specialTaxpayer) && (issuer.specialTaxpayer !== "SI" || Boolean(issuer.specialTaxpayerResolution.trim())) },
+    { label: "Agente de retención", ok: ["SI", "NO"].includes(String(issuer.retentionAgent || "")) && (issuer.retentionAgent !== "SI" || Boolean(issuer.retentionAgentResolution?.trim())) },
+    {
+      label: "Establecimiento y punto de emisión activos",
+      ok: Boolean(active && /^\d{3}$/.test(active.establishment) && /^\d{3}$/.test(active.emissionPoint))
+    },
+    { label: "Nombre y dirección del establecimiento", ok: Boolean(active?.name.trim() && active.address?.trim()) },
+    {
+      label: "Numeración inicial de factura, nota de crédito y guía",
+      ok: Boolean(active && positiveInteger(active.sequential) && positiveInteger(active.creditNoteSequential) && positiveInteger(active.remissionSequential))
+    }
+  ];
+}
+
+export function isIssuerBusinessConfigured(issuer: Issuer): boolean {
+  return businessConfigurationChecks(issuer).every((check) => check.ok);
+}
+
 export function buildProductionChecklist(issuer: Issuer, backendUrl: string, connectionResult: string) {
-  const sequentialOk = Number(issuer.sequential) > 0 && Number(issuer.remissionSequential || 1) > 0 && Number(issuer.creditNoteSequential || 1) > 0;
   const backendProduction = connectionResult.includes("Ambiente backend: production");
   const backendConnected = connectionResult.includes("Backend responde: SI");
   const certOk = connectionResult.includes("Certificado existe: SI") && connectionResult.includes("Clave certificado configurada: SI");
   const sriSendOk = connectionResult.includes("Envio real al SRI: ACTIVO");
   const baseChecks = [
-    { label: "RUC emisor valido", ok: isValidRuc(issuer.ruc) },
-    { label: "Establecimiento y punto de emision", ok: /^\d{3}$/.test(issuer.establishment) && /^\d{3}$/.test(issuer.emissionPoint) },
-    { label: "Secuenciales factura/guia/nota credito", ok: sequentialOk },
+    ...businessConfigurationChecks(issuer),
     { label: "URL de servidor configurada", ok: Boolean(backendUrl && isValidUrl(backendUrl)) }
   ];
   const connectionChecks = [
@@ -248,6 +277,7 @@ export function sanitizeAppData(data: AppData): AppData {
   const deletedProducts = new Set(deletedIds.products);
   const deletedUsers = new Set(deletedIds.users);
   const deletedSales = new Set(deletedIds.sales);
+  const deletedGuides = new Set(deletedIds.guides);
   const deletedInventoryMovements = new Set(deletedIds.inventoryMovements);
   const seenClients = new Set<string>();
   const clients = data.clients.map((client) => {
@@ -313,7 +343,7 @@ export function sanitizeAppData(data: AppData): AppData {
     inventoryMovements: (data.inventoryMovements || []).filter((movement) => !deletedInventoryMovements.has(movement.id)),
     auditLogs: data.auditLogs || [],
     receivedRetentions: data.receivedRetentions || [],
-    guides: (data.guides || []).map((guide) => ({ ...guide, status: normalizeInvoiceStatus(guide.status, guide.sriMessage) })),
+    guides: (data.guides || []).filter((guide) => !deletedGuides.has(guide.id)).map((guide) => ({ ...guide, status: normalizeInvoiceStatus(guide.status, guide.sriMessage) })),
     cashClosings: data.cashClosings || [],
     pendingSync: data.pendingSync || [],
     deletedIds,
@@ -359,6 +389,7 @@ function normalizeDeletedIds(deletedIds: AppData["deletedIds"], auditLogs: AppDa
     products: new Set<string>(deletedIds?.products || []),
     users: new Set<string>(deletedIds?.users || []),
     sales: new Set<string>(deletedIds?.sales || []),
+    guides: new Set<string>(deletedIds?.guides || []),
     inventoryMovements: new Set<string>(deletedIds?.inventoryMovements || [])
   };
   (auditLogs || []).forEach((log) => {
@@ -372,6 +403,7 @@ function normalizeDeletedIds(deletedIds: AppData["deletedIds"], auditLogs: AppDa
     products: Array.from(result.products),
     users: Array.from(result.users),
     sales: Array.from(result.sales),
+    guides: Array.from(result.guides),
     inventoryMovements: Array.from(result.inventoryMovements)
   };
 }
@@ -477,8 +509,15 @@ function sanitizeLicense(license?: AppLicense): AppLicense {
     maxEmissionPoints: 3,
     features: {
       sales: true,
+      documents: true,
+      clients: true,
+      products: true,
       sri: true,
       inventory: true,
+      cash: true,
+      credits: true,
+      guides: true,
+      users: true,
       reports: true,
       multiDevice: true,
       multiEmissionPoint: true
@@ -509,11 +548,18 @@ function sanitizeLicense(license?: AppLicense): AppLicense {
     maxEmissionPoints: multiEmissionPoint ? positiveInteger(source.maxEmissionPoints || 0, openAllModules ? 3 : 999) : 1,
     features: {
       ...features,
-      sales: openAllModules || features.sales !== false,
-      sri: openAllModules || features.sri !== false,
-      inventory: openAllModules || features.inventory !== false,
-      reports: openAllModules || features.reports !== false,
-      multiDevice: openAllModules || features.multiDevice !== false,
+      sales: features.sales !== false,
+      documents: features.documents !== false,
+      clients: features.clients !== false,
+      products: features.products !== false,
+      sri: features.sri !== false,
+      inventory: features.inventory !== false,
+      cash: features.cash !== false,
+      credits: features.credits !== false,
+      guides: features.guides !== false,
+      users: features.users !== false,
+      reports: features.reports !== false,
+      multiDevice: features.multiDevice !== false,
       multiEmissionPoint
     },
     notes: String(source.notes || "")

@@ -1,19 +1,21 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
 
 type PlanLimitCardProps = {
   licenseLabel: string;
 };
 
 export function PlanLimitCard({ licenseLabel }: PlanLimitCardProps) {
+  const { theme } = useAppTheme();
   return (
-    <View style={styles.planLockCard}>
+    <View style={[styles.planLockCard, { borderColor: theme.colors.info, backgroundColor: theme.colors.infoSoft }]}>
       <View style={styles.planLockHeader}>
-        <Text style={styles.planLockKicker}>Plan actual</Text>
-        <Text style={styles.planLockBadge}>{licenseLabel}</Text>
+        <Text style={[styles.planLockKicker, { color: theme.colors.info }]}>Plan actual</Text>
+        <Text style={[styles.planLockBadge, { color: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]}>{licenseLabel}</Text>
       </View>
-      <Text style={styles.planLockTitle}>1 punto de emision incluido</Text>
-      <Text style={styles.planLockText}>Para manejar sucursales o varios puntos de emision, active Plan Pro desde el panel SaaS.</Text>
+      <Text style={[styles.planLockTitle, { color: theme.colors.text }]}>1 punto de emision incluido</Text>
+      <Text style={[styles.planLockText, { color: theme.colors.textMuted }]}>Para manejar sucursales o varios puntos de emision, active Plan Pro desde el panel SaaS.</Text>
     </View>
   );
 }

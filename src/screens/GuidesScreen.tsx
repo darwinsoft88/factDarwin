@@ -189,6 +189,8 @@ export function GuidesScreen({
       }
       guide = {
         id: generateId(),
+        environment: documentIssuer.environment,
+        sriEnvironment: documentIssuer.environment,
         establishment: documentIssuer.establishment,
         emissionPoint: documentIssuer.emissionPoint,
         establishmentName: documentEstablishment.name,
@@ -394,6 +396,7 @@ export function GuidesScreen({
         retryingGuideId={retryingGuideId}
       />
       <EntityEditModal
+        adaptiveViewport
         visible={guideModalVisible}
         title="Nueva guia de remision"
         subtitle={sourceSale && client ? `${client.name} | ${sourceSale.items.length} producto(s)` : "Seleccione documento origen y transportista"}

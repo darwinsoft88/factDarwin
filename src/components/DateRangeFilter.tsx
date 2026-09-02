@@ -2,6 +2,7 @@ import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { CalendarDateInput } from "./CalendarDateInput";
+import { useAppTheme } from "../theme/AppTheme";
 
 type DateRangeFilterProps = {
   title: string;
@@ -24,9 +25,12 @@ export function DateRangeFilter({
   onMonth,
   onClear
 }: DateRangeFilterProps) {
+  const { theme } = useAppTheme();
+  const actionStyle = [styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }];
+  const actionTextStyle = [styles.smallButtonText, { color: theme.colors.primaryStrong }];
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>{title}</Text>
+      <Text style={[styles.title, { color: theme.colors.text }]}>{title}</Text>
       <View style={styles.row}>
         <View style={styles.flex}>
           <CalendarDateInput label="Desde" value={startValue} onChange={onStartChange} allowClear />
@@ -36,17 +40,17 @@ export function DateRangeFilter({
         </View>
       </View>
       <View style={styles.actionGroup}>
-        <Pressable style={styles.smallButton} onPress={onToday}>
-          <MaterialCommunityIcons name="calendar-today" size={14} color="#0f5f59" />
-          <Text style={styles.smallButtonText}>Hoy</Text>
+        <Pressable style={actionStyle} onPress={onToday}>
+          <MaterialCommunityIcons name="calendar-today" size={14} color={theme.colors.primaryStrong} />
+          <Text style={actionTextStyle}>Hoy</Text>
         </Pressable>
-        <Pressable style={styles.smallButton} onPress={onMonth}>
-          <MaterialCommunityIcons name="calendar-month-outline" size={14} color="#0f5f59" />
-          <Text style={styles.smallButtonText}>Este mes</Text>
+        <Pressable style={actionStyle} onPress={onMonth}>
+          <MaterialCommunityIcons name="calendar-month-outline" size={14} color={theme.colors.primaryStrong} />
+          <Text style={actionTextStyle}>Este mes</Text>
         </Pressable>
-        <Pressable style={styles.smallButton} onPress={onClear}>
-          <MaterialCommunityIcons name="filter-remove-outline" size={14} color="#0f5f59" />
-          <Text style={styles.smallButtonText}>Limpiar</Text>
+        <Pressable style={actionStyle} onPress={onClear}>
+          <MaterialCommunityIcons name="filter-remove-outline" size={14} color={theme.colors.primaryStrong} />
+          <Text style={actionTextStyle}>Limpiar</Text>
         </Pressable>
       </View>
     </View>

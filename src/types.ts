@@ -6,6 +6,7 @@ export type LicenseStatus = "trial" | "active" | "expired" | "suspended";
 export type LicensePlan = "trial" | "basico_mensual" | "basico_anual" | "pro_mensual" | "pro_anual" | "premium_mensual" | "premium_anual";
 export type TaxRegime = "general" | "rimpe_emprendedor" | "rimpe_negocio_popular";
 export type CatalogItemType = "product" | "service";
+export type SalePriceTier = "pvp1" | "pvp2" | "pvp3";
 
 export type User = {
   id: string;
@@ -27,6 +28,7 @@ export type Client = {
   email: string;
   phone: string;
   address: string;
+  defaultSalePriceTier?: SalePriceTier;
   updatedAt?: string;
 };
 
@@ -36,10 +38,16 @@ export type Product = {
   code: string;
   name: string;
   price: number;
+  price2?: number;
+  price3?: number;
   cost?: number;
   ivaRate: number;
   stock: number;
   minStock?: number;
+  imageKey?: string;
+  imageVersion?: string;
+  imageUpdatedAt?: string;
+  imageMimeType?: "image/webp";
   updatedAt?: string;
 };
 
@@ -81,6 +89,7 @@ export type AuditLog = {
 
 export type CashClosing = {
   id: string;
+  environment?: Environment;
   establishment?: string;
   emissionPoint?: string;
   establishmentName?: string;
@@ -193,6 +202,7 @@ export type SaleItem = {
   name: string;
   quantity: number;
   unitPrice: number;
+  priceTier?: SalePriceTier;
   cost?: number;
   discount: number;
   ivaRate: number;
@@ -219,6 +229,8 @@ export type SalePaymentSplit = {
 
 export type Sale = {
   id: string;
+  /** Ambiente SRI operacional en el que se creo el documento. */
+  environment?: Environment;
   documentType?: DocumentType;
   establishment?: string;
   emissionPoint?: string;
@@ -294,6 +306,8 @@ export type ReceivedRetention = {
 
 export type RemissionGuide = {
   id: string;
+  /** Ambiente SRI operacional en el que se creo la guia. */
+  environment?: Environment;
   establishment?: string;
   emissionPoint?: string;
   establishmentName?: string;
@@ -348,11 +362,18 @@ export type AppLicense = {
   maxUsers: number;
   maxDevices: number;
   maxEmissionPoints?: number;
-  features: {
-    sales: boolean;
-    sri: boolean;
-    inventory: boolean;
-    reports: boolean;
+    features: {
+      sales: boolean;
+      documents?: boolean;
+      clients?: boolean;
+      products?: boolean;
+      sri: boolean;
+      inventory: boolean;
+      cash?: boolean;
+      credits?: boolean;
+      guides?: boolean;
+      users?: boolean;
+      reports: boolean;
     multiDevice: boolean;
     multiEmissionPoint?: boolean;
   };
@@ -382,6 +403,7 @@ export type AppData = {
     products?: string[];
     users?: string[];
     sales?: string[];
+    guides?: string[];
     inventoryMovements?: string[];
   };
   license?: AppLicense;

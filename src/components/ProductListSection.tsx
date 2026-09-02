@@ -8,13 +8,18 @@ import { grossToNetUnitPrice, money } from "../sri";
 import { AppData, Product } from "../types";
 import { productCost, productMinStock } from "../utils/accounting";
 import { catalogItemBadge, isServiceItem } from "../utils/catalogItems";
+import { useAppTheme } from "../theme/AppTheme";
+import { availableProductPrices } from "../utils/productPrices";
+import { ProductThumbnail } from "./ProductThumbnail";
 
 export type ProductListItemProps = {
   title: string;
   meta: string;
+  accentTone?: "primary" | "success" | "warning" | "danger" | "info";
   editLabel?: string;
   onEdit?: () => void;
   onDelete?: () => void;
+  leading?: React.ReactNode;
 };
 
 type ProductListSectionProps = {
@@ -31,6 +36,7 @@ type ProductListSectionProps = {
   setProductPage: (page: number) => void;
   setProductSearch: (value: string) => void;
   visibleProducts: Product[];
+  backendToken: string;
 };
 
 export function ProductListSection({
@@ -46,16 +52,18 @@ export function ProductListSection({
   productSearch,
   setProductPage,
   setProductSearch,
-  visibleProducts
+  visibleProducts,
+  backendToken
 }: ProductListSectionProps) {
+  const { theme } = useAppTheme();
   return (
     <Section title="">
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Productos y servicios</Text>
+        <Text style={[styles.title, { color: theme.colors.text }]}>Productos y servicios</Text>
         {canEdit && onCreate ? (
-          <Pressable style={styles.addButton} onPress={onCreate}>
-            <MaterialCommunityIcons name="package-variant-closed-plus" size={15} color="#ffffff" />
-            <Text style={styles.addButtonText}>Agregar</Text>
+          <Pressable style={[styles.addButton, { backgroundColor: theme.colors.primary }]} onPress={onCreate}>
+            <MaterialCommunityIcons name="package-variant-closed-plus" size={15} color={theme.colors.onPrimary} />
+            <Text style={[styles.addButtonText, { color: theme.colors.onPrimary }]}>Agregar</Text>
           </Pressable>
         ) : null}
       </View>
@@ -64,14 +72,19 @@ export function ProductListSection({
       {data.products.length > 0 && filteredProducts.length === 0 ? <Empty text="No hay items con esa busqueda." /> : null}
       {visibleProducts.map((product) => {
         const isService = isServiceItem(product);
+        const minimumStock = productMinStock(product);
+        const accentTone = isService ? "info" : product.stock <= 0 ? "danger" : product.stock <= minimumStock ? "warning" : "success";
+        const priceSummary = availableProductPrices(product).map((item) => `${item.label} $${money(item.price)}`).join(" | ");
         const meta = isService
-          ? `${catalogItemBadge(product)} | Publico $${money(product.price)} | IVA ${money(product.ivaRate * 100)}% | Sin inventario`
-          : `${catalogItemBadge(product)} | Publico $${money(product.price)} | Costo $${money(productCost(product))} | Util. $${money(grossToNetUnitPrice(product.price, product.ivaRate) - productCost(product))} | stock ${product.stock}/${productMinStock(product)}`;
+          ? `${catalogItemBadge(product)} | ${priceSummary} | IVA ${money(product.ivaRate * 100)}% | Sin inventario`
+          : `${catalogItemBadge(product)} | ${priceSummary} | Costo $${money(productCost(product))} | Util. PVP1 $${money(grossToNetUnitPrice(product.price, product.ivaRate) - productCost(product))} | stock ${product.stock}/${minimumStock}`;
         return (
           <ListItemComponent
             key={product.id}
+            leading={<ProductThumbnail product={product} backendUrl={data.backendUrl} token={backendToken} size={46} />}
             title={`${product.code} - ${product.name}`}
             meta={meta}
+            accentTone={accentTone}
             editLabel={canEdit ? "Editar" : undefined}
             onEdit={() => onEdit(product)}
             onDelete={canDelete ? () => onDelete(product) : undefined}

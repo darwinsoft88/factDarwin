@@ -37,6 +37,27 @@ test("permite el mismo origen que sirve el panel maestro", () => {
   ), true);
 });
 
+test("permite Expo web en cualquier puerto cuando la API solicitada tambien es local", () => {
+  assert.equal(isCorsOriginAllowed(
+    "http://localhost:8082",
+    request("localhost:4000", "http"),
+    production
+  ), true);
+  assert.equal(isCorsOriginAllowed(
+    "http://127.0.0.1:19007",
+    request("127.0.0.1:4000", "http"),
+    production
+  ), true);
+});
+
+test("no permite que un origen localhost acceda a la API publica", () => {
+  assert.equal(isCorsOriginAllowed(
+    "http://localhost:8082",
+    request("api.factudarwin.com", "https"),
+    production
+  ), false);
+});
+
 test("respeta el protocolo reenviado por el proxy", () => {
   const req = request("api.factudarwin.com", "http", "https");
   assert.equal(requestOrigin(req), "https://api.factudarwin.com");

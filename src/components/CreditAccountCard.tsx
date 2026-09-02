@@ -1,6 +1,8 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
+import { ThemedAccentCard } from "./ThemedAccentCard";
 
 type CreditAccountCardProps = {
   balanceText: string;
@@ -25,38 +27,47 @@ export function CreditAccountCard({
   onDetail,
   onPay
 }: CreditAccountCardProps) {
+  const { theme } = useAppTheme();
+  const stateColor = paid ? theme.colors.success : overdue ? theme.colors.danger : theme.colors.warning;
+  const stateSoft = paid ? theme.colors.successSoft : overdue ? theme.colors.dangerSoft : theme.colors.warningSoft;
   return (
-    <View style={[styles.creditCard, overdue && styles.creditCardOverdue, paid && styles.creditCardPaid]}>
+    <ThemedAccentCard tone={paid ? "success" : overdue ? "danger" : "warning"} style={styles.creditCard}>
       <View style={styles.creditCardHeader}>
-        <View style={[styles.avatar, overdue && styles.avatarDanger, paid && styles.avatarPaid]}>
-          <Text style={styles.avatarText}>{initials(clientName || "CL")}</Text>
+        <View style={[styles.avatar, { backgroundColor: paid ? theme.colors.success : overdue ? theme.colors.danger : theme.colors.primary }]}>
+          <Text style={[styles.avatarText, { color: theme.colors.onPrimary }]}>{initials(clientName || "CL")}</Text>
         </View>
         <View style={styles.creditCardTitleBox}>
-          <Text style={styles.creditClientName} numberOfLines={1}>{clientName || "Cliente"}</Text>
-          <Text style={styles.creditDocument} numberOfLines={1}>{documentText}{scopeText ? ` | ${scopeText}` : ""}</Text>
+          <Text style={[styles.creditClientName, { color: theme.colors.text }]} numberOfLines={1}>{clientName || "Cliente"}</Text>
+          <Text style={[styles.creditDocument, { color: theme.colors.textMuted }]} numberOfLines={1}>{documentText}</Text>
+          {scopeText ? (
+            <View style={styles.scopeRow}>
+              <MaterialCommunityIcons name="storefront-outline" size={13} color={theme.colors.primary} />
+              <Text style={[styles.creditScope, { color: theme.colors.primary }]} numberOfLines={1}>{scopeText}</Text>
+            </View>
+          ) : null}
         </View>
-        <Text style={[styles.creditStatus, overdue && styles.creditStatusDanger, paid && styles.creditStatusPaid]}>{paid ? "Pagado" : overdue ? "Vencido" : "Pendiente"}</Text>
+        <Text style={[styles.creditStatus, { backgroundColor: stateSoft, color: stateColor }]}>{paid ? "Pagado" : overdue ? "Vencido" : "Pendiente"}</Text>
       </View>
       <View style={styles.creditCardMeta}>
-        <Text style={[styles.creditDue, overdue && styles.creditDueDanger]}>{dueText}</Text>
+        <Text style={[styles.creditDue, { color: overdue ? theme.colors.danger : theme.colors.primary }]}>{dueText}</Text>
         <View style={styles.balanceBox}>
-          <Text style={styles.balanceLabel}>Saldo</Text>
-          <Text style={[styles.balanceValue, overdue && styles.balanceDanger, paid && styles.balancePaid]}>{balanceText}</Text>
+          <Text style={[styles.balanceLabel, { color: theme.colors.textMuted }]}>Saldo</Text>
+          <Text style={[styles.balanceValue, { color: paid ? theme.colors.success : overdue ? theme.colors.danger : theme.colors.primary }]}>{balanceText}</Text>
         </View>
       </View>
       <View style={styles.actionsRow}>
-        <Pressable style={styles.secondaryAction} onPress={onDetail}>
-          <MaterialCommunityIcons name="eye-outline" size={16} color="#0f766e" />
-          <Text style={styles.secondaryActionText}>Detalle</Text>
+        <Pressable style={[styles.secondaryAction, { borderColor: theme.colors.primary, backgroundColor: theme.colors.surface }]} onPress={onDetail}>
+          <MaterialCommunityIcons name="eye-outline" size={16} color={theme.colors.primary} />
+          <Text style={[styles.secondaryActionText, { color: theme.colors.primary }]}>Detalle</Text>
         </Pressable>
         {onPay && !paid ? (
-          <Pressable style={styles.primaryAction} onPress={onPay}>
-            <MaterialCommunityIcons name="cash-plus" size={16} color="#ffffff" />
-            <Text style={styles.primaryActionText}>Abonar</Text>
+          <Pressable style={[styles.primaryAction, { backgroundColor: theme.colors.primary }]} onPress={onPay}>
+            <MaterialCommunityIcons name="cash-plus" size={16} color={theme.colors.onPrimary} />
+            <Text style={[styles.primaryActionText, { color: theme.colors.onPrimary }]}>Abonar</Text>
           </Pressable>
         ) : null}
       </View>
-    </View>
+    </ThemedAccentCard>
   );
 }
 
@@ -66,11 +77,7 @@ function initials(name: string) {
 
 const styles = StyleSheet.create({
   creditCard: {
-    borderWidth: 1,
-    borderColor: "#dfe6ef",
-    borderRadius: 8,
     padding: 11,
-    backgroundColor: "#ffffff",
     gap: 10
   },
   creditCardOverdue: {
@@ -119,6 +126,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     marginTop: 2
+  },
+  scopeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4
+  },
+  creditScope: {
+    flex: 1,
+    fontSize: 10,
+    fontWeight: "800"
   },
   creditStatus: {
     borderRadius: 999,

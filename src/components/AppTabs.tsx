@@ -2,6 +2,7 @@ import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, ScrollView, StyleSheet, Text } from "react-native";
 import { AppTab, tabLabel } from "../utils/appAccess";
+import { useAppTheme } from "../theme/AppTheme";
 
 type MaterialIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -27,15 +28,16 @@ const tabIcons: Record<AppTab, MaterialIconName> = {
 };
 
 export function AppTabs({ availableTabs, activeTab, onChange }: AppTabsProps) {
+  const { theme } = useAppTheme();
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabs} contentContainerStyle={styles.tabsContent} keyboardShouldPersistTaps="handled">
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.tabs, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]} contentContainerStyle={styles.tabsContent} keyboardShouldPersistTaps="handled">
       {availableTabs.map((item) => {
         const selected = activeTab === item;
-        const color = selected ? "#0f766e" : "#64748b";
+        const color = selected ? theme.colors.primary : theme.colors.textMuted;
         return (
-          <Pressable key={item} style={[styles.tab, selected && styles.tabActive]} onPress={() => onChange(item)}>
+          <Pressable key={item} style={[styles.tab, selected && { backgroundColor: theme.colors.primarySoft, borderBottomColor: theme.colors.primary }]} onPress={() => onChange(item)}>
             <MaterialCommunityIcons name={tabIcons[item]} size={16} color={color} />
-            <Text style={[styles.tabText, selected && styles.tabTextActive]}>{tabLabel(item)}</Text>
+            <Text style={[styles.tabText, { color: theme.colors.textMuted }, selected && { color: theme.colors.primary }]}>{tabLabel(item)}</Text>
           </Pressable>
         );
       })}

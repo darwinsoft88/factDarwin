@@ -3,6 +3,7 @@ import { StyleSheet, Text } from "react-native";
 import { TechnicalLog } from "../services/backend";
 import { PrimaryButton } from "./common";
 import { TechnicalLogsList } from "./TechnicalLogsList";
+import { useAppTheme } from "../theme/AppTheme";
 
 type TechnicalLogsSectionProps = {
   logs: TechnicalLog[];
@@ -11,9 +12,10 @@ type TechnicalLogsSectionProps = {
 };
 
 export function TechnicalLogsSection({ logs, loading, onLoad }: TechnicalLogsSectionProps) {
+  const { theme } = useAppTheme();
   return (
     <>
-      <Text style={styles.paragraph}>Para soporte: muestra errores, reintentos, login, correo, SRI y respuestas lentas del servidor. No guarda claves ni documentos completos.</Text>
+      <Text style={[styles.paragraph, { color: theme.colors.textMuted }]}>Para soporte: muestra errores, reintentos, login, correo, SRI y respuestas lentas del servidor. No guarda claves ni documentos completos.</Text>
       <PrimaryButton label={loading ? "Cargando..." : "Cargar logs tecnicos"} onPress={loading ? () => undefined : onLoad} />
       <TechnicalLogsList logs={logs} />
     </>

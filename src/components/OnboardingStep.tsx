@@ -1,13 +1,15 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
 
 export function OnboardingStep({ number, title, text }: { number: string; title: string; text: string }) {
+  const { theme } = useAppTheme();
   return (
-    <View style={styles.onboardingStep}>
-      <Text style={styles.onboardingStepNumber}>{number}</Text>
+    <View style={[styles.onboardingStep, { backgroundColor: theme.colors.surfaceMuted }]}>
+      <Text style={[styles.onboardingStepNumber, { color: theme.colors.onPrimary, backgroundColor: theme.colors.primary }]}>{number}</Text>
       <View style={styles.flex}>
-        <Text style={styles.onboardingStepTitle}>{title}</Text>
-        <Text style={styles.onboardingStepText}>{text}</Text>
+        <Text style={[styles.onboardingStepTitle, { color: theme.colors.text }]}>{title}</Text>
+        <Text style={[styles.onboardingStepText, { color: theme.colors.textMuted }]}>{text}</Text>
       </View>
     </View>
   );

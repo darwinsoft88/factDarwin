@@ -37,7 +37,8 @@ export function useHistoricalDocuments({
   const scope = activeScopeId(data);
   const normalizedSearch = filters.search.trim();
   const remoteEligible = (filters.status === "TODAS" || filters.status === "AUTORIZADA") && (!normalizedSearch || normalizedSearch.length >= 3);
-  const contextKey = JSON.stringify([companyId, scope, filters.startDate, filters.endDate, normalizedSearch, filters.status]);
+  const environment = data.issuer.environment;
+  const contextKey = JSON.stringify([companyId, environment, scope, filters.startDate, filters.endDate, normalizedSearch, filters.status]);
   const [state, setState] = useState<HistoricalDocumentsState>(() => initialHistoricalDocumentsState(contextKey));
   const [loadingOlder, setLoadingOlder] = useState(false);
   const stateRef = useRef(state);
@@ -81,6 +82,7 @@ export function useHistoricalDocuments({
       const deviceId = await getIncrementalDeviceId();
       const page = await getHistoricalDocumentsPage(data.backendUrl, backendToken, Platform.OS, deviceId, {
         documentScope: scope,
+        environment,
         cursor: current.requested ? current.nextCursor : null,
         dateFrom: filters.startDate || undefined,
         dateTo: filters.endDate || undefined,
@@ -108,7 +110,7 @@ export function useHistoricalDocuments({
         setLoadingOlder(false);
       }
     }
-  }, [backendToken, companyId, contextKey, data.backendUrl, enabled, filters.endDate, filters.startDate, normalizedSearch, remoteEligible, scope]);
+  }, [backendToken, companyId, contextKey, data.backendUrl, enabled, environment, filters.endDate, filters.startDate, normalizedSearch, remoteEligible, scope]);
 
   return {
     ...combined,

@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { Product } from "../types";
 import { productMinStock } from "../utils/accounting";
 import { formatQuantity } from "../utils/sales";
+import { useAppTheme } from "../theme/AppTheme";
 
 type SaleProductControlsProps = {
   product?: Product;
@@ -15,11 +16,12 @@ export function SaleProductControls({
   lowStock,
   projectedStock
 }: SaleProductControlsProps) {
+  const { theme } = useAppTheme();
   return (
     <>
       {lowStock ? (
-        <View style={styles.stockWarningBox}>
-          <Text style={styles.stockWarningText}>Stock bajo: quedaria {formatQuantity(projectedStock)}. Minimo configurado {product ? productMinStock(product) : 0}.</Text>
+        <View style={[styles.stockWarningBox, { borderColor: theme.colors.warning, backgroundColor: theme.colors.warningSoft }]}>
+          <Text style={[styles.stockWarningText, { color: theme.colors.warning }]}>Stock bajo: quedaria {formatQuantity(projectedStock)}. Minimo configurado {product ? productMinStock(product) : 0}.</Text>
         </View>
       ) : null}
     </>

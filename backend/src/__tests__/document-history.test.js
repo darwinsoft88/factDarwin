@@ -26,6 +26,7 @@ function config(overrides = {}) {
 function row(id, createdAt, sequenceNumber) {
   return {
     documentId: id,
+    environment: "1",
     establishment: "002",
     emissionPoint: "010",
     sequence: String(sequenceNumber).padStart(9, "0"),

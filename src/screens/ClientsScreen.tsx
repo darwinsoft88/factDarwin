@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { ClientEditModal } from "../components/ClientEditModal";
+import type { ClientFormValues } from "../components/ClientForm";
 import { ClientListItemProps, ClientListSection } from "../components/ClientListSection";
 import { LIST_BATCH_SIZE } from "../constants/app";
 import { useClientIdentityLookup } from "../hooks/useClientIdentityLookup";
+import type { PersistMutation } from "../hooks/useSyncAndBackup";
 import { AppData, Client, User } from "../types";
 import { canDeleteCatalog, canEditCatalog } from "../utils/appAccess";
 import { appendAudit } from "../utils/audit";
@@ -23,18 +25,18 @@ export function ClientsScreen({
   user,
   backendToken,
   getBackendToken,
-  persist,
+  persistMutation,
   ListItemComponent
 }: {
   data: AppData;
   user: User;
   backendToken: string;
   getBackendToken: (backendUrl: string) => Promise<string>;
-  persist: (data: AppData) => Promise<void>;
+  persistMutation: PersistMutation;
   ListItemComponent: React.ComponentType<ClientListItemProps>;
 }) {
-  const emptyForm = { name: "", identification: "", email: "", phone: "", address: "", identificationType: "05" as Client["identificationType"] };
-  const [form, setForm] = useState(emptyForm);
+  const emptyForm: ClientFormValues = { name: "", identification: "", email: "", phone: "", address: "", identificationType: "05", defaultSalePriceTier: "pvp1" };
+  const [form, setForm] = useState<ClientFormValues>(emptyForm);
   const [editingId, setEditingId] = useState("");
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [savingClient, setSavingClient] = useState(false);
@@ -109,14 +111,14 @@ export function ClientsScreen({
         }
         const updatedClient = { ...currentClient, ...clientData, id: editingId } as Client;
         const nextData = appendAudit({ ...data, clients: data.clients.map((client) => (client.id === editingId ? updatedClient : client)) }, user, "CLIENT_UPDATED", "client", editingId, `Cliente actualizado: ${clientData.name}`);
-        await persist(nextData);
-        const synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [updatedClient], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", nextData, persist);
+        await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
+        const synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [updatedClient], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", { persistMutation });
         if (!synced) return;
       } else {
         const client = { id: generateId(), ...clientData };
         const nextData = appendAudit({ ...data, clients: [client, ...data.clients] }, user, "CLIENT_CREATED", "client", client.id, `Cliente creado: ${client.name}`);
-        await persist(nextData);
-        const synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [client], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", nextData, persist);
+        await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
+        const synced = await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, clients: [client], auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente pendiente de sincronizar", { persistMutation });
         if (!synced) return;
       }
 
@@ -148,7 +150,8 @@ export function ClientsScreen({
       email: client.email,
       phone: client.phone || "",
       address: client.address,
-      identificationType: client.identificationType
+      identificationType: client.identificationType,
+      defaultSalePriceTier: client.defaultSalePriceTier || "pvp1"
     });
     setEditModalVisible(true);
   };
@@ -185,8 +188,8 @@ export function ClientsScreen({
     confirmAction("Eliminar cliente", `Seguro que desea eliminar a ${client.name}? Esta accion quedara registrada en auditoria.`, () => {
       void (async () => {
         const nextData = appendAudit({ ...data, clients: data.clients.filter((item) => item.id !== client.id), deletedIds: { ...(data.deletedIds || {}), clients: Array.from(new Set([...(data.deletedIds?.clients || []), client.id])) } }, user, "CLIENT_DELETED", "client", client.id, `Cliente eliminado: ${client.name}`);
-        await persist(nextData);
-        await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, deletions: { clients: [client.id] }, auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente eliminado pendiente de sincronizar", nextData, persist);
+        await persistMutation(() => nextData, { skipAutoBackup: true, syncState: "pending" });
+        await syncPatchToBackend(data.backendUrl, backendToken, { baseData: data, deletions: { clients: [client.id] }, auditLogs: nextData.auditLogs.slice(0, 1) }, "Cliente eliminado pendiente de sincronizar", { persistMutation });
         showSuccess("Cliente eliminado", "El cliente se elimino con exito.");
       })();
     });

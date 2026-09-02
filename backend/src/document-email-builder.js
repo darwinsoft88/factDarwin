@@ -30,26 +30,7 @@ async function buildDocumentEmail(operation, options = {}) {
     const xmlAttachment = buildXmlAttachment(documentType, document, limits);
     emit("email_xml_validated", attachmentLog(xmlAttachment, startedAt));
 
-    let pdf;
-    try {
-      pdf = await buildRidePdf({
-        documentType,
-        document,
-        client,
-        issuer: tenantLogo ? { ...issuer, logoPath: tenantLogo.filePath } : issuer,
-        sourceDocument: snapshot.sourceDocument || null
-      });
-    } catch (error) {
-      if (error?.code === "RIDE_DATA_INCOMPLETE") throw error;
-      throw new EmailBuildError("RIDE_GENERATION_FAILED", "No se pudo generar el RIDE PDF.", true);
-    }
-    assertAttachmentSize(pdf.length, limits.maxPdfBytes, "RIDE PDF");
-    assertPdf(pdf);
-    const pdfAttachment = attachment(
-      rideFilename(documentType, document),
-      "application/pdf",
-      pdf
-    );
+    const pdfAttachment = await buildDocumentRide(operation, { limits });
     emit("email_ride_generated", attachmentLog(pdfAttachment, startedAt));
 
     const totalAttachmentSize = xmlAttachment.size + pdfAttachment.size;
@@ -86,6 +67,31 @@ async function buildDocumentEmail(operation, options = {}) {
     });
     throw buildError;
   }
+}
+
+async function buildDocumentRide(operation, options = {}) {
+  const limits = options.limits || config.emailBuildLimits;
+  const documentType = normalizeDocumentType(operation.documentType);
+  const snapshot = operation.payload?.authorizationSnapshot || {};
+  const document = snapshot.document || {};
+  const issuer = snapshot.issuer || {};
+  const tenantLogo = resolveTenantLogo(operation.companyId);
+  let pdf;
+  try {
+    pdf = await buildRidePdf({
+      documentType,
+      document,
+      client: snapshot.client || {},
+      issuer: tenantLogo ? { ...issuer, logoPath: tenantLogo.filePath } : issuer,
+      sourceDocument: snapshot.sourceDocument || null
+    });
+  } catch (error) {
+    if (error?.code === "RIDE_DATA_INCOMPLETE") throw error;
+    throw new EmailBuildError("RIDE_GENERATION_FAILED", "No se pudo generar el RIDE PDF.", true);
+  }
+  assertAttachmentSize(pdf.length, limits.maxPdfBytes, "RIDE PDF");
+  assertPdf(pdf);
+  return attachment(rideFilename(documentType, document), "application/pdf", pdf);
 }
 
 function resolveTenantLogo(companyId) {
@@ -315,6 +321,7 @@ function sha256(value) {
 module.exports = {
   EmailBuildError,
   buildDocumentEmail,
+  buildDocumentRide,
   buildMessage,
   buildXmlAttachment,
   maskEmail,

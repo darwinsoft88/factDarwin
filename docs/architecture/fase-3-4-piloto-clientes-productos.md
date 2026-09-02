@@ -24,7 +24,7 @@ INCREMENTAL_SYNC_MIN_APP_VERSION=1.0.11
 INCREMENTAL_SYNC_CURSOR_SECRET=
 ```
 
-Shadow usa `INCREMENTAL_SYNC_SHADOW_MODE=shadow`; conserva compatibilidad usando `INCREMENTAL_SYNC_MODE` como fallback. Cliente Android: `EXPO_PUBLIC_INCREMENTAL_SYNC_PILOT=1`. PWA nunca habilita el piloto.
+Shadow usa `INCREMENTAL_SYNC_SHADOW_MODE=shadow`; conserva compatibilidad usando `INCREMENTAL_SYNC_MODE` como fallback. Cliente Android: `EXPO_PUBLIC_INCREMENTAL_SYNC_PILOT=1`. La PWA exige adicionalmente `EXPO_PUBLIC_INCREMENTAL_SYNC_WEB_PILOT=1` y que el backend autorice explÃ­citamente `web` en `INCREMENTAL_SYNC_PLATFORMS`; cualquiera de las dos capas apagada conserva el snapshot completo.
 
 ## Handshake y rutas
 

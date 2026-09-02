@@ -1,11 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useKeyboardInset } from "../hooks/useKeyboardInset";
 import { calculateLineSubtotal, calculateLineTax, calculateLineTotal, grossToNetUnitPrice, money } from "../sri";
 import { Product } from "../types";
 import { productCost } from "../utils/accounting";
 import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
 import { PrimaryButton, Select } from "./common";
+import { useAppTheme } from "../theme/AppTheme";
 
 type ProductPriceOptionsModalProps = {
   visible: boolean;
@@ -32,6 +35,14 @@ export function ProductPriceOptionsModal({
   onAdd,
   onClose
 }: ProductPriceOptionsModalProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardInset = useKeyboardInset();
+  const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? MODAL_SAFE_BOTTOM_PADDING : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
   const [draft, setDraft] = useState({ quantity, unitGrossPrice, grossDiscount, discountMode });
   const initializedForProductRef = useRef("");
 
@@ -70,18 +81,18 @@ export function ProductPriceOptionsModal({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-        <View style={styles.creditModalBackdrop}>
-          <View style={styles.quickClientModal}>
-            <View style={styles.creditModalHeader}>
+        <View style={[styles.creditModalBackdrop, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }]}>
+          <View style={[styles.quickClientModal, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
+            <View style={[styles.creditModalHeader, { borderBottomColor: theme.colors.border }]}>
               <View style={styles.flex}>
-                <Text style={styles.creditModalTitle}>Precio y descuento</Text>
-                <Text style={styles.creditModalMeta}>{product ? `${product.code} - ${product.name}` : "Seleccione producto"}</Text>
+                <Text style={[styles.creditModalTitle, { color: theme.colors.text }]}>Precio y descuento</Text>
+                <Text style={[styles.creditModalMeta, { color: theme.colors.textMuted }]}>{product ? `${product.code} - ${product.name}` : "Seleccione producto"}</Text>
               </View>
-              <Pressable style={styles.smallButton} onPress={onClose}>
-                <Text style={styles.smallButtonText}>Cerrar</Text>
+              <Pressable style={[styles.smallButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={onClose}>
+                <Text style={[styles.smallButtonText, { color: theme.colors.primary }]}>Cerrar</Text>
               </Pressable>
             </View>
-            <ScrollView contentContainerStyle={styles.creditModalContent} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+            <ScrollView contentContainerStyle={[styles.creditModalContent, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING }]} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
               <DraftNumberInput label="Cantidad" value={draft.quantity} onChange={(value) => setDraft((current) => ({ ...current, quantity: value }))} />
               <DraftNumberInput label="Precio publico" value={draft.unitGrossPrice} onChange={(value) => setDraft((current) => ({ ...current, unitGrossPrice: value }))} />
               <Select
@@ -95,11 +106,11 @@ export function ProductPriceOptionsModal({
               />
               <DraftNumberInput label={draft.discountMode === "percent" ? "Descuento %" : "Descuento publico"} value={draft.grossDiscount} onChange={(value) => setDraft((current) => ({ ...current, grossDiscount: value }))} />
               {previewItem ? (
-                <View style={styles.creditTotalsBox}>
-                  <Text style={styles.totalLine}>Base: ${money(calculateLineSubtotal(previewItem))}</Text>
-                  <Text style={styles.totalLine}>Descuento: ${money(grossDiscountValue)}</Text>
-                  <Text style={styles.totalLine}>IVA: ${money(calculateLineTax(previewItem))}</Text>
-                  <Text style={styles.totalStrong}>Total linea: ${money(calculateLineTotal(previewItem))}</Text>
+                <View style={[styles.creditTotalsBox, { backgroundColor: theme.colors.primarySoft }]}>
+                  <Text style={[styles.totalLine, { color: theme.colors.textMuted }]}>Base: ${money(calculateLineSubtotal(previewItem))}</Text>
+                  <Text style={[styles.totalLine, { color: theme.colors.textMuted }]}>Descuento: ${money(grossDiscountValue)}</Text>
+                  <Text style={[styles.totalLine, { color: theme.colors.textMuted }]}>IVA: ${money(calculateLineTax(previewItem))}</Text>
+                  <Text style={[styles.totalStrong, { color: theme.colors.text }]}>Total linea: ${money(calculateLineTotal(previewItem))}</Text>
                 </View>
               ) : null}
               <PrimaryButton label="Agregar producto" onPress={() => onAdd(draft)} />
@@ -112,10 +123,11 @@ export function ProductPriceOptionsModal({
 }
 
 function DraftNumberInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const { theme } = useAppTheme();
   if (Platform.OS === "web") {
     return (
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>{label}</Text>
+        <Text style={[styles.label, { color: theme.colors.textMuted }]}>{label}</Text>
         {React.createElement("input", {
           value,
           inputMode: "decimal",
@@ -127,7 +139,7 @@ function DraftNumberInput({ label, value, onChange }: { label: string; value: st
             const text = event.currentTarget?.value ?? event.target?.value;
             if (typeof text === "string") onChange(sanitizeDecimalInput(text));
           },
-          style: webInputStyle
+          style: { ...webInputStyle, borderColor: theme.colors.borderStrong, color: theme.colors.text, backgroundColor: theme.colors.surfaceMuted, outlineColor: theme.colors.primary }
         })}
       </View>
     );
@@ -135,9 +147,9 @@ function DraftNumberInput({ label, value, onChange }: { label: string; value: st
 
   return (
     <View style={styles.inputGroup}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, { color: theme.colors.textMuted }]}>{label}</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, { borderColor: theme.colors.borderStrong, color: theme.colors.text, backgroundColor: theme.colors.surfaceMuted }]}
         value={value}
         onChangeText={(value) => onChange(sanitizeDecimalInput(value))}
         onChange={(event) => {
@@ -145,7 +157,7 @@ function DraftNumberInput({ label, value, onChange }: { label: string; value: st
           if (typeof text === "string") onChange(sanitizeDecimalInput(text));
         }}
         keyboardType="decimal-pad"
-        placeholderTextColor="#7d8796"
+        placeholderTextColor={theme.colors.textMuted}
       />
     </View>
   );

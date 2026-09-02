@@ -12,6 +12,7 @@ import {
   Text,
   View
 } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
 
 type ToastVariant = "success" | "error" | "info" | "warning";
 
@@ -100,6 +101,7 @@ function CustomToast({
   text2,
   variant
 }: CustomToastProps) {
+  const { theme } = useAppTheme();
   const config = variantConfig[variant];
 
   return (
@@ -108,7 +110,9 @@ function CustomToast({
         style={[
           styles.container,
           {
-            borderLeftColor: config.accent
+            borderLeftColor: config.accent,
+            backgroundColor: theme.colors.surface,
+            shadowColor: theme.colors.shadow
           }
         ]}
       >
@@ -136,7 +140,7 @@ function CustomToast({
           {!!text1 && (
             <Text
               numberOfLines={2}
-              style={styles.title}
+              style={[styles.title, { color: theme.colors.text }]}
             >
               {text1}
             </Text>
@@ -145,7 +149,7 @@ function CustomToast({
           {!!text2 && (
             <Text
               numberOfLines={5}
-              style={styles.message}
+              style={[styles.message, { color: theme.colors.textMuted }]}
             >
               {text2}
             </Text>

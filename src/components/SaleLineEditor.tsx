@@ -1,28 +1,26 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, TextInput, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { calculateLineSubtotal, calculateLineTax, calculateLineTotal, grossToNetUnitPrice, money } from "../sri";
-import { SaleItem } from "../types";
+import { Product, SaleItem } from "../types";
 import { parseDecimal, sanitizeDecimalInput } from "../utils/numbers";
 import { EntityEditModal } from "./EntityEditModal";
 import { Select } from "./common";
-
-type SaleLineEditorForm = {
-  quantity: string;
-  unitGrossPrice: string;
-  grossDiscount: string;
-  discountMode: "amount" | "percent";
-};
+import { useAppTheme } from "../theme/AppTheme";
+import type { LineEditForm } from "../hooks/useSaleLineEditor";
+import { availableProductPrices } from "../utils/productPrices";
 
 type SaleLineEditorProps = {
   visible: boolean;
   item?: SaleItem;
-  form: SaleLineEditorForm;
-  onChange: (form: SaleLineEditorForm) => void;
-  onSave: (draft?: SaleLineEditorForm) => void;
+  product?: Product;
+  form: LineEditForm;
+  onChange: (form: LineEditForm) => void;
+  onSave: (draft?: LineEditForm) => void;
   onClose: () => void;
 };
 
-export function SaleLineEditor({ visible, item, form, onChange, onSave, onClose }: SaleLineEditorProps) {
+export function SaleLineEditor({ visible, item, product, form, onChange, onSave, onClose }: SaleLineEditorProps) {
+  const { theme } = useAppTheme();
   const [draft, setDraft] = useState(form);
   const initializedForLineRef = useRef("");
 
@@ -39,7 +37,7 @@ export function SaleLineEditor({ visible, item, form, onChange, onSave, onClose 
     initializedForLineRef.current = "";
   }, [visible]);
 
-  const updateDraft = (nextDraft: SaleLineEditorForm) => {
+  const updateDraft = (nextDraft: LineEditForm) => {
     setDraft(nextDraft);
     onChange(nextDraft);
   };
@@ -56,6 +54,7 @@ export function SaleLineEditor({ visible, item, form, onChange, onSave, onClose 
 
   return (
     <EntityEditModal
+      adaptiveViewport
       visible={visible}
       title="Editar detalle"
       subtitle={item ? `${item.code} - ${item.name}` : "Producto"}
@@ -64,7 +63,18 @@ export function SaleLineEditor({ visible, item, form, onChange, onSave, onClose 
       onConfirm={() => onSave(draft)}
     >
       <DraftNumberInput label="Cantidad" value={draft.quantity} onChange={(value) => updateDraft({ ...draft, quantity: value })} />
-      <DraftNumberInput label="Precio publico" value={draft.unitGrossPrice} onChange={(value) => updateDraft({ ...draft, unitGrossPrice: value })} />
+      {product && availableProductPrices(product).length > 1 ? (
+        <View style={styles.tierSection}>
+          <Text style={[styles.label, { color: theme.colors.textMuted }]}>Lista de precio de esta línea</Text>
+          <View style={styles.tierOptions}>
+            {availableProductPrices(product).map((option) => {
+              const active = draft.priceTier === option.tier;
+              return <Pressable key={option.tier} accessibilityRole="button" accessibilityState={{ selected: active }} onPress={() => updateDraft({ ...draft, priceTier: option.tier, unitGrossPrice: money(option.price) })} style={[styles.tierOption, { borderColor: active ? theme.colors.primary : theme.colors.borderStrong, backgroundColor: active ? theme.colors.primarySoft : theme.colors.surface }]}><Text style={[styles.tierOptionText, { color: active ? theme.colors.primary : theme.colors.text }]}>{active ? "✓ " : ""}{option.label} · ${money(option.price)}</Text></Pressable>;
+            })}
+          </View>
+        </View>
+      ) : null}
+      <DraftNumberInput label="Precio publico" value={draft.unitGrossPrice} onChange={(value) => updateDraft({ ...draft, unitGrossPrice: value, priceTier: undefined })} />
       <Select
         label="Tipo de descuento"
         value={draft.discountMode}
@@ -76,11 +86,11 @@ export function SaleLineEditor({ visible, item, form, onChange, onSave, onClose 
       />
       <DraftNumberInput label={draft.discountMode === "percent" ? "Descuento %" : "Descuento publico"} value={draft.grossDiscount} onChange={(value) => updateDraft({ ...draft, grossDiscount: value })} />
       {previewItem ? (
-        <View style={styles.creditTotalsBox}>
-          <Text style={styles.totalLine}>Base: ${money(calculateLineSubtotal(previewItem))}</Text>
-          <Text style={styles.totalLine}>Descuento: ${money(grossDiscount)}</Text>
-          <Text style={styles.totalLine}>IVA: ${money(calculateLineTax(previewItem))}</Text>
-          <Text style={styles.totalStrong}>Total linea: ${money(calculateLineTotal(previewItem))}</Text>
+        <View style={[styles.creditTotalsBox, { backgroundColor: theme.colors.primarySoft }]}>
+          <Text style={[styles.totalLine, { color: theme.colors.textMuted }]}>Base: ${money(calculateLineSubtotal(previewItem))}</Text>
+          <Text style={[styles.totalLine, { color: theme.colors.textMuted }]}>Descuento: ${money(grossDiscount)}</Text>
+          <Text style={[styles.totalLine, { color: theme.colors.textMuted }]}>IVA: ${money(calculateLineTax(previewItem))}</Text>
+          <Text style={[styles.totalStrong, { color: theme.colors.text }]}>Total linea: ${money(calculateLineTotal(previewItem))}</Text>
         </View>
       ) : null}
     </EntityEditModal>
@@ -88,10 +98,11 @@ export function SaleLineEditor({ visible, item, form, onChange, onSave, onClose 
 }
 
 function DraftNumberInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const { theme } = useAppTheme();
   if (Platform.OS === "web") {
     return (
       <View style={styles.inputGroup}>
-        <Text style={styles.label}>{label}</Text>
+        <Text style={[styles.label, { color: theme.colors.textMuted }]}>{label}</Text>
         {React.createElement("input", {
           value,
           inputMode: "decimal",
@@ -103,7 +114,7 @@ function DraftNumberInput({ label, value, onChange }: { label: string; value: st
             const text = event.currentTarget?.value ?? event.target?.value;
             if (typeof text === "string") onChange(sanitizeDecimalInput(text));
           },
-          style: webInputStyle
+          style: { ...webInputStyle, borderColor: theme.colors.borderStrong, color: theme.colors.text, backgroundColor: theme.colors.surfaceMuted, outlineColor: theme.colors.primary }
         })}
       </View>
     );
@@ -111,9 +122,9 @@ function DraftNumberInput({ label, value, onChange }: { label: string; value: st
 
   return (
     <View style={styles.inputGroup}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, { color: theme.colors.textMuted }]}>{label}</Text>
       <TextInput
-        style={styles.input}
+        style={[styles.input, { borderColor: theme.colors.borderStrong, color: theme.colors.text, backgroundColor: theme.colors.surfaceMuted }]}
         value={value}
         onChangeText={(value) => onChange(sanitizeDecimalInput(value))}
         onChange={(event) => {
@@ -121,7 +132,7 @@ function DraftNumberInput({ label, value, onChange }: { label: string; value: st
           if (typeof text === "string") onChange(sanitizeDecimalInput(text));
         }}
         keyboardType="decimal-pad"
-        placeholderTextColor="#7d8796"
+        placeholderTextColor={theme.colors.textSubtle}
       />
     </View>
   );
@@ -142,6 +153,10 @@ const webInputStyle = {
 } as const;
 
 const styles = StyleSheet.create({
+  tierSection: { gap: 6 },
+  tierOptions: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  tierOption: { flexGrow: 1, minWidth: 92, minHeight: 40, borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 10, alignItems: "center", justifyContent: "center" },
+  tierOptionText: { fontSize: 11, fontWeight: "900" },
   inputGroup: {
     gap: 5
   },

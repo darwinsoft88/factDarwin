@@ -82,6 +82,7 @@ function historicalSummaryToSale(item: HistoricalDocumentSummary): Sale {
   return {
     id: item.documentId,
     documentType: "factura",
+    environment: item.environment,
     establishment: item.establishment,
     emissionPoint: item.emissionPoint,
     clientId: item.clientId,

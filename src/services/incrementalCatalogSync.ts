@@ -1,17 +1,30 @@
 import { Platform } from "react-native";
-import type { AppData, Client, PendingSyncPatch, Product } from "../types";
+import type { AppData, Client, PendingSyncPatch, Product, RemissionGuide } from "../types";
 import { updateStoredData } from "../database/storage";
 import { getIncrementalBootstrap, getIncrementalCapabilities, pullIncrementalChanges, type IncrementalChange } from "./backend";
 import { getIncrementalDeviceId } from "./incrementalDeviceIdentity";
 import { loadIncrementalCursor, saveIncrementalCursor, type IncrementalCursorState } from "./incrementalCursorStorage";
 
-const CLIENT_KEYS = new Set(["id", "name", "identification", "identificationType", "email", "phone", "address", "updatedAt"]);
-const PRODUCT_KEYS = new Set(["id", "itemType", "code", "barcode", "name", "price", "cost", "ivaRate", "stock", "minStock", "unitMeasure", "active", "deleted", "updatedAt"]);
+const CLIENT_KEYS = new Set(["id", "name", "identification", "identificationType", "email", "phone", "address", "defaultSalePriceTier", "updatedAt"]);
+const PRODUCT_KEYS = new Set(["id", "itemType", "code", "barcode", "name", "price", "price2", "price3", "cost", "ivaRate", "stock", "minStock", "imageKey", "imageVersion", "imageUpdatedAt", "imageMimeType", "unitMeasure", "active", "deleted", "updatedAt"]);
+const GUIDE_KEYS = new Set(["id", "establishment", "emissionPoint", "establishmentName", "sourceSaleId", "clientId", "userId", "createdAt", "sequence", "accessKey", "authorizationNumber", "authorizationDate", "sriEnvironment", "sriMessage", "retryHistory", "signedXml", "authorizedXml", "status", "transporterName", "transporterIdentification", "transporterIdentificationType", "plate", "startAddress", "endAddress", "route", "reason", "startDate", "endDate", "items"]);
 
 export type IncrementalPilotResult = { status: "disabled" | "bootstrapped" | "applied" | "blocked" | "fallback"; applied: number; data?: AppData; reason?: string };
 
 export function localIncrementalPilotEnabled(): boolean {
-  return Platform.OS === "android" && process.env.EXPO_PUBLIC_INCREMENTAL_SYNC_PILOT === "1";
+  return incrementalPilotEnabledForPlatform(Platform.OS, {
+    pilot: process.env.EXPO_PUBLIC_INCREMENTAL_SYNC_PILOT,
+    webPilot: process.env.EXPO_PUBLIC_INCREMENTAL_SYNC_WEB_PILOT
+  });
+}
+
+export function incrementalPilotEnabledForPlatform(
+  platform: string,
+  flags: { pilot?: string; webPilot?: string }
+): boolean {
+  if (flags.pilot !== "1") return false;
+  if (platform === "android") return true;
+  return platform === "web" && flags.webPilot === "1";
 }
 
 export async function runIncrementalCatalogPilot(options: { data: AppData; token: string; companyId: string }): Promise<IncrementalPilotResult> {
@@ -23,8 +36,9 @@ export async function runIncrementalCatalogPilot(options: { data: AppData; token
   const capability = await getIncrementalCapabilities(options.data.backendUrl, options.token, platform, deviceId);
   if (!capability.incrementalSyncEnabled) return { status: "disabled", applied: 0, reason: capability.reason };
 
-  const moduleSet = [capability.modules.clients ? "clients" : "", capability.modules.products ? "products" : ""].filter(Boolean).join("+");
-  let state = await loadIncrementalCursor(options.companyId, capability.configVersion, moduleSet);
+  const protocolVersion = capability.syncProtocolVersion === 2 ? 2 : 1;
+  const moduleSet = [capability.modules.clients ? "clients" : "", capability.modules.products ? "products" : "", capability.modules.guides ? "guides" : ""].filter(Boolean).join("+");
+  let state = await loadIncrementalCursor(options.companyId, capability.configVersion, moduleSet, protocolVersion);
   let currentData = options.data;
   if (!state || state.configVersion !== capability.configVersion) {
     const bootstrap = await getIncrementalBootstrap<AppData>(options.data.backendUrl, options.token, platform, deviceId);
@@ -35,7 +49,7 @@ export async function runIncrementalCatalogPilot(options: { data: AppData; token
       pendingSync: current.pendingSync || []
     }));
     state = {
-      companyId: options.companyId, protocolVersion: 1, configVersion: capability.configVersion,
+      companyId: options.companyId, protocolVersion, configVersion: capability.configVersion,
       moduleSet,
       cursor: bootstrap.cursor, snapshotRevision: bootstrap.snapshotRevision,
       versions: Object.fromEntries(bootstrap.versions.map((version) => [`${version.entityType}:${version.entityId}`, { recordVersion: Number(version.recordVersion), payloadHash: version.payloadHash, action: version.action }])),
@@ -85,7 +99,7 @@ export async function runIncrementalCatalogPilot(options: { data: AppData; token
 }
 
 export async function prepareIncrementalBatch(data: AppData, state: IncrementalCursorState, changes: IncrementalChange[], fromCursor: string, expectedCursor: string, protocolVersion: number) {
-  if (!state.companyId || protocolVersion !== 1 || fromCursor !== expectedCursor) throw incrementalError("SYNC_BATCH_CONTEXT_INVALID");
+  if (!state.companyId || protocolVersion !== state.protocolVersion || ![1, 2].includes(protocolVersion) || fromCursor !== expectedCursor) throw incrementalError("SYNC_BATCH_CONTEXT_INVALID");
   const pending = pendingCatalogEntities(data);
   const next = clone(data);
   const versions = { ...state.versions };
@@ -94,7 +108,8 @@ export async function prepareIncrementalBatch(data: AppData, state: IncrementalC
   for (const change of changes) {
     if (!Number.isSafeInteger(change.sequence) || change.sequence <= previousSequence) throw incrementalError("SYNC_BATCH_ORDER_INVALID");
     previousSequence = change.sequence;
-    if (!(["client", "product"] as string[]).includes(change.entityType)) throw incrementalError("SYNC_ENTITY_TYPE_REJECTED");
+    const supported = protocolVersion === 2 ? ["client", "product", "remission_guide"] : ["client", "product"];
+    if (!supported.includes(change.entityType)) throw incrementalError("SYNC_ENTITY_TYPE_REJECTED");
     if (pending.has(`${change.entityType}:${change.entityId}`)) throw incrementalError("SYNC_INCREMENTAL_CONFLICT");
     assertPayloadShape(change);
     const actualHash = await hashIncrementalPayload(change.payload);
@@ -116,16 +131,18 @@ export async function prepareIncrementalBatch(data: AppData, state: IncrementalC
 }
 
 function applyChange(data: AppData, change: IncrementalChange) {
-  const field = change.entityType === "client" ? "clients" : "products";
+  const field = change.entityType === "client" ? "clients" : change.entityType === "product" ? "products" : "guides";
   if (change.action === "DELETE") {
-    data[field] = data[field].filter((item) => item.id !== change.entityId) as Client[] & Product[];
+    const existing = data.guides?.find((guide) => field === "guides" && guide.id === change.entityId);
+    if (existing?.status === "AUTORIZADA") throw incrementalError("SYNC_AUTHORIZED_GUIDE_DELETE_CONFLICT");
+    (data[field] as Array<{ id: string }>).splice(0, data[field].length, ...data[field].filter((item) => item.id !== change.entityId));
     data.deletedIds = { ...(data.deletedIds || {}), [field]: [...new Set([...(data.deletedIds?.[field] || []), change.entityId])] };
     return;
   }
-  const collection = data[field] as Array<Client | Product>;
+  const collection = data[field] as Array<Client | Product | RemissionGuide>;
   const index = collection.findIndex((item) => item.id === change.entityId);
   if (index >= 0) collection[index] = change.payload as Client | Product;
-  else collection.push(change.payload as Client | Product);
+  else collection.push(change.payload as Client | Product | RemissionGuide);
   if (data.deletedIds?.[field]) data.deletedIds[field] = data.deletedIds[field].filter((id) => id !== change.entityId);
 }
 
@@ -134,15 +151,18 @@ function assertPayloadShape(change: IncrementalChange) {
   if (change.isTombstone || !change.payload || typeof change.payload !== "object" || Array.isArray(change.payload)) throw incrementalError("SYNC_PAYLOAD_INVALID");
   const payload = change.payload as Record<string, unknown>;
   if (payload.id !== change.entityId) throw incrementalError("SYNC_PAYLOAD_ID_MISMATCH");
-  const allowed = change.entityType === "client" ? CLIENT_KEYS : PRODUCT_KEYS;
+  const allowed = change.entityType === "client" ? CLIENT_KEYS : change.entityType === "product" ? PRODUCT_KEYS : GUIDE_KEYS;
   if (Object.keys(payload).some((key) => !allowed.has(key))) throw incrementalError("SYNC_PAYLOAD_FIELD_REJECTED");
   if (change.entityType === "client") {
     for (const field of ["id", "name", "identification", "identificationType", "email", "phone", "address"]) {
       if (typeof payload[field] !== "string") throw incrementalError("SYNC_PAYLOAD_INVALID");
     }
-  } else {
+  } else if (change.entityType === "product") {
     for (const field of ["id", "code", "name"]) if (typeof payload[field] !== "string") throw incrementalError("SYNC_PAYLOAD_INVALID");
     for (const field of ["price", "ivaRate", "stock"]) if (typeof payload[field] !== "number" || !Number.isFinite(payload[field])) throw incrementalError("SYNC_PAYLOAD_INVALID");
+  } else {
+    for (const field of ["id", "sourceSaleId", "clientId", "userId", "createdAt", "sequence", "accessKey", "status", "transporterName", "transporterIdentification", "transporterIdentificationType", "plate", "startAddress", "endAddress", "route", "reason", "startDate", "endDate"]) if (typeof payload[field] !== "string") throw incrementalError("SYNC_PAYLOAD_INVALID");
+    if (!Array.isArray(payload.items)) throw incrementalError("SYNC_PAYLOAD_INVALID");
   }
 }
 

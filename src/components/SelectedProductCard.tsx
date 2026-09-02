@@ -5,6 +5,7 @@ import { money } from "../sri";
 import { Product } from "../types";
 import { productMinStock } from "../utils/accounting";
 import { catalogItemIcon, isServiceItem } from "../utils/catalogItems";
+import { useAppTheme } from "../theme/AppTheme";
 
 type SelectedProductCardProps = {
   product?: Product;
@@ -12,24 +13,25 @@ type SelectedProductCardProps = {
 };
 
 export function SelectedProductCard({ product, onAdd }: SelectedProductCardProps) {
+  const { theme } = useAppTheme();
   if (!product) return null;
   const isService = isServiceItem(product);
 
   return (
-    <View style={styles.productSummaryCard}>
-      <View style={[styles.productIcon, isService && styles.serviceIcon]}>
-        <MaterialCommunityIcons name={catalogItemIcon(product)} size={15} color={isService ? "#6d28d9" : "#047857"} />
+    <View style={[styles.productSummaryCard, { borderColor: theme.colors.borderStrong, backgroundColor: theme.colors.primarySoft }]}>
+      <View style={[styles.productIcon, { backgroundColor: isService ? theme.colors.accentSoft : theme.colors.successSoft }]}>
+        <MaterialCommunityIcons name={catalogItemIcon(product)} size={15} color={isService ? theme.colors.accent : theme.colors.success} />
       </View>
       <View style={styles.flex}>
-        <Text style={styles.itemTitle} numberOfLines={1}>{product.name}</Text>
-        <Text style={styles.inlineInfo} numberOfLines={1}>
+        <Text style={[styles.itemTitle, { color: theme.colors.text }]} numberOfLines={1}>{product.name}</Text>
+        <Text style={[styles.inlineInfo, { color: theme.colors.textMuted }]} numberOfLines={1}>
           {isService ? `Servicio | IVA ${money(product.ivaRate * 100)}% | sin stock` : `Stock ${product.stock} | Min. ${productMinStock(product)} | IVA ${money(product.ivaRate * 100)}%`}
         </Text>
       </View>
-      <Text style={styles.price}>${money(product.price)}</Text>
+      <Text style={[styles.price, { color: theme.colors.success }]}>${money(product.price)}</Text>
       {onAdd ? (
-        <Pressable accessibilityRole="button" accessibilityLabel="Agregar producto a la venta" style={styles.addIconButton} onPress={onAdd}>
-          <MaterialCommunityIcons name="plus" size={24} color="#047857" />
+        <Pressable accessibilityRole="button" accessibilityLabel="Agregar producto a la venta" style={[styles.addIconButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.surface }]} onPress={onAdd}>
+          <MaterialCommunityIcons name="plus" size={24} color={theme.colors.success} />
         </Pressable>
       ) : null}
     </View>

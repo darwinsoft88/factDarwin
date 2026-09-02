@@ -1,5 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
 
 type DismissibleNoticeProps = {
   message: string;
@@ -10,6 +11,7 @@ type DismissibleNoticeProps = {
 };
 
 export function DismissibleNotice({ message, tone = "warning", title, onDismiss, autoDismissMs = 4500 }: DismissibleNoticeProps) {
+  const { theme } = useAppTheme();
   React.useEffect(() => {
     if (!message || autoDismissMs <= 0) return undefined;
     const timer = setTimeout(onDismiss, autoDismissMs);
@@ -18,13 +20,13 @@ export function DismissibleNotice({ message, tone = "warning", title, onDismiss,
 
   if (!message) return null;
 
-  const boxStyle = tone === "success" ? styles.successBox : styles.warningBox;
-  const textStyle = tone === "success" ? styles.successText : styles.warningText;
+  const toneColor = tone === "success" ? theme.colors.success : theme.colors.warning;
+  const toneBackground = tone === "success" ? theme.colors.successSoft : theme.colors.warningSoft;
 
   return (
-    <Pressable style={[styles.box, boxStyle]} onPress={onDismiss}>
-      {title ? <Text style={styles.title}>{title}</Text> : null}
-      <Text style={textStyle}>{message}</Text>
+    <Pressable style={[styles.box, { borderColor: toneColor, backgroundColor: toneBackground }]} onPress={onDismiss}>
+      {title ? <Text style={[styles.title, { color: toneColor }]}>{title}</Text> : null}
+      <Text style={[tone === "success" ? styles.successText : styles.warningText, { color: toneColor }]}>{message}</Text>
     </Pressable>
   );
 }

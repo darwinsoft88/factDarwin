@@ -1,10 +1,13 @@
 import React from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
+import { useKeyboardInset } from "../hooks/useKeyboardInset";
 import { Client } from "../types";
 import { Empty, Input, LoadMoreButton } from "./common";
 import { SelectedClientCard } from "./SelectedClientCard";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useAppTheme } from "../theme/AppTheme";
 type SaleClientPickerProps = {
   search: string;
   selectedClientId: string;
@@ -32,6 +35,15 @@ export function SaleClientPicker({
   onCreateClient,
   onEditClient
 }: SaleClientPickerProps) {
+  const { theme } = useAppTheme();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const keyboardInset = useKeyboardInset();
+  const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
+  const safeTopPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Platform.OS === "web" ? MODAL_SAFE_BOTTOM_PADDING : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
+  const nativePickerHeight = Math.max(300, Math.floor(adaptiveMaxHeight * 0.92));
   const [pickerVisible, setPickerVisible] = React.useState(false);
   const selectClient = (client: Client) => {
     onClientChange(client.id, client);
@@ -41,19 +53,19 @@ export function SaleClientPicker({
   return (
     <>
       <View style={styles.compactHeader}>
-        <Text style={styles.compactTitle}>Cliente</Text>
+        <Text style={[styles.compactTitle, { color: theme.colors.text }]}>Cliente</Text>
         <View style={styles.headerActions}>
-          <Pressable style={styles.actionButton} onPress={() => setPickerVisible(true)}>
+          <Pressable style={[styles.actionButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={() => setPickerVisible(true)}>
             <MaterialCommunityIcons
               name="account-switch"
               size={18}
-              color="#0f766e"
+              color={theme.colors.primary}
             />
-            <Text style={styles.actionButtonText}>Cambiar cliente</Text>
+            <Text style={[styles.actionButtonText, { color: theme.colors.primary }]}>Cambiar cliente</Text>
           </Pressable>
-          <Pressable style={styles.secondaryActionButton} onPress={onCreateClient}>
-            <MaterialCommunityIcons name="account-plus-outline" size={17} color="#0f766e" />
-            <Text style={styles.secondaryActionText}>Agregar</Text>
+          <Pressable style={[styles.secondaryActionButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.surface }]} onPress={onCreateClient}>
+            <MaterialCommunityIcons name="account-plus-outline" size={17} color={theme.colors.primary} />
+            <Text style={[styles.secondaryActionText, { color: theme.colors.primary }]}>Agregar</Text>
           </Pressable>
           
         </View>
@@ -61,31 +73,31 @@ export function SaleClientPicker({
       <SelectedClientCard client={selectedClient} onEdit={onEditClient} />
       <Modal visible={pickerVisible} transparent animationType="fade" onRequestClose={() => setPickerVisible(false)}>
         <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setPickerVisible(false)}>
-            <Pressable style={styles.modalSheet}>
+          <Pressable style={[styles.modalBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, androidKeyboardInset > 0 && { paddingBottom: androidKeyboardInset + safeBottomPadding }]} onPress={() => setPickerVisible(false)}>
+            <Pressable style={[styles.modalSheet, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, Platform.OS !== "web" && { height: nativePickerHeight, maxHeight: adaptiveMaxHeight, flexShrink: 1 }]}>
               <View style={styles.modalHeader}>
                 <View style={styles.flex}>
-                  <Text style={styles.modalTitle}>Buscar cliente</Text>
+                  <Text style={[styles.modalTitle, { color: theme.colors.text }]}>Buscar cliente</Text>
                 </View>
-                <Pressable style={styles.closeButton} onPress={() => setPickerVisible(false)}>
-                  <Text style={styles.closeButtonText}>Cerrar</Text>
+                <Pressable style={[styles.closeButton, { borderColor: theme.colors.primary, backgroundColor: theme.colors.surface }]} onPress={() => setPickerVisible(false)}>
+                  <Text style={[styles.closeButtonText, { color: theme.colors.primary }]}>Cerrar</Text>
                 </Pressable>
               </View>
               <Input label="" value={search} onChangeText={onSearchChange} placeholder="Nombre, cedula o RUC" autoCapitalize="none" />
               <View style={styles.resultHeader}>
-                <Text style={styles.resultLabel}>Clientes encontrados</Text>
-                <Text style={styles.resultCount}>{visibleClients.length}/{filteredClientCount}</Text>
+                <Text style={[styles.resultLabel, { color: theme.colors.text }]}>Clientes encontrados</Text>
+                <Text style={[styles.resultCount, { color: theme.colors.textMuted }]}>{visibleClients.length}/{filteredClientCount}</Text>
               </View>
-              <ScrollView style={styles.resultsBox} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+              <ScrollView style={[styles.resultsBox, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }, Platform.OS !== "web" && styles.resultsBoxNative]} contentContainerStyle={styles.resultsContent} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                 {visibleClients.map((client) => {
                   const selected = client.id === selectedClientId;
                   return (
-                    <Pressable key={client.id} style={[styles.clientRow, selected && styles.clientRowSelected]} onPress={() => selectClient(client)}>
+                    <Pressable key={client.id} style={[styles.clientRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, selected && { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }]} onPress={() => selectClient(client)}>
                       <View style={styles.clientTextBlock}>
-                        <Text style={[styles.clientName, selected && styles.clientNameSelected]} numberOfLines={1}>{client.name}</Text>
-                        <Text style={styles.clientMeta} numberOfLines={2}>{client.identification}{client.email ? ` | ${client.email}` : ""}{client.phone ? ` | ${client.phone}` : ""}</Text>
+                        <Text style={[styles.clientName, { color: selected ? theme.colors.primary : theme.colors.text }]} numberOfLines={1}>{client.name}</Text>
+                        <Text style={[styles.clientMeta, { color: theme.colors.textMuted }]} numberOfLines={2}>{client.identification}{client.email ? ` | ${client.email}` : ""}{client.phone ? ` | ${client.phone}` : ""}</Text>
                       </View>
-                      {selected ? <Text style={styles.selectedPill}>Activo</Text> : null}
+                      {selected ? <Text style={[styles.selectedPill, { backgroundColor: theme.colors.successSoft, color: theme.colors.success }]}>Activo</Text> : null}
                     </Pressable>
                   );
                 })}
@@ -224,11 +236,15 @@ const styles = StyleSheet.create({
     fontWeight: "800"
   },
   resultsBox: {
-    maxHeight: 230,
+    maxHeight: 420,
     borderWidth: 1,
     borderColor: "#dbe4ee",
     borderRadius: 8,
     backgroundColor: "#ffffff"
+  },
+  resultsBoxNative: {
+    flex: 1,
+    maxHeight: undefined
   },
   resultsContent: {
     gap: 6,

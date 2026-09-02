@@ -85,3 +85,33 @@ test("modo piloto renueva watermark y avanza sobre modulos fuera de alcance", as
   assert.equal(result.fromCursor, old);
   assert.equal(decodeCursor(result.nextCursor, { companyId: "company", config: c, maximumSeq: 3 }).lastChangeSeq, 3);
 });
+
+test("V1 atraviesa paginas de guides sin entregarlas y V2 si las consume", async () => {
+  const c = config();
+  const all = [
+    { ...rows(1)[0], changeSeq: 1, entityType: "client" },
+    { ...rows(1)[0], changeSeq: 2, entityType: "remission_guide", module: "guides" },
+    { ...rows(1)[0], changeSeq: 3, entityType: "product" },
+    { ...rows(1)[0], changeSeq: 4, entityType: "remission_guide", module: "guides" },
+    { ...rows(1)[0], changeSeq: 5, entityType: "client" }
+  ];
+  const repository = {
+    maximumSequence: async () => 5,
+    listChanges: async ({ after, watermark, limit, entityTypes }) => all.filter((row) => row.changeSeq > after && row.changeSeq <= watermark && (!entityTypes || entityTypes.includes(row.entityType))).slice(0, limit)
+  };
+  const v1 = await diagnosticPull(repository, { config: c, companyId: "company", accessGranted: true, entityTypes: ["client", "product"], protocolVersion: 1, advanceToWatermarkWhenExhausted: true });
+  assert.deepEqual(v1.changes.map((item) => item.sequence), [1, 3, 5]);
+  assert.equal(decodeCursor(v1.nextCursor, { companyId: "company", config: c, maximumSeq: 5, protocolVersion: 1 }).lastChangeSeq, 5);
+  const v2 = await diagnosticPull(repository, { config: c, companyId: "company", accessGranted: true, entityTypes: ["client", "product", "remission_guide"], protocolVersion: 2 });
+  assert.deepEqual(v2.changes.map((item) => item.sequence), [1, 2, 3, 4, 5]);
+  assert.equal(v2.protocolVersion, 2);
+});
+
+test("V1 avanza al watermark cuando el intervalo contiene exclusivamente guides", async () => {
+  const c = config();
+  const repository = { maximumSequence: async () => 2, listChanges: async () => [] };
+  const result = await diagnosticPull(repository, { config: c, companyId: "company", accessGranted: true, entityTypes: ["client", "product"], protocolVersion: 1, advanceToWatermarkWhenExhausted: true });
+  assert.equal(result.changeCount, 0);
+  assert.equal(result.hasMore, false);
+  assert.equal(decodeCursor(result.nextCursor, { companyId: "company", config: c, maximumSeq: 2, protocolVersion: 1 }).lastChangeSeq, 2);
+});

@@ -1,7 +1,7 @@
 import { initialData } from "../../database/storage";
 import { AppData, User } from "../../types";
 import { useSyncAndBackup } from "../useSyncAndBackup";
-import { backupAppData, mergeBackendData, restoreAppData } from "../../services/backend";
+import { backupAppData, checkBackendHealth, mergeBackendData, restoreAppData } from "../../services/backend";
 import { migrateStoredPendingSyncRequestIds } from "../../database/storage";
 import { showSuccess, showWarning } from "../../utils/dialogs";
 
@@ -45,6 +45,7 @@ jest.mock("../../services/backend", () => ({
 const mergeMock = mergeBackendData as jest.MockedFunction<typeof mergeBackendData>;
 const backupMock = backupAppData as jest.MockedFunction<typeof backupAppData>;
 const restoreMock = restoreAppData as jest.MockedFunction<typeof restoreAppData>;
+const healthMock = checkBackendHealth as jest.MockedFunction<typeof checkBackendHealth>;
 const migrateMock = migrateStoredPendingSyncRequestIds as jest.MockedFunction<typeof migrateStoredPendingSyncRequestIds>;
 const showSuccessMock = showSuccess as jest.MockedFunction<typeof showSuccess>;
 const showWarningMock = showWarning as jest.MockedFunction<typeof showWarning>;
@@ -66,7 +67,7 @@ function useTestHook(data: AppData) {
     hook: useSyncAndBackup({
       backendTokenRef: { current: "token" }, data, dataRef, email: "", password: "", ready: false,
       session, sessionRef: { current: session }, setAppMenuVisible: jest.fn(), setBackendToken: jest.fn(),
-      setData: jest.fn(), setSyncActionLoading: jest.fn(), setSyncCenterVisible: jest.fn(), setSyncState: jest.fn(),
+      setData: jest.fn(), setSyncActionLoading: jest.fn(), setSyncCenterVisible: jest.fn(), setSyncState: jest.fn(), setNetworkReachable: jest.fn(),
       syncState: "pending", syncStateRef: { current: "pending" }
     })
   };
@@ -77,6 +78,7 @@ describe("useSyncAndBackup pending replay", () => {
     jest.clearAllMocks();
     backupMock.mockResolvedValue({ ok: true, updatedAt: "2026-07-01T00:00:00.000Z" });
     mergeMock.mockResolvedValue({ ok: true });
+    healthMock.mockResolvedValue({ ok: true, service: "FactuDarwin", database: { engine: "postgresql" } });
   });
 
   it("sends item.patch directly and removes the successful pending", async () => {
@@ -155,5 +157,34 @@ describe("useSyncAndBackup pending replay", () => {
 
     expect(showWarningMock).toHaveBeenCalledWith("SRI pendiente", expect.stringContaining("1 documento"));
     expect(showSuccessMock).not.toHaveBeenCalledWith("Datos al dia", expect.any(String));
+  });
+
+  it("clears a persisted historical sync error after a successful server test", async () => {
+    mockStoredData = {
+      ...initialData,
+      backendUrl: "https://backend.test",
+      autoBackupLastError: "Error real de conexion: Load failed"
+    };
+    const { hook, dataRef } = useTestHook(mockStoredData);
+
+    await hook.testSyncServer();
+
+    expect(healthMock).toHaveBeenCalledWith("https://backend.test");
+    expect(dataRef.current.autoBackupLastError).toBe("");
+    expect(showSuccessMock).toHaveBeenCalledWith("Servidor OK", expect.stringContaining("postgresql"));
+  });
+
+  it("keeps a current error when the server test really fails", async () => {
+    mockStoredData = {
+      ...initialData,
+      backendUrl: "https://backend.test",
+      autoBackupLastError: "Fallo de sincronizacion vigente"
+    };
+    healthMock.mockRejectedValue(new Error("Servidor inaccesible"));
+    const { hook, dataRef } = useTestHook(mockStoredData);
+
+    await hook.testSyncServer();
+
+    expect(dataRef.current.autoBackupLastError).toBe("Fallo de sincronizacion vigente");
   });
 });

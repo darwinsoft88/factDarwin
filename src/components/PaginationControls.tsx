@@ -1,6 +1,7 @@
 import React from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useAppTheme } from "../theme/AppTheme";
 
 type PaginationControlsProps = {
   page: number;
@@ -13,43 +14,44 @@ type PaginationControlsProps = {
 };
 
 export function PaginationControls({ page, pageSize, totalItems, onPageChange, hasMoreItems = false, loadingMore = false, onRequestMore }: PaginationControlsProps) {
+  const { theme } = useAppTheme();
   const totalPages = Math.max(1, Math.ceil(totalItems / Math.max(1, pageSize)));
   const currentPage = Math.min(Math.max(1, page), totalPages);
   const canGoBack = currentPage > 1;
   const canGoNext = currentPage < totalPages || hasMoreItems;
 
   if (totalItems <= pageSize && !hasMoreItems) {
-    return totalItems > 0 ? <Text style={styles.summary}>Pagina 1 de 1 | {totalItems} registro(s)</Text> : null;
+    return totalItems > 0 ? <Text style={[styles.summary, { color: theme.colors.textMuted }]}>Pagina 1 de 1 | {totalItems} registro(s)</Text> : null;
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Pagina anterior"
-        style={[styles.button, !canGoBack && styles.buttonDisabled]}
+        style={[styles.button, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }, !canGoBack && [styles.buttonDisabled, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]]}
         disabled={!canGoBack}
         onPress={() => onPageChange(currentPage - 1)}
       >
-        <MaterialCommunityIcons name="chevron-left" size={18} color={canGoBack ? "#0f766e" : "#94a3b8"} />
-        <Text style={[styles.buttonText, !canGoBack && styles.buttonTextDisabled]}>Anterior</Text>
+        <MaterialCommunityIcons name="chevron-left" size={18} color={canGoBack ? theme.colors.primary : theme.colors.textSubtle} />
+        <Text style={[styles.buttonText, { color: theme.colors.primary }, !canGoBack && { color: theme.colors.textSubtle }]}>Anterior</Text>
       </Pressable>
       <View style={styles.pageInfo}>
-        <Text style={styles.pageText}>Pagina {currentPage} de {totalPages}</Text>
-        <Text style={styles.countText}>{totalItems} registro(s)</Text>
+        <Text style={[styles.pageText, { color: theme.colors.text }]}>Pagina {currentPage} de {totalPages}</Text>
+        <Text style={[styles.countText, { color: theme.colors.textMuted }]}>{totalItems} registro(s)</Text>
       </View>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Pagina siguiente"
-        style={[styles.button, !canGoNext && styles.buttonDisabled]}
+        style={[styles.button, { borderColor: theme.colors.primary, backgroundColor: theme.colors.primarySoft }, !canGoNext && [styles.buttonDisabled, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]]}
         disabled={!canGoNext || loadingMore}
         onPress={() => {
           if (currentPage < totalPages) onPageChange(currentPage + 1);
           else onRequestMore?.();
         }}
       >
-        <Text style={[styles.buttonText, (!canGoNext || loadingMore) && styles.buttonTextDisabled]}>{loadingMore ? "Cargando..." : "Siguiente"}</Text>
-        <MaterialCommunityIcons name="chevron-right" size={18} color={canGoNext ? "#0f766e" : "#94a3b8"} />
+        <Text style={[styles.buttonText, { color: theme.colors.primary }, (!canGoNext || loadingMore) && { color: theme.colors.textSubtle }]}>{loadingMore ? "Cargando..." : "Siguiente"}</Text>
+        <MaterialCommunityIcons name="chevron-right" size={18} color={canGoNext ? theme.colors.primary : theme.colors.textSubtle} />
       </Pressable>
     </View>
   );
