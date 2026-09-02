@@ -161,6 +161,9 @@ async function executePgDump(filePath) {
     "--format=custom",
     "--no-owner",
     "--no-privileges",
+    // amcheck pertenece a la administracion de PostgreSQL y exige superusuario al
+    // restaurarse. No contiene datos de FactuDarwin y bloquearia la prueba real.
+    "--exclude-extension=amcheck",
     "--file",
     filePath,
     "--dbname",

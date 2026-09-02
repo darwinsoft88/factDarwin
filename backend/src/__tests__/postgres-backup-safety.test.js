@@ -20,6 +20,12 @@ test("el dump se verifica como parcial y solo entonces se publica atomicamente",
   assert.match(source, /fs\.rm\(temporaryPath, \{ force: true \}\)/);
 });
 
+test("excluye amcheck para que la restauracion sea verificable sin superusuario", () => {
+  assert.match(source, /"--exclude-extension=amcheck"/);
+  assert.match(source, /"--no-owner"/);
+  assert.match(source, /"--no-privileges"/);
+});
+
 test("usa bloqueo entre procesos y comprueba espacio antes de pg_dump", () => {
   const lock = source.indexOf("acquireProcessLock()");
   const disk = source.indexOf("assertFreeDiskSpace()");
