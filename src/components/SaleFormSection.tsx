@@ -705,7 +705,6 @@ function SaleSplitPaymentsEditor({
   useEffect(() => {
     if (!shouldSyncSingleCashPayment || !singlePayment || singlePaymentWasEdited) return;
     const syncedAmount = Math.max(0, parsePaymentAmount(total));
-    const syncedDraft = syncedAmount > 0 ? money(syncedAmount) : "";
 
     if (Math.abs(parsePaymentAmount(singlePayment.amount) - syncedAmount) > 0.009) {
       onChange((current) => {
@@ -719,11 +718,6 @@ function SaleSplitPaymentsEditor({
         return [{ ...source[0], amount: syncedAmount }];
       });
     }
-
-    setAmountDrafts((current) => {
-      if (current[singlePayment.id] === syncedDraft) return current;
-      return { ...current, [singlePayment.id]: syncedDraft };
-    });
   }, [displayedPayments, onChange, shouldSyncSingleCashPayment, singlePayment, singlePaymentWasEdited, total]);
 
   const updatePayment = (id: string, patch: Partial<SalePaymentSplit>) => {
@@ -762,6 +756,15 @@ function SaleSplitPaymentsEditor({
     setManualPaymentAmounts((current) => ({ ...current, [payment.id]: true }));
     setAmountDrafts((current) => ({ ...current, [payment.id]: sanitized }));
     updatePayment(payment.id, { amount: parsePaymentAmount(sanitized) });
+  };
+
+  const clearPaymentAmountDraft = (paymentId: string) => {
+    setAmountDrafts((current) => {
+      if (!(paymentId in current)) return current;
+      const next = { ...current };
+      delete next[paymentId];
+      return next;
+    });
   };
 
   const updateCashTendered = (paymentId: string, rawValue: string) => {
@@ -880,6 +883,7 @@ function SaleSplitPaymentsEditor({
             placeholderTextColor={theme.colors.textSubtle}
             selectTextOnFocus
             onFocus={selectWholeAmountOnWeb}
+            onBlur={() => clearPaymentAmountDraft(payment.id)}
           />
         );
         return (

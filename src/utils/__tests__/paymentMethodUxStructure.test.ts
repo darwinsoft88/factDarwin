@@ -31,5 +31,7 @@ describe("payment method UX structure", () => {
     expect(source).toContain("selectWholeAmountOnWeb");
     expect(source).toContain("target?.select?.()");
     expect(source.match(/onFocus={selectWholeAmountOnWeb}/g)?.length).toBe(3);
+    expect(source).toContain("clearPaymentAmountDraft");
+    expect(source).not.toContain("const syncedDraft");
   });
 });
