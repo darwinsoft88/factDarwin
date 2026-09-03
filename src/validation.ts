@@ -170,7 +170,8 @@ export function isIssuerBusinessConfigured(issuer: Issuer): boolean {
 }
 
 export function buildProductionChecklist(issuer: Issuer, backendUrl: string, connectionResult: string) {
-  const backendProduction = connectionResult.includes("Ambiente backend: production");
+  const backendProduction = connectionResult.includes("Ambiente backend por defecto: production")
+    || connectionResult.includes("Ambiente backend: production");
   const backendConnected = connectionResult.includes("Backend responde: SI");
   const certOk = connectionResult.includes("Certificado existe: SI") && connectionResult.includes("Clave certificado configurada: SI");
   const sriSendOk = connectionResult.includes("Envio real al SRI: ACTIVO");

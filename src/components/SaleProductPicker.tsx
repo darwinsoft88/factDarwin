@@ -53,8 +53,8 @@ export function SaleProductPicker({
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const keyboardInset = useKeyboardInset();
   const androidKeyboardInset = Platform.OS === "android" ? keyboardInset : 0;
-  const safeTopPadding = Platform.OS === "web" ? MODAL_EDGE_PADDING : Math.max(insets.top, MODAL_EDGE_PADDING);
-  const safeBottomPadding = Platform.OS === "web" ? MODAL_SAFE_BOTTOM_PADDING : Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
+  const safeTopPadding = Math.max(insets.top, MODAL_EDGE_PADDING);
+  const safeBottomPadding = Math.max(insets.bottom, MODAL_SAFE_BOTTOM_PADDING);
   const adaptiveMaxHeight = Math.max(320, windowHeight - safeTopPadding - safeBottomPadding);
   const useFullScreenPicker = windowWidth <= 600;
   const [pickerVisible, setPickerVisible] = React.useState(false);
@@ -191,7 +191,7 @@ export function SaleProductPicker({
       ) : null}
       <Modal visible={pickerVisible} transparent animationType="fade" onRequestClose={() => setPickerVisible(false)}>
         <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
-          <Pressable style={[styles.modalBackdrop, { backgroundColor: theme.colors.backdrop }, Platform.OS !== "web" && { paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, useFullScreenPicker && styles.fullScreenBackdrop, useFullScreenPicker && Platform.OS !== "web" && { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, androidKeyboardInset) }]} onPress={() => setPickerVisible(false)}>
+          <Pressable style={[styles.modalBackdrop, { backgroundColor: theme.colors.backdrop, paddingTop: safeTopPadding, paddingBottom: safeBottomPadding }, useFullScreenPicker && styles.fullScreenBackdrop, useFullScreenPicker && { paddingTop: safeTopPadding, paddingBottom: Math.max(safeBottomPadding, androidKeyboardInset) }]} onPress={() => setPickerVisible(false)}>
             <Pressable style={[styles.modalSheet, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }, Platform.OS !== "web" && { maxHeight: adaptiveMaxHeight, flexShrink: 1 }, useFullScreenPicker && styles.fullScreenSheet]}>
               <View style={styles.modalHeader}>
                 <View style={styles.flex}>

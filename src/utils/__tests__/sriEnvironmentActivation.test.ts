@@ -2,6 +2,7 @@ import { initialData } from "../../database";
 import type { AppData } from "../../types";
 import { canActivateRealBilling, changeSriEnvironmentAuthoritatively, realBillingRequirements } from "../sriEnvironmentActivation";
 import type { ProductionChecklistValue } from "../../components/ProductionChecklist";
+import { buildProductionChecklist } from "../../validation";
 
 const readyChecklist: ProductionChecklistValue = {
   baseChecks: [{ label: "RUC emisor valido", ok: true }, { label: "Secuenciales factura/guia/nota credito", ok: true }],
@@ -14,6 +15,22 @@ function snapshot(environment: "1" | "2" = "1"): AppData {
 }
 
 describe("guided SRI environment activation", () => {
+  it("reconoce el formato actual del diagnostico del backend productivo", () => {
+    const checklist = buildProductionChecklist(
+      initialData.issuer,
+      "https://api.factudarwin.com",
+      [
+        "Backend responde: SI",
+        "Ambiente backend por defecto: production",
+        "Envio real al SRI: ACTIVO",
+        "Certificado existe: SI",
+        "Clave certificado configurada: SI"
+      ].join("\n")
+    );
+
+    expect(checklist.productionChecks.find((item) => item.label === "Backend en produccion")?.ok).toBe(true);
+  });
+
   it("usa los checks existentes e ignora solo el check que será satisfecho por la activación", () => {
     expect(canActivateRealBilling(readyChecklist)).toBe(true);
     expect(realBillingRequirements(readyChecklist).some((item) => item.label === "Ambiente app en produccion")).toBe(false);
