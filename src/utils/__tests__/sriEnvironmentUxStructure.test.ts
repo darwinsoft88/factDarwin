@@ -53,7 +53,8 @@ describe("SRI environment UX structure", () => {
     expect(card).not.toContain("Backend en produccion");
     expect(card).not.toContain("diagnosticItems");
     expect(assets).toContain("Configuración avanzada · Diagnóstico técnico");
-    expect(assets).toContain("onReturnToTests");
+    expect(card).toContain("onReturnToTests");
+    expect(card).toContain("Ambiente real confirmado por el servidor");
     expect(card).toContain("flex: 1");
     expect(info).toContain('"Modo de prueba" : "Facturación real"');
   });

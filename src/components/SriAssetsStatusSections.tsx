@@ -12,7 +12,6 @@ type SriAssetsStatusSectionsProps = {
   certificatePassword: string;
   checkingAssetStatus: boolean;
   checklist: ReturnType<typeof buildProductionChecklist>;
-  changingEnvironment: boolean;
   diagnosticOpen: boolean;
   assetsOpen: boolean;
   issuer: Issuer;
@@ -20,7 +19,6 @@ type SriAssetsStatusSectionsProps = {
   onCertificatePasswordChange: (value: string) => void;
   onConfirmCertificateUpload: () => void;
   onRefreshAssetsStatus: () => void;
-  onReturnToTests: () => void;
   onDiagnosticOpenChange: (open: boolean) => void;
   onAssetsOpenChange: (open: boolean) => void;
   onUploadCertificate: () => void;
@@ -36,7 +34,6 @@ export function SriAssetsStatusSections({
   certificatePassword,
   checkingAssetStatus,
   checklist,
-  changingEnvironment,
   diagnosticOpen,
   assetsOpen,
   issuer,
@@ -44,7 +41,6 @@ export function SriAssetsStatusSections({
   onCertificatePasswordChange,
   onConfirmCertificateUpload,
   onRefreshAssetsStatus,
-  onReturnToTests,
   onDiagnosticOpenChange,
   onAssetsOpenChange,
   onUploadCertificate,
@@ -73,7 +69,7 @@ export function SriAssetsStatusSections({
         />
       </CollapsibleSection>
       <CollapsibleSection title="Configuración avanzada · Diagnóstico técnico" open={diagnosticOpen} onOpenChange={onDiagnosticOpenChange}>
-        <ProductionStatusSection issuer={issuer} checklist={checklist} changingEnvironment={changingEnvironment} onReturnToTests={onReturnToTests} />
+        <ProductionStatusSection issuer={issuer} checklist={checklist} />
       </CollapsibleSection>
     </>
   );

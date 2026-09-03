@@ -497,6 +497,7 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
         onCheckConnection={() => { void checkConnectionForSummary(); }}
         onOpenCertificate={() => setAssetsOpen(true)}
         onOpenIssuer={() => setIssuerOpen(true)}
+        onReturnToTests={() => requestEnvironmentChange("1")}
       />
       <CollapsibleSection title="Emisor SRI" open={issuerOpen} onOpenChange={setIssuerOpen}>
         <IssuerIdentityFields issuer={issuer} lookingUpIssuer={lookingUpIssuer} onChange={setIssuer} onLookupRuc={() => { void lookupIssuerRuc(); }} />
@@ -552,7 +553,6 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
         certificatePassword={certificatePassword}
         checkingAssetStatus={checkingAssetStatus}
         checklist={productionChecklist}
-        changingEnvironment={changingEnvironment}
         diagnosticOpen={diagnosticOpen}
         assetsOpen={assetsOpen}
         issuer={issuer}
@@ -560,7 +560,6 @@ export function SriScreen({ data, user, backendToken, getBackendToken, persist, 
         onCertificatePasswordChange={setCertificatePassword}
         onConfirmCertificateUpload={() => { void confirmCertificateUpload(); }}
         onRefreshAssetsStatus={() => { void refreshAssetsStatus(true); }}
-        onReturnToTests={() => requestEnvironmentChange("1")}
         onDiagnosticOpenChange={setDiagnosticOpen}
         onAssetsOpenChange={setAssetsOpen}
         onUploadCertificate={uploadCertificateFromWeb}

@@ -18,9 +18,10 @@ type Props = {
   onCheckConnection: () => void;
   onOpenCertificate: () => void;
   onOpenIssuer: () => void;
+  onReturnToTests: () => void;
 };
 
-export function SriEnvironmentExperienceCard({ issuer, checklist, certificate, changing, checking, serverInTestMode, onActivate, onCheckConnection, onOpenCertificate, onOpenIssuer }: Props) {
+export function SriEnvironmentExperienceCard({ issuer, checklist, certificate, changing, checking, serverInTestMode, onActivate, onCheckConnection, onOpenCertificate, onOpenIssuer, onReturnToTests }: Props) {
   const { theme } = useAppTheme();
   const production = issuer.environment === "2";
   const summary = realBillingSummary(checklist, certificate);
@@ -45,9 +46,12 @@ export function SriEnvironmentExperienceCard({ issuer, checklist, certificate, c
       <View style={styles.statusList}>
         <SummaryRow ok={summary.company.ok} label={summary.company.label} />
         <SummaryRow ok={summary.certificate.ok} label={summary.certificate.label} detail={summary.certificate.warning} />
-        <SummaryRow ok={summary.connection.ok} info={serverInTestMode} label={serverInTestMode ? "Servidor local de pruebas" : summary.connection.label} detail={serverInTestMode ? "En este equipo no se puede activar facturación real. Al usar el servidor productivo aparecerá la opción para activarla." : !summary.connection.ok && summary.company.ok && summary.certificate.ok ? "Último paso: después podrás activar la facturación real." : undefined} />
+        {production
+          ? <SummaryRow ok label="Ambiente real confirmado por el servidor" />
+          : <SummaryRow ok={summary.connection.ok} info={serverInTestMode} label={serverInTestMode ? "Servidor local de pruebas" : summary.connection.label} detail={serverInTestMode ? "En este equipo no se puede activar facturación real. Al usar el servidor productivo aparecerá la opción para activarla." : !summary.connection.ok && summary.company.ok && summary.certificate.ok ? "Último paso: después podrás activar la facturación real." : undefined} />}
       </View>
       {production ? <Text style={[styles.point, { color: theme.colors.text }]}>Establecimiento {issuer.establishment} · Punto de emisión {issuer.emissionPoint}</Text> : null}
+      {production ? <Pressable disabled={changing} onPress={onReturnToTests} style={[styles.returnButton, { borderColor: theme.colors.warning }, changing && styles.disabled]}><Text style={[styles.returnButtonText, { color: theme.colors.warning }]}>{changing ? "Confirmando..." : "Volver a modo de prueba"}</Text></Pressable> : null}
       {!production && !serverInTestMode ? <Pressable disabled={checking || changing} onPress={nextAction.onPress} style={[styles.primary, { backgroundColor: theme.colors.primary }, (checking || changing) && styles.disabled]}><Text style={[styles.primaryText, { color: theme.colors.onPrimary }]}>{nextAction.label}</Text></Pressable> : null}
       {!production && !serverInTestMode && summary.company.ok && summary.certificate.ok && !summary.connection.ok ? (
         <View style={[styles.lockedAction, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceMuted }]}>
@@ -80,5 +84,7 @@ const styles = StyleSheet.create({
   primaryText: { fontSize: 13, fontWeight: "900", textAlign: "center" },
   lockedAction: { alignItems: "center", borderRadius: 11, borderWidth: 1, flexDirection: "row", gap: 7, justifyContent: "center", minHeight: 40, paddingHorizontal: 12 },
   lockedActionText: { fontSize: 12, fontWeight: "800", textAlign: "center" },
+  returnButton: { alignItems: "center", borderRadius: 11, borderWidth: 1, justifyContent: "center", minHeight: 42, paddingHorizontal: 12 },
+  returnButtonText: { fontSize: 12, fontWeight: "900", textAlign: "center" },
   disabled: { opacity: 0.5 }
 });
