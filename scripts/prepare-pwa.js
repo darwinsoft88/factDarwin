@@ -6,6 +6,17 @@ const distDir = path.join(root, "dist");
 const webDir = path.join(root, "web");
 const assetsDir = path.join(root, "assets");
 const distAssetsDir = path.join(distDir, "assets");
+const expoIconFontsDir = path.join(
+  distAssetsDir,
+  "node_modules",
+  "@expo",
+  "vector-icons",
+  "build",
+  "vendor",
+  "react-native-vector-icons",
+  "Fonts"
+);
+const publicFontsDir = path.join(distAssetsDir, "fonts");
 const indexPath = path.join(distDir, "index.html");
 
 function fail(message) {
@@ -27,6 +38,49 @@ copyFile(path.join(webDir, "manifest.json"), path.join(distDir, "manifest.json")
 copyFile(path.join(assetsDir, "icon.png"), path.join(distAssetsDir, "icon.png"));
 copyFile(path.join(assetsDir, "adaptive-icon.png"), path.join(distAssetsDir, "adaptive-icon.png"));
 copyFile(path.join(assetsDir, "splash-icon.png"), path.join(distAssetsDir, "splash-icon.png"));
+
+// Cloudflare Pages Direct Upload omite directorios llamados node_modules.
+// Expo exporta las fuentes de @expo/vector-icons dentro de esa ruta, por lo
+// que las publicamos en una carpeta segura y actualizamos el bundle generado.
+if (!fs.existsSync(expoIconFontsDir)) {
+  fail(`No se encontraron las fuentes de iconos exportadas: ${expoIconFontsDir}`);
+}
+
+fs.mkdirSync(publicFontsDir, { recursive: true });
+const iconFontFiles = fs
+  .readdirSync(expoIconFontsDir)
+  .filter((fileName) => fileName.toLowerCase().endsWith(".ttf"));
+
+if (iconFontFiles.length === 0) {
+  fail("Expo no exporto ninguna fuente de iconos.");
+}
+
+for (const fileName of iconFontFiles) {
+  copyFile(path.join(expoIconFontsDir, fileName), path.join(publicFontsDir, fileName));
+}
+
+const webBundleDir = path.join(distDir, "_expo", "static", "js", "web");
+const webBundles = fs
+  .readdirSync(webBundleDir)
+  .filter((fileName) => fileName.toLowerCase().endsWith(".js"));
+let rewrittenFontReferences = 0;
+
+for (const bundleName of webBundles) {
+  const bundlePath = path.join(webBundleDir, bundleName);
+  const originalBundle = fs.readFileSync(bundlePath, "utf8");
+  const updatedBundle = originalBundle.replace(
+    /\/assets\/node_modules\/@expo\/vector-icons\/build\/vendor\/react-native-vector-icons\/Fonts\/([^"']+\.ttf)/g,
+    (_match, fileName) => {
+      rewrittenFontReferences += 1;
+      return `/assets/fonts/${fileName}`;
+    }
+  );
+  fs.writeFileSync(bundlePath, updatedBundle);
+}
+
+if (rewrittenFontReferences === 0) {
+  fail("No se encontraron referencias de fuentes de iconos para publicar.");
+}
 
 let html = fs.readFileSync(indexPath, "utf8");
 
@@ -113,4 +167,6 @@ html = html.replace(
 html = html.replace("You need to enable JavaScript to run this app.", "Se necesita JavaScript para ejecutar esta aplicacion.");
 
 fs.writeFileSync(indexPath, html);
-console.log("PWA listo en dist: manifest, iconos y metadatos iOS configurados.");
+console.log(
+  `PWA listo en dist: manifest, iconos, metadatos iOS y ${iconFontFiles.length} fuentes configurados.`
+);
