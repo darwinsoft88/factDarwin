@@ -179,23 +179,25 @@ function SwipeSaleItemRow({ item, product, backendUrl, backendToken, index, isLa
         <Text style={styles.deleteRevealText}>Eliminar</Text>
       </View>
       <Animated.View style={[styles.row, Platform.OS === "web" && ({ touchAction: "pan-y" } as any), { backgroundColor: theme.colors.surface, transform: [{ translateX }] }]} {...panResponder.panHandlers}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`Editar ${item.name}`} hitSlop={4} style={styles.itemTapArea} onPress={() => onEdit(index)}>
-          {product ? <ProductThumbnail product={product} backendUrl={backendUrl} token={backendToken} size={34} /> : <View style={[styles.itemIcon, { backgroundColor: isService ? theme.colors.accentSoft : theme.colors.successSoft }]}><MaterialCommunityIcons name={catalogItemIcon(item)} size={14} color={isService ? theme.colors.accent : theme.colors.success} /></View>}
-          <View style={styles.itemInfo}>
-            <Text style={[styles.itemTitle, { color: theme.colors.text }]} numberOfLines={1}>{item.name}</Text>
-            <Text style={[styles.itemMeta, { color: theme.colors.textMuted }, compactLayout && styles.itemMetaCompact]} numberOfLines={1}>${money(calculateGrossUnitPrice(item))} · IVA {formatQuantity(item.ivaRate * 100)}%</Text>
-            {discount > 0 ? <Text style={[styles.itemDiscount, { color: theme.colors.success }, compactLayout && styles.itemDiscountCompact]} numberOfLines={1}>Desc. {formatQuantity(displayedDiscountPercentage)}%</Text> : null}
+        <Pressable accessibilityRole="button" accessibilityLabel={`Editar ${item.name}`} style={styles.rowTapSurface} onPress={() => onEdit(index)}>
+          <View style={styles.itemTapArea}>
+            {product ? <ProductThumbnail product={product} backendUrl={backendUrl} token={backendToken} size={34} /> : <View style={[styles.itemIcon, { backgroundColor: isService ? theme.colors.accentSoft : theme.colors.successSoft }]}><MaterialCommunityIcons name={catalogItemIcon(item)} size={14} color={isService ? theme.colors.accent : theme.colors.success} /></View>}
+            <View style={styles.itemInfo}>
+              <Text style={[styles.itemTitle, { color: theme.colors.text }]} numberOfLines={1}>{item.name}</Text>
+              <Text style={[styles.itemMeta, { color: theme.colors.textMuted }, compactLayout && styles.itemMetaCompact]} numberOfLines={1}>${money(calculateGrossUnitPrice(item))} · IVA {formatQuantity(item.ivaRate * 100)}%</Text>
+              {discount > 0 ? <Text style={[styles.itemDiscount, { color: theme.colors.success }, compactLayout && styles.itemDiscountCompact]} numberOfLines={1}>Desc. {formatQuantity(displayedDiscountPercentage)}%</Text> : null}
+            </View>
+            <Text style={[styles.itemTotal, { color: theme.colors.text }]}>${money(calculateLineTotal(item))}</Text>
           </View>
-          <Text style={[styles.itemTotal, { color: theme.colors.text }]}>${money(calculateLineTotal(item))}</Text>
+          <View style={styles.itemFooter}>
+            {item.priceTier ? <Pressable ref={priceChipRef} accessibilityRole="button" accessibilityLabel={`Cambiar ${item.priceTier.toUpperCase()} de ${item.name}`} style={[styles.priceTierChip, { borderColor: theme.colors.primary, backgroundColor: theme.colors.surface }]} onPress={(event) => { event.stopPropagation(); priceChipRef.current?.measureInWindow((x, y, width, height) => onToggleQuickPrice({ x, y, width, height })); }}><Text style={[styles.priceTierChipText, { color: theme.colors.primary }]}>{item.priceTier.toUpperCase()}</Text><MaterialCommunityIcons name={quickPriceOpen ? "chevron-up" : "chevron-down"} size={13} color={theme.colors.primary} /></Pressable> : <Text style={[styles.manualPriceText, { color: theme.colors.textMuted }]}>Precio manual</Text>}
+            <View style={[styles.quantityControls, { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border }] }>
+              <Pressable accessibilityLabel="Disminuir cantidad" style={[styles.qtyButton, { backgroundColor: theme.colors.primarySoft }]} onPress={(event) => { event.stopPropagation(); onAdjustQuantity(index, -1); }}><MaterialCommunityIcons name="minus" size={15} color={theme.colors.success} /></Pressable>
+              <Text style={[styles.qtyText, { color: theme.colors.text }]}>{item.quantity}</Text>
+              <Pressable accessibilityLabel="Aumentar cantidad" style={[styles.qtyButton, { backgroundColor: theme.colors.primarySoft }]} onPress={(event) => { event.stopPropagation(); onAdjustQuantity(index, 1); }}><MaterialCommunityIcons name="plus" size={15} color={theme.colors.success} /></Pressable>
+            </View>
+          </View>
         </Pressable>
-        <View style={styles.itemFooter}>
-          {item.priceTier ? <Pressable ref={priceChipRef} accessibilityRole="button" accessibilityLabel={`Cambiar ${item.priceTier.toUpperCase()} de ${item.name}`} style={[styles.priceTierChip, { borderColor: theme.colors.primary, backgroundColor: theme.colors.surface }]} onPress={() => priceChipRef.current?.measureInWindow((x, y, width, height) => onToggleQuickPrice({ x, y, width, height }))}><Text style={[styles.priceTierChipText, { color: theme.colors.primary }]}>{item.priceTier.toUpperCase()}</Text><MaterialCommunityIcons name={quickPriceOpen ? "chevron-up" : "chevron-down"} size={13} color={theme.colors.primary} /></Pressable> : <Text style={[styles.manualPriceText, { color: theme.colors.textMuted }]}>Precio manual</Text>}
-          <View style={[styles.quantityControls, { backgroundColor: theme.colors.surfaceMuted, borderColor: theme.colors.border }] }>
-            <Pressable accessibilityLabel="Disminuir cantidad" style={[styles.qtyButton, { backgroundColor: theme.colors.primarySoft }]} onPress={() => onAdjustQuantity(index, -1)}><MaterialCommunityIcons name="minus" size={15} color={theme.colors.success} /></Pressable>
-            <Text style={[styles.qtyText, { color: theme.colors.text }]}>{item.quantity}</Text>
-            <Pressable accessibilityLabel="Aumentar cantidad" style={[styles.qtyButton, { backgroundColor: theme.colors.primarySoft }]} onPress={() => onAdjustQuantity(index, 1)}><MaterialCommunityIcons name="plus" size={15} color={theme.colors.success} /></Pressable>
-          </View>
-        </View>
       </Animated.View>
     </View>
   );
@@ -313,6 +315,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
     flexDirection: "row",
     alignItems: "center",
+    gap: 7
+  },
+  rowTapSurface: {
+    alignSelf: "stretch",
+    width: "100%",
     gap: 7
   },
   itemFooter: {

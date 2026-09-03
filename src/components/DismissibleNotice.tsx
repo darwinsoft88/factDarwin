@@ -12,11 +12,17 @@ type DismissibleNoticeProps = {
 
 export function DismissibleNotice({ message, tone = "warning", title, onDismiss, autoDismissMs = 4500 }: DismissibleNoticeProps) {
   const { theme } = useAppTheme();
+  const onDismissRef = React.useRef(onDismiss);
+
+  React.useEffect(() => {
+    onDismissRef.current = onDismiss;
+  }, [onDismiss]);
+
   React.useEffect(() => {
     if (!message || autoDismissMs <= 0) return undefined;
-    const timer = setTimeout(onDismiss, autoDismissMs);
+    const timer = setTimeout(() => onDismissRef.current(), autoDismissMs);
     return () => clearTimeout(timer);
-  }, [autoDismissMs, message, onDismiss]);
+  }, [autoDismissMs, message]);
 
   if (!message) return null;
 

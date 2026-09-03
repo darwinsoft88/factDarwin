@@ -18,6 +18,8 @@ describe("PVP sales UX structure", () => {
     const modal = fs.readFileSync(path.join(root, "components/EntityEditModal.tsx"), "utf8");
     expect(list).toContain("priceTierChip");
     expect(list).toContain("quickPriceFloating");
+    expect(list).toContain("style={styles.rowTapSurface}");
+    expect(list.match(/event\.stopPropagation\(\)/g)?.length).toBeGreaterThanOrEqual(3);
     expect(list).toContain("onChangePriceTier(quickPriceIndex");
     expect(list).toContain("onChangePriceTier");
     expect(list).toContain("Precio manual");
