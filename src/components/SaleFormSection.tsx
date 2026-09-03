@@ -792,8 +792,10 @@ function SaleSplitPaymentsEditor({
       || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   };
 
+  const usesMobileAmountEntry = () => Platform.OS !== "web" || isIosWeb();
+
   const focusPaymentAmount = (paymentId: string, event: unknown) => {
-    if (isIosWeb()) {
+    if (usesMobileAmountEntry()) {
       setAmountDrafts((current) => ({ ...current, [paymentId]: "" }));
       return;
     }
@@ -801,7 +803,7 @@ function SaleSplitPaymentsEditor({
   };
 
   const focusCashTendered = (paymentId: string, event: unknown) => {
-    if (isIosWeb()) {
+    if (usesMobileAmountEntry()) {
       setCashTenderDrafts((current) => ({ ...current, [paymentId]: "" }));
       return;
     }
@@ -920,7 +922,7 @@ function SaleSplitPaymentsEditor({
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={theme.colors.textSubtle}
-            selectTextOnFocus
+            selectTextOnFocus={Platform.OS === "web" && !isIosWeb()}
             onFocus={(event) => focusPaymentAmount(payment.id, event)}
             onBlur={() => clearPaymentAmountDraft(payment.id)}
           />
@@ -970,7 +972,7 @@ function SaleSplitPaymentsEditor({
                       keyboardType="decimal-pad"
                       placeholder="0.00"
                       placeholderTextColor={theme.colors.textSubtle}
-                      selectTextOnFocus
+                      selectTextOnFocus={Platform.OS === "web" && !isIosWeb()}
                       onFocus={(event) => focusCashTendered(payment.id, event)}
                       onBlur={() => restoreEmptyCashTendered(payment.id)}
                     />
@@ -999,7 +1001,7 @@ function SaleSplitPaymentsEditor({
                   keyboardType="decimal-pad"
                   placeholder="0.00"
                   placeholderTextColor="#94a3b8"
-                  selectTextOnFocus
+                  selectTextOnFocus={Platform.OS === "web" && !isIosWeb()}
                   onFocus={(event) => focusCashTendered(payment.id, event)}
                   onBlur={() => restoreEmptyCashTendered(payment.id)}
                 />

@@ -32,6 +32,8 @@ describe("payment method UX structure", () => {
     expect(source).toContain("target?.select?.()");
     expect(source).toContain("focusPaymentAmount");
     expect(source).toContain("focusCashTendered");
+    expect(source).toContain('const usesMobileAmountEntry = () => Platform.OS !== "web" || isIosWeb()');
+    expect(source.match(/selectTextOnFocus={Platform\.OS === "web" && !isIosWeb\(\)}/g)?.length).toBe(3);
     expect(source).toContain('/iPad|iPhone|iPod/');
     expect(source).toContain('navigator.platform === "MacIntel"');
     expect(source).toContain("clearPaymentAmountDraft");

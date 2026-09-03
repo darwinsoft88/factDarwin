@@ -2,7 +2,7 @@
   "expo": {
     "name": "FactuDarwin",
     "slug": "factura-sri-mobile",
-    "version": "1.0.13",
+    "version": "1.0.14",
     "icon": "./assets/icon.png",
     "scheme": "factudarwin",
     "userInterfaceStyle": "light",
@@ -27,7 +27,7 @@
     },
     "android": {
       "package": "com.facturasri.mobile",
-      "versionCode": 14,
+      "versionCode": 15,
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -66,7 +66,16 @@
         }
       ],
       "expo-secure-store",
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          }
+        }
+      ]
     ],
     "web": {
       "favicon": "./assets/icon.png",
