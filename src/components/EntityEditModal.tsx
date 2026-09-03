@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { Animated, BackHandler, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Animated, BackHandler, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KEYBOARD_AVOIDING_BEHAVIOR, MODAL_EDGE_PADDING, MODAL_KEYBOARD_CONTENT_BOTTOM_PADDING, MODAL_SAFE_BOTTOM_PADDING } from "../constants/layout";
 import { useKeyboardInset } from "../hooks/useKeyboardInset";
-import { AppOverlayPortal } from "./AppToast";
 import { useAppTheme } from "../theme/AppTheme";
 
 type EntityEditModalProps = {
@@ -84,7 +83,7 @@ export function EntityEditModal({
   if (!rendered) return null;
 
   return (
-    <AppOverlayPortal>
+    <Modal visible={rendered} transparent animationType="none" onRequestClose={onClose}>
       <Animated.View accessibilityViewIsModal style={[styles.portalModal, { opacity }]}>
         <KeyboardAvoidingView style={styles.keyboardAvoiding} behavior={KEYBOARD_AVOIDING_BEHAVIOR} keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}>
         <View
@@ -127,7 +126,7 @@ export function EntityEditModal({
         </View>
       </KeyboardAvoidingView>
       </Animated.View>
-    </AppOverlayPortal>
+    </Modal>
   );
 }
 

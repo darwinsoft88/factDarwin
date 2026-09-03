@@ -25,4 +25,11 @@ describe("payment method UX structure", () => {
     expect(source).toContain('showWarning("Cliente requerido para crédito"');
     expect(source).toContain("Consumidor Final no puede utilizar esta forma de pago.");
   });
+
+  it("selecciona por completo los importes al enfocarlos en la PWA", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src/components/SaleFormSection.tsx"), "utf8");
+    expect(source).toContain("selectWholeAmountOnWeb");
+    expect(source).toContain("target?.select?.()");
+    expect(source.match(/onFocus={selectWholeAmountOnWeb}/g)?.length).toBe(3);
+  });
 });

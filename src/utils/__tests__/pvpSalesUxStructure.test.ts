@@ -15,6 +15,7 @@ describe("PVP sales UX structure", () => {
   test("la linea expone chip y selector rapido sin eliminar el editor avanzado", () => {
     const list = fs.readFileSync(path.join(root, "components/SaleItemsList.tsx"), "utf8");
     const editor = fs.readFileSync(path.join(root, "components/SaleLineEditor.tsx"), "utf8");
+    const modal = fs.readFileSync(path.join(root, "components/EntityEditModal.tsx"), "utf8");
     expect(list).toContain("priceTierChip");
     expect(list).toContain("quickPriceFloating");
     expect(list).toContain("onChangePriceTier(quickPriceIndex");
@@ -27,5 +28,7 @@ describe("PVP sales UX structure", () => {
     expect(list).toContain("rowWidth * 0.2");
     expect(editor).toContain('title="Editar detalle"');
     expect(editor).toContain("Lista de precio de esta línea");
+    expect(modal).toContain('<Modal visible={rendered}');
+    expect(modal).not.toContain("AppOverlayPortal");
   });
 });

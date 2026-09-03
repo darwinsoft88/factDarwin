@@ -769,6 +769,12 @@ function SaleSplitPaymentsEditor({
     setCashTenderDrafts((current) => ({ ...current, [paymentId]: sanitized }));
   };
 
+  const selectWholeAmountOnWeb = (event: unknown) => {
+    if (Platform.OS !== "web") return;
+    const target = (event as { currentTarget?: { select?: () => void } }).currentTarget;
+    target?.select?.();
+  };
+
   const selectPaymentMethod = (payment: SalePaymentSplit, index: number, method: PaymentChoice) => {
     if (method === "credito") {
       if (!creditAllowed) {
@@ -873,6 +879,7 @@ function SaleSplitPaymentsEditor({
             placeholder="0.00"
             placeholderTextColor={theme.colors.textSubtle}
             selectTextOnFocus
+            onFocus={selectWholeAmountOnWeb}
           />
         );
         return (
@@ -921,6 +928,7 @@ function SaleSplitPaymentsEditor({
                       placeholder="0.00"
                       placeholderTextColor={theme.colors.textSubtle}
                       selectTextOnFocus
+                      onFocus={selectWholeAmountOnWeb}
                     />
                   </View>
                   <View style={styles.cashChangeColumn}>
@@ -948,6 +956,7 @@ function SaleSplitPaymentsEditor({
                   placeholder="0.00"
                   placeholderTextColor="#94a3b8"
                   selectTextOnFocus
+                  onFocus={selectWholeAmountOnWeb}
                 />
                 <Text style={styles.cashWideChange}>{cashTenderedAmount + 0.009 < appliedAmount ? "Falta" : "Cambio"} ${money(cashTenderedAmount + 0.009 < appliedAmount ? appliedAmount - cashTenderedAmount : cashChange)}</Text>
               </View>
