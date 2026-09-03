@@ -65,7 +65,8 @@
           "faceIDPermission": "Permita que FactuDarwin use Face ID para proteger el acceso a su cuenta."
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-asset"
     ],
     "web": {
       "favicon": "./assets/icon.png",
