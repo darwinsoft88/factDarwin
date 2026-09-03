@@ -57,6 +57,17 @@ export function salePaymentBalance(total: number, payments?: SalePaymentSplit[])
   return roundMoney(roundMoney(total || 0) - salePaymentTotal(payments));
 }
 
+export function cashPaymentAppliedAmount(
+  total: number,
+  payments: SalePaymentSplit[],
+  paymentId: string,
+  tendered: string | number
+) {
+  const otherPaymentsTotal = salePaymentTotal(payments.filter((payment) => payment.id !== paymentId));
+  const available = Math.max(0, roundMoney(total || 0) - otherPaymentsTotal);
+  return roundMoney(Math.min(parsePaymentAmount(tendered), available));
+}
+
 export function normalizeSalePayments(payments: SalePaymentSplit[] | undefined, fallbackMethod: PaymentMethod, total: number) {
   const source = payments || [];
   const clean = source

@@ -30,7 +30,10 @@ describe("payment method UX structure", () => {
     const source = fs.readFileSync(path.join(process.cwd(), "src/components/SaleFormSection.tsx"), "utf8");
     expect(source).toContain("selectWholeAmountOnWeb");
     expect(source).toContain("target?.select?.()");
-    expect(source.match(/onFocus={selectWholeAmountOnWeb}/g)?.length).toBe(3);
+    expect(source).toContain("focusPaymentAmount");
+    expect(source).toContain("focusCashTendered");
+    expect(source).toContain('/iPad|iPhone|iPod/');
+    expect(source).toContain('navigator.platform === "MacIntel"');
     expect(source).toContain("clearPaymentAmountDraft");
     expect(source).not.toContain("const syncedDraft");
   });

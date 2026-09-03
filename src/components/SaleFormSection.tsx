@@ -21,6 +21,7 @@ import { useFloatingOverlay } from "../context/FloatingOverlayContext";
 import {
   SPLIT_PAYMENT_METHOD_OPTIONS,
   TRANSFER_BANK_OPTIONS,
+  cashPaymentAppliedAmount,
   createSalePayment,
   normalizePartialSalePayments,
   normalizeSalePayments,
@@ -767,15 +768,53 @@ function SaleSplitPaymentsEditor({
     });
   };
 
-  const updateCashTendered = (paymentId: string, rawValue: string) => {
+  const updateCashTendered = (payment: SalePaymentSplit, rawValue: string) => {
     const sanitized = normalizePaymentAmountInput(rawValue);
-    setCashTenderDrafts((current) => ({ ...current, [paymentId]: sanitized }));
+    const appliedAmount = cashPaymentAppliedAmount(total, displayedPayments, payment.id, sanitized);
+    setCashTenderDrafts((current) => ({ ...current, [payment.id]: sanitized }));
+    setManualPaymentAmounts((current) => ({ ...current, [payment.id]: true }));
+    setAmountDrafts((current) => ({
+      ...current,
+      [payment.id]: parsePaymentAmount(sanitized) > appliedAmount ? String(appliedAmount) : sanitized
+    }));
+    updatePayment(payment.id, { amount: appliedAmount });
   };
 
   const selectWholeAmountOnWeb = (event: unknown) => {
     if (Platform.OS !== "web") return;
     const target = (event as { currentTarget?: { select?: () => void } }).currentTarget;
     target?.select?.();
+  };
+
+  const isIosWeb = () => {
+    if (Platform.OS !== "web" || typeof navigator === "undefined") return false;
+    return /iPad|iPhone|iPod/.test(navigator.userAgent)
+      || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  };
+
+  const focusPaymentAmount = (paymentId: string, event: unknown) => {
+    if (isIosWeb()) {
+      setAmountDrafts((current) => ({ ...current, [paymentId]: "" }));
+      return;
+    }
+    selectWholeAmountOnWeb(event);
+  };
+
+  const focusCashTendered = (paymentId: string, event: unknown) => {
+    if (isIosWeb()) {
+      setCashTenderDrafts((current) => ({ ...current, [paymentId]: "" }));
+      return;
+    }
+    selectWholeAmountOnWeb(event);
+  };
+
+  const restoreEmptyCashTendered = (paymentId: string) => {
+    setCashTenderDrafts((current) => {
+      if (current[paymentId] !== "") return current;
+      const next = { ...current };
+      delete next[paymentId];
+      return next;
+    });
   };
 
   const selectPaymentMethod = (payment: SalePaymentSplit, index: number, method: PaymentChoice) => {
@@ -882,7 +921,7 @@ function SaleSplitPaymentsEditor({
             placeholder="0.00"
             placeholderTextColor={theme.colors.textSubtle}
             selectTextOnFocus
-            onFocus={selectWholeAmountOnWeb}
+            onFocus={(event) => focusPaymentAmount(payment.id, event)}
             onBlur={() => clearPaymentAmountDraft(payment.id)}
           />
         );
@@ -927,12 +966,13 @@ function SaleSplitPaymentsEditor({
                     <TextInput
                       style={[styles.paymentAmountInput, styles.paymentAmountInputStacked, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface, color: theme.colors.text }]}
                       value={cashTenderedValue}
-                      onChangeText={(value) => updateCashTendered(payment.id, value)}
+                      onChangeText={(value) => updateCashTendered(payment, value)}
                       keyboardType="decimal-pad"
                       placeholder="0.00"
                       placeholderTextColor={theme.colors.textSubtle}
                       selectTextOnFocus
-                      onFocus={selectWholeAmountOnWeb}
+                      onFocus={(event) => focusCashTendered(payment.id, event)}
+                      onBlur={() => restoreEmptyCashTendered(payment.id)}
                     />
                   </View>
                   <View style={styles.cashChangeColumn}>
@@ -955,12 +995,13 @@ function SaleSplitPaymentsEditor({
                 <TextInput
                   style={styles.paymentAmountInput}
                   value={cashTenderedValue}
-                  onChangeText={(value) => updateCashTendered(payment.id, value)}
+                  onChangeText={(value) => updateCashTendered(payment, value)}
                   keyboardType="decimal-pad"
                   placeholder="0.00"
                   placeholderTextColor="#94a3b8"
                   selectTextOnFocus
-                  onFocus={selectWholeAmountOnWeb}
+                  onFocus={(event) => focusCashTendered(payment.id, event)}
+                  onBlur={() => restoreEmptyCashTendered(payment.id)}
                 />
                 <Text style={styles.cashWideChange}>{cashTenderedAmount + 0.009 < appliedAmount ? "Falta" : "Cambio"} ${money(cashTenderedAmount + 0.009 < appliedAmount ? appliedAmount - cashTenderedAmount : cashChange)}</Text>
               </View>
