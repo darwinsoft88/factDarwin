@@ -48,6 +48,8 @@ const incrementalSyncShadow = buildShadowConfig(process.env);
 const incrementalSyncPullDiagnostic = buildPullDiagnosticConfig(process.env, jwtSecret);
 const incrementalSyncPilot = buildIncrementalPilotConfig(process.env, jwtSecret);
 const historicalDocumentPagination = buildDocumentHistoryConfig(process.env, jwtSecret);
+const { buildAppVersionPolicy } = require("./app-version-policy");
+const appVersionPolicy = buildAppVersionPolicy(process.env);
 const emailBuildLimits = {
   maxXmlBytes: boundedPositiveInteger(process.env.EMAIL_MAX_XML_BYTES, 5 * 1024 * 1024),
   maxPdfBytes: boundedPositiveInteger(process.env.EMAIL_MAX_PDF_BYTES, 10 * 1024 * 1024),
@@ -139,6 +141,7 @@ module.exports = {
   incrementalSyncPullDiagnostic,
   incrementalSyncPilot,
   historicalDocumentPagination,
+  appVersionPolicy,
   emailBuildLimits,
   passkeys: {
     enabled: process.env.PASSKEY_ENABLED === "true",

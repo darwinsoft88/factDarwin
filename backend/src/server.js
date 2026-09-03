@@ -192,6 +192,10 @@ app.get("/master", (_req, res) => {
   res.type("html").send(renderMasterPanel());
 });
 
+app.get("/api/app/version-policy", (_req, res) => {
+  res.json(config.appVersionPolicy);
+});
+
 const masterLicenseService = createMasterLicenseService({ getSnapshot, saveSnapshot, normalizeLicense, licenseStatus, logTechnical });
 registerMasterLicenseRoutes(app, { requireMasterKey, service: masterLicenseService });
 const masterTenantService = createMasterTenantService({ listTenantAccounts, listTenantAccountsPage, licenseStatus });

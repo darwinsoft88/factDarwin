@@ -5,6 +5,7 @@ import { StartupErrorBoundary } from "./src/components/StartupErrorBoundary";
 import { installWebDomGuards } from "./src/utils/webDomGuards";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { AppThemeProvider } from "./src/theme/AppTheme";
+import { AppUpdatePrompt } from "./src/components/AppUpdatePrompt";
 
 export default function App() {
   installWebDomGuards();
@@ -15,6 +16,7 @@ export default function App() {
         <AppThemeProvider>
           <AppOverlayProvider>
             <AppContent />
+            <AppUpdatePrompt />
           </AppOverlayProvider>
 
           <AppToast global />
